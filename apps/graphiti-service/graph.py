@@ -42,7 +42,7 @@ from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.openai_client import OpenAIClient
 
 from auth import anthropic_client_kwargs
-from anthropic_compat import normalize_message_create_kwargs
+from anthropic_compat import wrap_anthropic_message_create
 from config import Settings
 from usage_telemetry import graph_usage_payload
 
@@ -278,11 +278,8 @@ def _wrap_sdk_create(
     model: str,
     in_attr: str,
     out_attr: str,
-    normalize_kwargs=None,
 ):
     async def wrapped(*args, **kwargs):
-        if normalize_kwargs is not None:
-            kwargs = normalize_kwargs(kwargs)
         resp = await create(*args, **kwargs)
         try:
             u = getattr(resp, "usage", None)
@@ -299,13 +296,10 @@ class UsageTrackingAnthropicClient(AnthropicClient):
     def __init__(self, config: LLMConfig, post: UsagePoster, client: AsyncAnthropic | None = None) -> None:
         super().__init__(config=config, client=client)
         try:
-            self.client.messages.create = _wrap_sdk_create(  # type: ignore[method-assign]
+            self.client.messages.create = wrap_anthropic_message_create(  # type: ignore[method-assign]
                 self.client.messages.create,
                 post,
                 config.model,
-                "input_tokens",
-                "output_tokens",
-                normalize_message_create_kwargs,
             )
         except Exception as exc:  # pragma: no cover — defensive
             print(f"[usage] could not wrap Anthropic client for usage capture: {exc}")

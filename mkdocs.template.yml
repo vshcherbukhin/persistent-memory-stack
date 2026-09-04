@@ -47,4 +47,4 @@ extra_css:
   - stylesheets/material-icons-outlined.css
   - stylesheets/pm-management.css
 extra:
-  docs_version: 0.2.8
+  docs_version: 0.2.9

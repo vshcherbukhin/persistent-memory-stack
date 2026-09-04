@@ -29,6 +29,10 @@
 
 # --- Graphiti core + graph backend + extraction LLM extras -------------------
 graphiti-core[falkordb,anthropic]==0.29.2
+# Graphiti 0.29.2 still sends sampling kwargs that Anthropic SDK 1.x removed
+# from messages.create(). Pin the tested SDK while the service compatibility
+# adapter normalizes that upstream call at runtime.
+anthropic==1.3.0
 # FalkorDB currently declares only redis>=7.1.0. Keep this known-compatible
 # pair explicit: redis-py 8.1.0 passes an async-only internal pool option to
 # FalkorDB's synchronous cluster probe and prevents Graphiti from starting.

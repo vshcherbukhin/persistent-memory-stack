@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-dashboard",
-  "version": "4.0.36",
+  "version": "4.0.37",
   "private": true,
   "description": "persistent-memory control-plane dashboard webapp (Next.js 15, App Router). STANDALONE — NOT a @pm/* workspace member: it talks to persistent-memory-api ONLY over HTTP, so it has NO @pm/db / @pm/shared deps, NO Prisma, NO argon2, NO database.",
   "scripts": {

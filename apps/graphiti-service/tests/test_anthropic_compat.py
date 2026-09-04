@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 import unittest
 
-from anthropic_compat import normalize_message_create_kwargs
+from anthropic_compat import normalize_message_create_kwargs, wrap_anthropic_message_create
 
 
 class AnthropicCompatibilityTest(unittest.TestCase):
@@ -37,3 +39,46 @@ class AnthropicCompatibilityTest(unittest.TestCase):
         }
 
         self.assertEqual(normalize_message_create_kwargs(original), original)
+
+    def test_wrapped_sdk_boundary_normalizes_kwargs_and_preserves_usage(self) -> None:
+        received: dict[str, object] = {}
+        usage_events: list[tuple[str, int, int]] = []
+        response = SimpleNamespace(
+            usage=SimpleNamespace(input_tokens=17, output_tokens=5),
+        )
+
+        async def create(*_args, **kwargs):
+            received.update(kwargs)
+            return response
+
+        wrapped = wrap_anthropic_message_create(
+            create,
+            lambda model, tokens_in, tokens_out: usage_events.append(
+                (model, tokens_in, tokens_out)
+            ),
+            "claude-haiku-4-5",
+        )
+
+        result = asyncio.run(
+            wrapped(
+                model="claude-haiku-4-5",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "Extract entities"}],
+                system="Return JSON",
+                temperature=0.0,
+                top_p=0.9,
+                top_k=40,
+            )
+        )
+
+        self.assertIs(result, response)
+        self.assertEqual(
+            received,
+            {
+                "model": "claude-haiku-4-5",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": "Extract entities"}],
+                "system": "Return JSON",
+            },
+        )
+        self.assertEqual(usage_events, [("claude-haiku-4-5", 17, 5)])

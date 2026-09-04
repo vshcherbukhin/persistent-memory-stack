@@ -17,5 +17,6 @@ class GraphitiDependencyPinsTest(unittest.TestCase):
         }
 
         self.assertEqual(pins.get("graphiti-core[falkordb,anthropic]"), "0.29.2")
+        self.assertEqual(pins.get("anthropic"), "1.3.0")
         self.assertEqual(pins.get("falkordb"), "1.6.2")
         self.assertEqual(pins.get("redis"), "8.0.1")

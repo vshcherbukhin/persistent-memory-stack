@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "release": "4.0.36",
+  "release": "4.0.37",
   "minimumSupportedSource": "4.0.24",
   "compatibleMajorLine": 4,
-  "directFrom": ">=4.0.24 <4.0.37",
+  "directFrom": ">=4.0.24 <4.0.38",
   "bridges": [],
   "requiredStops": [],
   "coordinator": {

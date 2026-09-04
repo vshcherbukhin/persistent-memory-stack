@@ -1,5 +1,26 @@
 # Release History
 
+## 4.0.37 - 2026-09-04
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard | 4.0.37 | Publishes the Anthropic SDK 1.x compatibility release metadata. |
+| api | 0.5.10 | Unchanged from 4.0.36. |
+| graphiti service | 0.1.3 | Keeps Graphiti 0.29.2 extraction compatible with Anthropic SDK 1.x. |
+| graph | 0.1.2 | Unchanged from 4.0.36. |
+| mcp-runtime | 0.1.3 | Unchanged from 4.0.36. |
+| database | 0.3.2 | Unchanged from 4.0.36. |
+| docs | 0.2.9 | Documents the Anthropic message-boundary compatibility behavior. |
+
+- Normalizes Graphiti 0.29.2 Anthropic calls before they reach
+  `messages.create()`, removing the legacy `temperature`, `top_p`, and `top_k`
+  keywords that Anthropic SDK 1.x rejects with `TypeError`.
+- Pins the tested Anthropic SDK 1.3.0 dependency and extends the fail-closed
+  Graphiti contract tests so a future clean image cannot silently lose this
+  compatibility boundary.
+- Preserves every supported request field and the existing best-effort usage
+  telemetry behavior; current-model sampling semantics remain unchanged.
+
 ## 4.0.36 - 2026-09-04
 
 | Service | Version | Change |

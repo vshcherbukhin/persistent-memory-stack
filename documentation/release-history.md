@@ -3,6 +3,14 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 4.0.37 - 2026-09-04
+
+- Documents the Graphiti compatibility boundary for Anthropic Python SDK 1.x:
+  the service removes legacy sampling keyword arguments before calling the SDK
+  while preserving supported request fields and usage telemetry.
+- Records the tested `anthropic==1.3.0` pin and the focused, fail-closed
+  regression coverage that protects clean image builds.
+
 ## 4.0.36 - 2026-09-04
 
 - Refreshes all six Personal Memories dashboard captures so the list, graph
