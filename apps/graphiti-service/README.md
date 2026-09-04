@@ -189,6 +189,11 @@ The `NEO4J_*` env is wired into the `graphiti` block so the swap connects.
   service reads `EXTRACTION_PROVIDER`, `EXTRACTION_MODEL`, and the matching
   provider key from the shared env. Anthropic OAT credentials use the same
   Bearer + `oauth-2025-04-20` path as the TypeScript fact-extraction client.
+  Anthropic Python SDK 1.x no longer accepts `temperature`, `top_p`, or `top_k`
+  as `messages.create()` keyword arguments. Graphiti 0.29.2 still forwards
+  those sampling controls, so the service strips them at its Anthropic client
+  boundary before sending a request; all other request fields and usage
+  telemetry remain unchanged.
 - **FalkorDB full-text compatibility and timeout fallback are patched locally.**
   Graphiti 0.29.2 can leave punctuation from arbitrary memory content in its
   RediSearch filters and turns every word of a verbose extracted fact into an
