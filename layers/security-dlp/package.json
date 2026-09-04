@@ -1,0 +1,24 @@
+{
+  "name": "@pm/security-dlp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "persistent-memory security/DLP capability layer: fail-closed PII and secret scan gate.",
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^5.7.2"
+  }
+}

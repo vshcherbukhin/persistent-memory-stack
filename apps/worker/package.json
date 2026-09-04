@@ -1,0 +1,35 @@
+{
+  "name": "persistent-memory-worker",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "description": "persistent-memory BullMQ ingest worker (Phase 6) — consumes the pm.ingest queue and runs the 7-step pipeline (fetch → extract → chunk → persist → embed (Mode A) → graphiti → status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "npm run build -w @pm/graph && npm run build -w @pm/evidence-files && npm run build -w @pm/security-dlp && vitest run"
+  },
+  "dependencies": {
+    "@pm/db": "*",
+    "@pm/evidence-files": "*",
+    "@pm/graph": "*",
+    "@pm/security-dlp": "*",
+    "@pm/shared": "*",
+    "bullmq": "^5.34.0",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.4.0",
+    "nodemailer": "^9.0.3",
+    "web-push": "^3.6.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/nodemailer": "^7.0.0",
+    "@types/web-push": "^3.6.4",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  }
+}

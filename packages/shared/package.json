@@ -1,0 +1,65 @@
+{
+  "name": "@pm/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "persistent-memory shared core — embedding adapter (ollama/voyage/openai), Qdrant multi-tenant vector layer (named vectors + is_tenant), the dimension/provider switch tool, MinIO blob storage, the BullMQ ingest queue contract, and text extraction + token-aware chunking. Prisma-FREE: deals in plain bytes/vectors/payloads + string ids; callers own the DB.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./embeddings": {
+      "types": "./dist/embeddings/index.d.ts",
+      "import": "./dist/embeddings/index.js"
+    },
+    "./qdrant": {
+      "types": "./dist/qdrant/index.d.ts",
+      "import": "./dist/qdrant/index.js"
+    },
+    "./switch": {
+      "types": "./dist/switch/index.d.ts",
+      "import": "./dist/switch/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage/index.d.ts",
+      "import": "./dist/storage/index.js"
+    },
+    "./queue": {
+      "types": "./dist/queue/index.d.ts",
+      "import": "./dist/queue/index.js"
+    },
+    "./extract": {
+      "types": "./dist/extract/index.d.ts",
+      "import": "./dist/extract/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    }
+  },
+  "bin": {
+    "pm-switch-embedding": "./dist/switch/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "switch": "tsx src/switch/cli.ts"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.15.0",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.0",
+    "js-tiktoken": "^1.0.21",
+    "mammoth": "^1.12.0",
+    "minio": "^8.0.6",
+    "unpdf": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  }
+}

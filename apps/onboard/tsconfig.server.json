@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "outDir": "dist",
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": [
+    "server/**/*.ts",
+    "../../layers/onboarding/src/server/**/*.ts"
+  ]
+}

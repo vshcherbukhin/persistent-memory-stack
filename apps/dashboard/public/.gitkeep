@@ -1,0 +1,1 @@
+# kept so the Dockerfile COPY of public/ never fails (Next standalone omits it).

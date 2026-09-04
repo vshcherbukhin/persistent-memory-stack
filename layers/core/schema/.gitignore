@@ -1,0 +1,7 @@
+# Regenerable Prisma client (run `prisma generate`) — never commit.
+/generated/
+# Local install + lockfile for this prisma workspace.
+/node_modules/
+package-lock.json
+# Local tsconfig used only for ad-hoc type-checking.
+tsconfig.json

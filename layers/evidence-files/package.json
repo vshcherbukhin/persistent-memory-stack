@@ -1,0 +1,38 @@
+{
+  "name": "@pm/evidence-files",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "persistent-memory evidence/files capability layer: MinIO storage singleton and document chunk persistence helpers.",
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./storage": {
+      "types": "./dist/api/storage.d.ts",
+      "import": "./dist/api/storage.js",
+      "default": "./dist/api/storage.js"
+    },
+    "./worker": {
+      "types": "./dist/worker/persist-chunks.d.ts",
+      "import": "./dist/worker/persist-chunks.js",
+      "default": "./dist/worker/persist-chunks.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pm/db": "*",
+    "@pm/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^5.7.2"
+  }
+}

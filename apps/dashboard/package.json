@@ -1,0 +1,39 @@
+{
+  "name": "persistent-memory-dashboard",
+  "version": "4.0.36",
+  "private": true,
+  "description": "persistent-memory control-plane dashboard webapp (Next.js 15, App Router). STANDALONE — NOT a @pm/* workspace member: it talks to persistent-memory-api ONLY over HTTP, so it has NO @pm/db / @pm/shared deps, NO Prisma, NO argon2, NO database.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "tsc --noEmit && next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "d3-force-3d": "3.0.6",
+    "material-icons": "^1.13.14",
+    "next": "15.5.24",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-force-graph-2d": "1.29.1",
+    "react-force-graph-3d": "1.29.1",
+    "react-markdown": "10.1.0",
+    "recharts": "^3.3.0",
+    "remark-gfm": "4.0.1",
+    "three": "0.185.1",
+    "three-spritetext": "1.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "0.185.4",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}

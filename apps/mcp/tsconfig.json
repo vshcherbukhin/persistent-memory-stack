@@ -1,0 +1,28 @@
+{
+  // persistent-memory-mcp — Node / ESM / stream MCP service.
+  //
+  // Extends the workspace baseline (../../tsconfig.base.json). The MCP depends ONLY
+  // on @pm/shared (NOT @pm/db — it is Prisma-free; all DB access goes through the
+  // HTTP API). @pm/shared is consumed as a BUILT PACKAGE via its `exports` map;
+  // `references` makes `tsc -b` build packages/shared/dist (+ .d.ts) first, and the bare
+  // `@pm/shared` import resolves through packages/shared's package.json exports.
+  //
+  // EMIT LAYOUT: rootDir "src" → a clean dist/** tree; entry dist/index.js (the
+  // bin target). We mirror the api's two-option pair so source can write
+  // `... from './x.ts'` and the EMITTED dist rewrites those specifiers to `.js`:
+  //   • allowImportingTsExtensions     — lets source use `.ts` specifiers.
+  //   • rewriteRelativeImportExtensions — rewrites them to `.js` on emit so the
+  //     built dist is runnable Node ESM.
+  // (tsx in dev resolves `.ts` natively; this pair only matters for `tsc`.)
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false
+  },
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../layers/mcp-runtime" }],
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

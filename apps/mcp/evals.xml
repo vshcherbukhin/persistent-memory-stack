@@ -1,0 +1,75 @@
+<!--
+  persistent-memory-mcp — evaluation Q/A pairs (mcp-builder Phase 4; finalized P14, #12).
+
+  9 INDEPENDENT, READ-ONLY, COMPLEX, VERIFIABLE, STABLE questions over the FROZEN seed
+  fixture loaded by `node scripts/eval-seed.mjs` (team `qa-automation`, your token's own
+  team with read_write, + a read-grant "mount" to `qa-manual`). Every <answer> below was
+  GROUND-TRUTHED by querying the live api directly — not a placeholder. Questions avoid the
+  target keywords (the agent must choose tools + search semantically), and most need a
+  multi-tool chain (search → read → field-extract / cross-team / identity).
+
+  HOW TO RUN — two ways:
+   1) The "normal way" (preferred): register the MCP, then a Claude Code session (Opus)
+      uses the tools to answer each question — the best agent, no API-key burn. This is how
+      P14 was validated (see apps/mcp/eval_report.md).
+   2) The HTTP mcp-builder harness for a future CI run with a real ANTHROPIC_API_KEY (Sonnet):
+        npm run eval:mcp   ->  python scripts/evaluation.py -t http -u ${PM_MCP_URL:-http://127.0.0.1:8091/mcp} \
+          -o apps/mcp/eval_report.md apps/mcp/evals.xml
+      Manual stdio alternative:
+        python scripts/evaluation.py -t stdio -c node -a apps/mcp/dist/index.js \
+          -e PM_USER_TOKEN=<qa-automation token from eval-seed> -e API_URL=http://localhost:8090 \
+          -e OLLAMA_URL=http://localhost:11434 -o apps/mcp/eval_report.md apps/mcp/evals.xml
+      (The personal Haiku OAT is a weak eval agent + burns quota — use a real Sonnet key, or
+      the Opus session in option 1.)
+
+  NOT INCLUDED (deliberate): graph contradiction/timeline questions (depend on Graphiti
+  extraction quality — a separately-documented local-model gap) and an investigation-find
+  question (the MCP exposes get_investigation by id but NO list/search tool to DISCOVER one
+  by content — a real tool-gap surfaced by this eval; see apps/mcp/README.md follow-ups).
+-->
+<evaluation>
+  <qa_pair>
+    <question>How many teams can your token read from, including your own team? Answer with a single integer.</question>
+    <answer>2</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The write protocol mandates a literal fallback tag for any memory that isn't tied to a named project (it is never null). What is that exact tag string?</question>
+    <answer>general</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Search the agent memories for guidance about a vector store losing a team's visibility into its own data when stored payloads are rewritten. The single memory addressing this carries one category tag — what is that category? Answer the exact category string.</question>
+    <answer>gotcha</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Find the memory describing how the database enforces team isolation as a defense-in-depth net beneath the application authorization choke-point. That memory lists exactly one entity in its entities array — what is that entity name, verbatim?</question>
+    <answer>component_persistent_memory_postgres</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Using exact entity matching, find every memory that touches the entity representing the read_write permission. How many such memories exist across your readable teams? Answer with a single integer.</question>
+    <answer>2</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Looking across EVERY team you can read (not just your own), find the memory that names the source of truth for release sign-off steps. That memory lists exactly one entity — what is it, verbatim?</question>
+    <answer>component_manual_runbook</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>For the memory about a vector store losing tenant visibility when payloads are rewritten: the system records, server-side, where the memory's information came from (its provenance). What is that exact provenance value?</question>
+    <answer>agent_inferred</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The memory about the database enforcing team isolation is filed under one of the system's memory tiers. Which tier is it? Answer the exact tier value.</question>
+    <answer>semantic</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Locate the previously ingested document about quarterly test coverage, then retrieve that document and report its MIME type verbatim (e.g. application/pdf).</question>
+    <answer>text/markdown</answer>
+  </qa_pair>
+</evaluation>

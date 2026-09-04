@@ -1,0 +1,108 @@
+site_name: PM Management Documentation
+site_description: Product, operator, and architecture documentation for persistent-memory.
+docs_dir: documentation
+site_dir: .local/generated-docs/site
+strict: true
+exclude_docs: |
+  readme.md
+  node_modules/
+  package.json
+  package-lock.json
+  requirements.txt
+use_directory_urls: false
+theme:
+  name: material
+  custom_dir: documentation/overrides
+  logo: assets/images/pm-logo.svg
+  favicon: assets/images/pm-logo.svg
+  font: false
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.highlight
+    - search.suggest
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: pm-mermaid-source
+          format: !!python/name:pymdownx.superfences.fence_code_format
+extra_css:
+  - stylesheets/material-icons-outlined.css
+  - stylesheets/pm-management.css
+extra:
+  docs_version: 0.2.8
+nav:
+  - "Home": index.md
+  - "Installation":
+      - "Installation steps": installation/installation-steps.md
+      - "Uninstall memory stack": installation/uninstall-memory-stack.md
+  - "Spaces":
+      - "Personal Space Documentation":
+          - "Start here": spaces/personal/index.md
+          - "Navigation and spaces": spaces/personal/navigation-and-spaces.md
+          - "Overview": spaces/personal/overview.md
+          - "Memories": spaces/personal/memories.md
+          - "Services": spaces/personal/services.md
+          - "Workers": spaces/personal/workers.md
+          - "Token usage": spaces/personal/token-usage.md
+          - "Security": spaces/personal/security.md
+          - "Notifications": spaces/personal/notifications.md
+          - "System Settings": spaces/personal/system-settings.md
+          - "Profile": spaces/personal/profile.md
+          - "Releases and updates": spaces/personal/releases-and-updates.md
+      - "Shared Space Documentation":
+          - "In development": spaces/shared/index.md
+      - "Hosted Server Dashboard Documentation":
+          - "In development": spaces/hosted-server/index.md
+  - "Stack Architecture":
+      - "Architecture": stack-architecture/architecture.md
+      - "Operations": stack-architecture/operations.md
+      - "Security": stack-architecture/security.md
+      - "Access Model": stack-architecture/access-model.md
+      - "Memory Protocol": stack-architecture/memory-protocol.md
+      - "Ingest": stack-architecture/ingest.md
+      - "Embedding": stack-architecture/embedding.md
+      - "Benchmarking": stack-architecture/benchmarking.md
+  - "Stack Layers":
+      - "Core": stack-layers/core.md
+      - "Memory Vector": stack-layers/memory-vector.md
+      - "Graph": stack-layers/graph.md
+      - "Evidence Files": stack-layers/evidence-files.md
+      - "Security DLP": stack-layers/security-dlp.md
+      - "MCP Runtime": stack-layers/mcp-runtime.md
+      - "Dashboard": stack-layers/dashboard.md
+      - "Onboarding": stack-layers/onboarding.md
+      - "Update Ops": stack-layers/update-ops.md
+      - "Docs System": stack-layers/docs-system.md
+  - "Components":
+      - "API": components/api.md
+      - "Worker": components/worker.md
+      - "MCP": components/mcp.md
+      - "Dashboard": components/dashboard.md
+      - "Dashboard Gateway": components/dashboard-gateway.md
+      - "Onboard": components/onboard.md
+      - "Shared": components/shared.md
+      - "DB": components/db.md
+      - "Docker Control": components/docker-control.md
+      - "Graphiti Service": components/graphiti-service.md
+      - "DLP Service": components/dlp-service.md
+  - "Benchmark Reports":
+      - "4.0.30 system health": benchmark_reports/4.0.30-system-health.md
+      - "4.0.34 token economics": benchmark_reports/4.0.34-token-economics.md

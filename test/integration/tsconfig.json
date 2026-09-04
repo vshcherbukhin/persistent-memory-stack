@@ -1,0 +1,21 @@
+{
+  // persistent-memory — LIVE integration suite typecheck config.
+  //
+  // Pure-HTTP tests: they import NOTHING from @pm/* (no Prisma, no argon2) — all
+  // provisioning goes through the real API. So this is a self-contained program
+  // that only needs node + vitest globals. It extends the workspace baseline for
+  // the strict/ESM settings but relaxes verbatimModuleSyntax (these are leaf test
+  // files, never emitted) and allows .ts import specifiers between the helpers.
+  //
+  // Verify with: npx tsc --noEmit -p test/integration/tsconfig.json
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "types": ["node", "vitest/globals"],
+    "skipLibCheck": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

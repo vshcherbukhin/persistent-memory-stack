@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "generator": "@mermaid-js/mermaid-cli@11.16.0",
+  "diagrams": [
+    {
+      "fileName": "components-api--01.svg",
+      "relativeSource": "components/api.md",
+      "sourceHash": "8845264e8f4d25f6cef3cfba9479b0e6abe450a6e5b678b0b6c1e6beed00538f"
+    },
+    {
+      "fileName": "components-dashboard--01.svg",
+      "relativeSource": "components/dashboard.md",
+      "sourceHash": "e3a5e7ad71b4b032df29249a930a244121484700d6993fed8e7c0e0d89077233"
+    },
+    {
+      "fileName": "components-db--01.svg",
+      "relativeSource": "components/db.md",
+      "sourceHash": "e1e56fc593dbd889ce87bef5a0a7ec4b88216b0dbf8f843c25c607d091a26a82"
+    },
+    {
+      "fileName": "components-dlp-service--01.svg",
+      "relativeSource": "components/dlp-service.md",
+      "sourceHash": "8c2f605bf4c126a0f5ac9b9b3183ebc4a34f1ff4f016402c0c969430c50a9337"
+    },
+    {
+      "fileName": "components-docker-control--01.svg",
+      "relativeSource": "components/docker-control.md",
+      "sourceHash": "49fd393afb72de174916bf34df2601b7b67a0a38c1a65a42a2fe026ea29b5011"
+    },
+    {
+      "fileName": "components-graphiti-service--01.svg",
+      "relativeSource": "components/graphiti-service.md",
+      "sourceHash": "79d821974df3a0b0279ea55c76b6bb4e555cb1d3fa36f7d2f791bb0bad73c8b3"
+    },
+    {
+      "fileName": "components-mcp--01.svg",
+      "relativeSource": "components/mcp.md",
+      "sourceHash": "07cf550a10098cc25e831c1bcd13ea3cf6f26a9f488015d09a0dad12e9786c35"
+    },
+    {
+      "fileName": "components-onboard--01.svg",
+      "relativeSource": "components/onboard.md",
+      "sourceHash": "453fbbda69931057b46bd142804920cf94686c41c6ef97dbee4fdb028a90a0e7"
+    },
+    {
+      "fileName": "components-shared--01.svg",
+      "relativeSource": "components/shared.md",
+      "sourceHash": "d2e11f10d1340fa60fe08b004128d04c4b17c6560115b2a5089d294453c77dc5"
+    },
+    {
+      "fileName": "components-worker--01.svg",
+      "relativeSource": "components/worker.md",
+      "sourceHash": "190872fa83b99ffe53a3904c69098a3331a31c534539bd1e69a82dc471111552"
+    },
+    {
+      "fileName": "readme--01.svg",
+      "relativeSource": "readme.md",
+      "sourceHash": "242fce5db17d6b0faac3f5067568434329e46c998d1a6819b99539d633bee6a7"
+    },
+    {
+      "fileName": "stack-architecture-access-model--01.svg",
+      "relativeSource": "stack-architecture/access-model.md",
+      "sourceHash": "d5d06eb0a550304e662cf9d5a667c598e4450173019ba77b5774d58e17878eb1"
+    },
+    {
+      "fileName": "stack-architecture-architecture--01.svg",
+      "relativeSource": "stack-architecture/architecture.md",
+      "sourceHash": "5d910487b4026ea2b5c1528f35eef35ba30d6b09f7de424340cd259518d59e77"
+    },
+    {
+      "fileName": "stack-architecture-embedding--01.svg",
+      "relativeSource": "stack-architecture/embedding.md",
+      "sourceHash": "063ed1d96f8c580dff539c1762648b087254aca4b0955f68d62efda04f0adf2f"
+    },
+    {
+      "fileName": "stack-architecture-ingest--01.svg",
+      "relativeSource": "stack-architecture/ingest.md",
+      "sourceHash": "df9b0eb9d93eb5bdc76f522ca56c028f7d0eb64ae914b723f36ca69e4e2aeef3"
+    },
+    {
+      "fileName": "stack-architecture-operations--01.svg",
+      "relativeSource": "stack-architecture/operations.md",
+      "sourceHash": "d1b8a3ae5f87c151548d21576cb85ea736cc2abd1fdca0afe9d87ae994a39d90"
+    },
+    {
+      "fileName": "stack-architecture-security--01.svg",
+      "relativeSource": "stack-architecture/security.md",
+      "sourceHash": "fcf4e020250795582e4b862ffe0bb932bf9331b38c5f2e30f1d8af79c65786ff"
+    }
+  ]
+}

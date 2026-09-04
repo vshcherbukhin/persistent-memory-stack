@@ -1,0 +1,43 @@
+{
+  // @pm/db — composite library, but with api's emit-layout constraint, NOT shared's.
+  //
+  // Like shared/: composite + declaration so api & worker consume it as a built
+  // package via `exports` (project reference → `tsc -b` builds packages/db/dist first).
+  //
+  // UNLIKE shared/: rootDir is the REPO ROOT (persistent-memory/), not "src". The
+  // generated Prisma client lives at ../../generated/prisma, so
+  // the program's common root is persistent-memory/, exactly as in api/. Because
+  // this is a COMPOSITE project (api is not), tsc would otherwise auto-infer
+  // rootDir from the `src/**` include and reject the out-of-tree generated files
+  // (TS6059). Setting rootDir:"../.." makes the shared root explicit. tsc emits to
+  // dist/packages/db/src/** + dist/generated/** .
+  //
+  // Therefore the package `exports."."` points at ./dist/packages/db/src/index.js (NOT
+  // ./dist/index.js — that asymmetry vs @pm/shared is the #1 gotcha). The
+  // generated client travels INSIDE dist/generated/**, so
+  // dist/packages/db/src/prisma.js's `../../../generated/prisma/client.js`
+  // resolves within packages/db/dist.
+  //
+  // The .ts-specifier pair (allowImportingTsExtensions +
+  // rewriteRelativeImportExtensions) is required: we import the generated client
+  // with an explicit `.ts` extension and re-emit it to `.js`.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "rootDir": "../..",
+    "outDir": "dist",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  // composite:true requires EVERY file in the program to be listed. The
+  // generated Prisma client is an out-of-tree sibling we import, so it must be
+  // included explicitly (api's tsconfig is NOT composite, so it never hit this;
+  // @pm/db IS, like @pm/shared). Including ../../generated also fixes the emit root:
+  // the program now spans packages/db/src + generated, so the common root is
+  // persistent-memory/ → tsc emits to dist/packages/db/src/** + dist/generated/**
+  // (hence exports → ./dist/packages/db/src/index.js).
+  "include": ["src/**/*.ts", "../../generated/prisma/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

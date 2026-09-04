@@ -1,0 +1,37 @@
+# persistent-memory-graphiti — build context exclusions
+#
+# The Dockerfile does `COPY . /app`, so keep the image lean and free of local
+# cruft / secrets. Only the service source + requirements need to ship.
+
+# Python build/runtime artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Local env / secrets — config comes from compose-injected env, never a file
+.env
+.env.*
+*.local
+
+# VCS / editor / OS noise
+.git/
+.gitignore
+.gitkeep
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docs / tests are not needed in the runtime image
+README.md
+tests/
+*.md

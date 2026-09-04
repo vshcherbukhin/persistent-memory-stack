@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "outDir": "dist",
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../layers/update-ops/update-flow/**/*.ts",
+    "../../layers/update-ops/release-versioning/**/*.ts"
+  ]
+}

@@ -1,0 +1,877 @@
+##############################################################################
+# persistent-memory — server stack
+#
+# A Dockerized, TypeScript-primary, team-scoped memory/evidence stack.
+#
+# Conventions (mirror the existing mem0 stack at the repo root):
+#   project name : persistent-memory   (groups all containers)
+#   network      : persistent_memory_network (bridge)
+#   volumes      : persistent_memory_<x>
+#   container    : persistent-memory-<svc>
+#
+# All four names are defaulted below but may be explicitly namespaced for a
+# disposable test stack. `deploy/scripts/dev-test-stack.sh` uses that escape
+# hatch; it never shares normal-stack containers, images, network or volumes.
+#   restart      : unless-stopped; healthcheck on every long-lived service
+#
+# Ollama runs on the HOST (not a container), reached at
+# host.docker.internal:11434 — same pattern as mem0.
+#
+# Internal service-to-service wiring uses CONTAINER names + INTERNAL ports
+# (qdrant 6333, postgres 5432, redis 6379, falkordb 6379, minio 9000,
+# graphiti 8100). Host port mappings are for the developer only.
+# Developer-facing host ports bind to loopback by default. Set
+# PM_HOST_BIND=0.0.0.0 only behind a trusted firewall/reverse proxy.
+#
+# IMPORTANT: run lifecycle commands through the npm scripts or with:
+#   docker compose -f deploy/compose/docker-compose.yml --env-file .env.persistent-memory ...
+# `env_file:` only feeds container runtime env. It does NOT feed ${VAR:-default}
+# interpolation in this compose file. Running raw `docker compose up --build` can
+# silently fall back to defaults (server mode, default DB/service passwords) while
+# reusing existing volumes.
+##############################################################################
+
+name: persistent-memory
+
+services:
+  # ===========================================================================
+  # STORAGE — official upstream images, no build context
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Vector database. REST 6333 (host 7333), gRPC 6334 (host 7334).
+  # Internal service name for other containers: persistent-memory-qdrant:6333
+  # QDRANT_URL=http://persistent-memory-qdrant:6333 (see .env.persistent-memory)
+  #
+  # HEALTHCHECK CAVEAT: the official qdrant/qdrant image is debian-slim based and
+  # ships NO curl, NO wget, and only /bin/sh=dash (no bash, no /dev/tcp). The mem0
+  # stack's `bash -c 'echo > /dev/tcp/...'` healthcheck does NOT work here.
+  #
+  # Choice A (default, zero extra services): NO healthcheck on qdrant; gate
+  # dependents with a plain `depends_on: [qdrant]` (no condition: service_healthy).
+  # This is what Qdrant's own authored compose files do. Choice B (busybox
+  # readiness sidecar) is provided commented out below if a hard gate is needed.
+  #
+  # NOTE: api/worker depend on qdrant with condition: service_started (NOT
+  # service_healthy). qdrant has no healthcheck (Choice A), and Compose v5 ERRORS
+  # ("dependency failed to start: ... has no healthcheck configured") if a dependent
+  # gates on service_healthy against a no-healthcheck service — verified empirically.
+  # If you need a TRUE readiness gate, enable Choice B (busybox sidecar) and gate
+  # dependents on persistent-memory-qdrant-health's health instead.
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-qdrant
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_QDRANT_HTTP_PORT:-7333}:6333"   # REST / dashboard
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_QDRANT_GRPC_PORT:-7334}:6334"   # gRPC
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env.persistent-memory}
+    volumes:
+      - persistent_memory_qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+    # --- Choice A: no in-container healthcheck (image has no http client) ---
+    # (intentionally omitted — dependents use depends_on without service_healthy
+    #  effect; see header)
+    #
+    # --- Choice B: real readiness gate via busybox sidecar (uncomment this
+    #     disable line AND the persistent-memory-qdrant-health service) ---
+    # healthcheck:
+    #   disable: true
+
+  # OPTIONAL readiness sidecar for Choice B — busybox HAS wget. It shares the
+  # qdrant container's network namespace, so localhost:6333 reaches qdrant.
+  # Dependents can then use `condition: service_healthy` on THIS service.
+  # Keep commented unless you need a hard readiness gate.
+  # qdrant-health:
+  #   image: busybox:1.37.0
+  #   container_name: persistent-memory-qdrant-health
+  #   command: ["sleep", "infinity"]
+  #   network_mode: "service:qdrant"
+  #   depends_on:
+  #     - qdrant
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # FalkorDB — Graphiti graph backend (PRIMARY). Redis-protocol graph DB.
+  # Image tag scheme is v4.x; the "1.1.2" Graphiti requirement is the ENGINE/
+  # module minimum, which every v4.x image far exceeds. Full image bundles the
+  # browser UI on 3000 (host 3100). Internal: persistent-memory-falkordb:6379.
+  # ---------------------------------------------------------------------------
+  falkordb:
+    image: falkordb/falkordb:v4.18.10
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-falkordb
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_FALKORDB_PORT:-6380}:6379"      # FalkorDB / Redis protocol
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_FALKORDB_BROWSER_PORT:-3100}:3000"      # FalkorDB Browser UI
+    volumes:
+      - persistent_memory_falkordb_data:/data
+    environment:
+      # AOF persistence for durability plus a Redis/FalkorDB password. The
+      # browser login uses user "default" with this password.
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}
+      REDIS_ARGS: "--appendonly yes --requirepass ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}"
+      # FalkorDB images default TIMEOUT to 1000ms. Graphiti's bounded hybrid
+      # full-text reads need a small but realistic budget; they retain the
+      # server-side limit rather than running without one.
+      FALKORDB_ARGS: "TIMEOUT ${FALKORDB_QUERY_TIMEOUT_MS:-5000}"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${FALKORDB_PASSWORD}\" ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # Neo4j — Graphiti graph backend (ALT to FalkorDB). OFF by default via the
+  # "neo4j" profile. Start with: docker compose --profile neo4j up -d
+  # HTTP/Browser 7474 (host 7475), Bolt 7687 (host 7688).
+  # ---------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5.26.27
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-neo4j
+    profiles: ["neo4j"]
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_NEO4J_HTTP_PORT:-7475}:7474"          # HTTP / Neo4j Browser
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_NEO4J_BOLT_PORT:-7688}:7687"          # Bolt protocol
+    environment:
+      # NEO4J_AUTH format is user/password; default user must be "neo4j".
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/persistentmemory}
+      # JSON-array STRING; image downloads + enables the plugin on first boot.
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - persistent_memory_neo4j_data:/data
+    healthcheck:
+      # cypher-shell ships in the image; password hardcoded to the default.
+      # If NEO4J_AUTH password is overridden via env, keep this in sync.
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p persistentmemory 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s      # Neo4j + APOC download/boot is slow; large grace window
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # Postgres — metadata store. Standard image; RLS is a core feature (no special
+  # image). Pinned to 17.x to avoid the Postgres 18 volume-path change: 17-and-
+  # below MUST mount at /var/lib/postgresql/data. Internal: 5432 (host 5433).
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17.10
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-postgres
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pmpass}
+      POSTGRES_DB: ${POSTGRES_DB:-persistent_memory}
+    volumes:
+      # Postgres 17 and below: MUST mount at /var/lib/postgresql/data.
+      # If you ever upgrade to 18.x, change this to /var/lib/postgresql.
+      - persistent_memory_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready with -U/-d ties readiness to the actual app role+db, so the
+      # check passes only once they are truly accepting connections.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pmuser} -d ${POSTGRES_DB:-persistent_memory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # Redis — BullMQ broker for the worker queue. Internal: 6379 (host 6381).
+  # BullMQ REQUIRES maxmemory-policy=noeviction (the only policy that guarantees
+  # correct queue behavior). AOF enabled so in-flight jobs survive a restart.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:8-alpine
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_REDIS_PORT:-6381}:6379"
+    volumes:
+      - persistent_memory_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object store (evidence blobs). Internal S3 API 9000
+  # (host 9002), console 9001 (host 9003).
+  # NOTE: the community minio/minio image was de-published / repo ARCHIVED on
+  # 2025-10-23. The last published tag RELEASE.2025-09-07T16-13-09Z is still
+  # pullable but receives NO further security patches. A maintained drop-in is
+  # cgr.dev/chainguard/minio:latest (same command/ports/env). Flag to the team.
+  # Healthcheck uses `mc ready local` (curl was removed from the image).
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_MINIO_API_PORT:-9002}:9000"
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_MINIO_CONSOLE_PORT:-9003}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-pmadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-pmadminsecret}
+    volumes:
+      - persistent_memory_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ===========================================================================
+  # APPLICATION — repository-built services
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Graphiti — Python/FastAPI graph service (build context: apps/graphiti-service/).
+  # Real entrypoint lands in a later phase. Internal: persistent-memory-graphiti:8100.
+  # NOTE: upstream graph_service.main:app defaults to port 8000 — the real CMD
+  # MUST override to 8100 to match this scaffold's host mapping.
+  # ---------------------------------------------------------------------------
+  graphiti:
+    build:
+      context: ../../apps/graphiti-service
+      dockerfile: Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-graphiti:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-graphiti
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_GRAPHITI_PORT:-8100}:8100"
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    environment:
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-falkordb}
+      # FalkorDB connection (container name + INTERNAL port 6379)
+      FALKORDB_HOST: ${FALKORDB_HOST:-${PM_CONTAINER_PREFIX:-persistent-memory}-falkordb}
+      FALKORDB_PORT: ${FALKORDB_PORT:-6379}
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}
+      FALKORDB_DATABASE: ${FALKORDB_DATABASE:-default_db}
+      # Neo4j swap path (GRAPH_BACKEND=neo4j). The neo4j service is profile-gated
+      # (profiles: ["neo4j"], off by default) so depends_on stays SOFT/documented
+      # — a hard gate would break the default FalkorDB start. Start the swap with:
+      #   GRAPH_BACKEND=neo4j docker compose --profile neo4j up -d neo4j graphiti
+      # Blank/default values keep the FalkorDB path unaffected. NEO4J_USER/PASSWORD
+      # must track NEO4J_AUTH (neo4j/persistentmemory).
+      NEO4J_URI: ${NEO4J_URI:-bolt://persistent-memory-neo4j:7687}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-persistentmemory}
+      # Concurrency cap for Graphiti's async extraction pipeline
+      SEMAPHORE_LIMIT: ${SEMAPHORE_LIMIT:-10}
+      # LLM extraction (entity/edge extraction)
+      EXTRACTION_PROVIDER: ${EXTRACTION_PROVIDER:-anthropic}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Embeddings (Ollama on the HOST by default). ALWAYS server-side for
+      # Graphiti's graph nodes — separate from the Qdrant vector topology.
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-ollama}
+      EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:4b}
+      EMBED_DIM: ${EMBED_DIM:-2560}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # Voyage embedder path (EMBED_PROVIDER=voyage) — opt-in cloud embeddings.
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      # Self URL (container name + internal port)
+      GRAPHITI_URL: ${GRAPHITI_URL:-http://${PM_CONTAINER_PREFIX:-persistent-memory}-graphiti:8100}
+      # Report extraction-LLM token usage to the api (POST /internal/usage).
+      API_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-api:8090
+      USAGE_INGEST_TOKEN: ${USAGE_INGEST_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets the container reach HOST Ollama
+    healthcheck:
+      # Placeholder target until the real GET /healthcheck route exists. The
+      # placeholder image serves nothing on 8100, so this stays "starting" then
+      # unhealthy while Graphiti is still starting; downstream gates are documented
+      # below. Once the real app is wired, this check passes as-is.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/healthcheck').status==200 else 1)\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-dlp — PII (Presidio) + secret (gitleaks) detection sidecar.
+  # Thin FastAPI wrapper around official detectors; serves both api (write gate)
+  # + worker (doc block + pii-scan)
+  # over the private network. Internal-only: NO published host port (it only ever
+  # handles sensitive scan text). Internal: persistent-memory-dlp:8200. NO inbound
+  # auth (like graphiti) — the api is the choke-point.
+  # ---------------------------------------------------------------------------
+  dlp:
+    build:
+      context: ../../apps/dlp-service
+      dockerfile: Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-dlp:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-dlp
+    environment:
+      GITLEAKS_TIMEOUT_S: ${GITLEAKS_TIMEOUT_S:-10}
+      DEFAULT_SCORE_THRESHOLD: ${PII_SCORE_THRESHOLD:-0.5}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8200/healthcheck').status==200 else 1)\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-api — TS/Node HTTP API (build context: repo root).
+  # Public REST surface. Real build is a later phase. Internal: 8090 (host 8090).
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      # Context is the persistent-memory/ dir (NOT ./apps/api) so the multi-stage
+      # build can reach layers/core/schema to `prisma generate` the shared client
+      # imported through @pm/db. See apps/api/Dockerfile.
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-api:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-api
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_API_PORT:-8090}:8090"
+    env_file:
+      - ${PM_RUNTIME_ENV_FILE:-../../.env.persistent-memory}
+    environment:
+      # Internal service wiring uses CONTAINER names + INTERNAL ports.
+      NODE_ENV: production
+      API_PORT: "8090"
+      # Deployment mode. `local` DISABLES auth (single super-user). The api
+      # reads this at runtime (node), so a plain env is enough here. Default server.
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-server}
+      PM_TEST_STACK: ${PM_TEST_STACK:-false}
+      # Runtime / data plane = RLS-subject pm_app.
+      DATABASE_URL: postgresql://pm_app:${PM_APP_PASSWORD:-pmapp}@${PM_CONTAINER_PREFIX:-persistent-memory}-postgres:5432/${POSTGRES_DB:-persistent_memory}
+      # Owner = pmuser. The API control plane (token verify, dashboard ops on
+      # app_user/team/team_grant) connects as this; it BYPASSES RLS, so it is
+      # NEVER used for the data plane.
+      DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER:-pmuser}:${POSTGRES_PASSWORD:-pmpass}@${PM_CONTAINER_PREFIX:-persistent-memory}-postgres:5432/${POSTGRES_DB:-persistent_memory}
+      REDIS_URL: redis://${PM_CONTAINER_PREFIX:-persistent-memory}-redis:6379
+      QDRANT_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env.persistent-memory}
+      FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}
+      GRAPHITI_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-graphiti:8100
+      MINIO_ENDPOINT: http://${PM_CONTAINER_PREFIX:-persistent-memory}-minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-pmadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-pmadminsecret}
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-ollama}
+      EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:4b}
+      EMBED_DIM: ${EMBED_DIM:-2560}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-server}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # EXTRACTION_PROVIDER / EXTRACTION_MODEL also load from env_file (single-source),
+      # so the extraction model can be switched via .env.persistent-memory without a
+      # compose edit (e.g. Haiku on a personal OAT today, a stronger model later).
+      # ANTHROPIC_API_KEY / OPENAI_API_KEY / VOYAGE_API_KEY / TOKEN_PEPPER load from
+      # env_file: .env.persistent-memory and are deliberately NOT re-declared here.
+      # An `environment:` ${VAR:-} override is filled from compose interpolation
+      # (shell or a literal .env, NOT .env.persistent-memory) and OVERRIDES env_file
+      # — so it silently blanked the real secret on any `docker compose up`/restart.
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-falkordb}
+      ARGON2_MEMORY_KIB: ${ARGON2_MEMORY_KIB:-19456}
+      ARGON2_TIME_COST: ${ARGON2_TIME_COST:-2}
+      ARGON2_PARALLELISM: ${ARGON2_PARALLELISM:-1}
+      # Local Services monitor → the docker-control sidecar (the ONLY container
+      # with the Docker socket). The api holds NO socket; it presents this shared
+      # secret over the internal network. Empty token ⇒ Services control disabled.
+      DOCKER_CONTROL_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-docker-control:9090
+      DOCKER_CONTROL_TOKEN: ${DOCKER_CONTROL_TOKEN:-}
+      UPDATE_RUNNER_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-update-runner:9092
+      UPDATE_RUNNER_TOKEN: ${UPDATE_RUNNER_TOKEN:-}
+      # Shared secret the internal /internal/usage endpoint validates (graphiti posts here).
+      USAGE_INGEST_TOKEN: ${USAGE_INGEST_TOKEN:-}
+      # DLP write-gate: the PII/secret detection sidecar + policy. Empty
+      # PII_GATE_ENABLED / unreachable sidecar ⇒ the gate fails CLOSED (blocks).
+      DLP_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-dlp:8200
+      PII_GATE_ENABLED: ${PII_GATE_ENABLED:-true}
+      PII_ENTITIES: ${PII_ENTITIES:-}
+      PII_SCORE_THRESHOLD: ${PII_SCORE_THRESHOLD:-0.5}
+      DLP_TIMEOUT_MS: ${DLP_TIMEOUT_MS:-4000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started   # qdrant has no healthcheck (Choice A) — gate on start, not health
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+      dlp:
+        condition: service_healthy
+    extra_hosts:
+      # Lets the container reach Ollama running on the HOST (Linux parity;
+      # Docker Desktop on macOS resolves host.docker.internal natively).
+      - "host.docker.internal:host-gateway"
+    # NOTE: the api intentionally has NO Docker socket. Service control goes
+    # through the docker-control sidecar below (the only container with the socket).
+    healthcheck:
+      # Real liveness probe on GET /health (no auth, no DB). node:22-alpine
+      # ships global fetch; exit 0 only on a 2xx.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-docker-control — the ONLY container with the Docker socket.
+  # Backs the dashboard Services page. Tiny, zero runtime deps, gated by
+  # a shared-secret bearer (DOCKER_CONTROL_TOKEN), scoped to THIS compose project,
+  # and published on NO host port (internal compose network only). The api calls
+  # it; the browser never does. See apps/docker-control/README.md for the full model.
+  # Comment out the socket volume below to disable service control entirely.
+  # ---------------------------------------------------------------------------
+  docker-control:
+    build:
+      context: ../..
+      dockerfile: apps/docker-control/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-docker-control:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-docker-control
+    environment:
+      DOCKER_CONTROL_TOKEN: ${DOCKER_CONTROL_TOKEN:-}
+      DOCKER_COMPOSE_PROJECT: ${DOCKER_COMPOSE_PROJECT:-persistent-memory}
+      PORT: "9090"
+    # host-root-equivalent — but isolated HERE behind the token gate + no host
+    # port. This is the one and only place the socket is mounted.
+    volumes:
+      - "${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock"
+    security_opt:
+      - no-new-privileges:true
+    # The sidecar only opens a unix socket + listens on a high TCP port — it needs
+    # no Linux capabilities. Drop them all (defense-in-depth on the socket-holder).
+    cap_drop:
+      - ALL
+    # Run as the non-root `node` user (uid 1000), not root — least privilege for the
+    # one container that holds the socket. The socket is the only thing it must
+    # reach: on Docker Desktop the in-container socket is root:root mode 660, so
+    # supplementary group 0 grants rw (DOCKER_GID default 0 — validated). On native
+    # LINUX the socket is root:<docker-gid>, so set DOCKER_GID to that gid
+    # (`stat -c '%g' /var/run/docker.sock`); otherwise the sidecar can't read the
+    # socket and the Services page degrades to 503 (fail-closed, never crashes).
+    user: "node"
+    group_add:
+      - "${DOCKER_GID:-0}"
+    # It writes nothing to disk — lock the rootfs read-only (tmpfs covers /tmp).
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-update-runner — restricted updater sidecar.
+  # Owns local update status metadata and the internal snapshot-safe update flow.
+  # Dashboard UI only exposes release notes + the terminal update command.
+  # It is separate from docker-control so docker-control can keep its tiny
+  # bounded service-control surface.
+  # ---------------------------------------------------------------------------
+  update-runner:
+    build:
+      context: ../..
+      dockerfile: apps/update-runner/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-update-runner:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-update-runner
+    environment:
+      UPDATE_RUNNER_TOKEN: ${UPDATE_RUNNER_TOKEN:-}
+      UPDATE_REPO_DIR: /workspace
+      UPDATE_BACKUP_ROOT: /workspace/.local/update-backups
+      UPDATE_BRANCH: ${UPDATE_BRANCH:-master}
+      COMPOSE_PARALLEL_LIMIT: ${COMPOSE_PARALLEL_LIMIT:-1}
+    volumes:
+      - "../..:/workspace"
+      - "${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock"
+      - persistent_memory_qdrant_data:/snapshot/qdrant:ro
+      - persistent_memory_falkordb_data:/snapshot/falkordb:ro
+      - persistent_memory_neo4j_data:/snapshot/neo4j:ro
+      - persistent_memory_postgres_data:/snapshot/postgres:ro
+      - persistent_memory_redis_data:/snapshot/redis:ro
+      - persistent_memory_minio_data:/snapshot/minio:ro
+    security_opt:
+      - no-new-privileges:true
+    group_add:
+      - "${DOCKER_GID:-0}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9092/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-mcp — local Streamable HTTP MCP service.
+  # Enabled by the "mcp-stream" profile for personal-first client installs.
+  # Stream MCP is the only runtime; legacy Node values are migration aliases.
+  # ---------------------------------------------------------------------------
+  mcp:
+    profiles: ["mcp-stream"]
+    build:
+      context: ../..
+      dockerfile: apps/mcp/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-mcp:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-mcp
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_MCP_PORT:-8091}:8091"
+    env_file:
+      - ${PM_RUNTIME_ENV_FILE:-../../.env.persistent-memory}
+    environment:
+      NODE_ENV: production
+      PM_MCP_TRANSPORT: http
+      PM_MCP_CLIENT_NAME: persistent-memory-stream
+      PM_MCP_HTTP_HOST: 0.0.0.0
+      PM_MCP_HTTP_PORT: "8091"
+      API_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-api:8090
+      PM_PERSONAL_API_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-api:8090
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    depends_on:
+      api:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8091/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-worker — TS/Node BullMQ ingest consumer.
+  # Build context = the workspace ROOT (persistent-memory/) so the multi-stage
+  # build reaches packages/shared/ + packages/db/ + layers/core/schema/ (the worker depends on @pm/shared +
+  # @pm/db). No host port (background processor).
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-worker:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-worker
+    security_opt:
+      - no-new-privileges:true
+    # Memory ceiling: the worker buffers each ingested file to extract
+    # it (pdf/docx aren't streamable), so peak ≈ INGEST_MAX_FILE_BYTES × WORKER_CONCURRENCY
+    # × ~a-few (buffer + extracted text + chunks/vectors). The bounded read
+    # (getBufferCapped) caps EACH job at the file limit; this caps the CONTAINER so a
+    # pathological doc OOM-kills + restarts (restart: unless-stopped) instead of taking
+    # down the host. Tune WORKER_MEM_LIMIT up, or INGEST_MAX_FILE_BYTES / WORKER_CONCURRENCY
+    # down, for a constrained host / larger docs. Worst case: a ~100MiB TEXT doc
+    # expands (buffer + extracted text + tens of thousands of chunk vectors) past 1g →
+    # OOM-kill + restart; BullMQ retries are BOUNDED (maxAttempts + backoff) so the job
+    # ends `failed`, not a crash-loop — the host stays up (the #8 goal). Realistic
+    # docs (≤ a few MB) sit far under 1g. Raise WORKER_MEM_LIMIT for large-doc workloads.
+    mem_limit: ${WORKER_MEM_LIMIT:-1g}
+    env_file:
+      - ${PM_RUNTIME_ENV_FILE:-../../.env.persistent-memory}
+    environment:
+      NODE_ENV: production
+      # The worker never calls docker-control — null the inherited token so a
+      # worker compromise (it parses uploaded docs) can't drive the socket sidecar.
+      # `environment:` overrides `env_file:`, so this shadows .env.persistent-memory.
+      DOCKER_CONTROL_TOKEN: ""
+      UPDATE_RUNNER_TOKEN: ""
+      # Worker records usage directly via @pm/db (not the HTTP endpoint) → no token needed.
+      USAGE_INGEST_TOKEN: ""
+      # Worker is data-plane (writes chunks/claims team-stamped) → pm_app + RLS.
+      # It runs inside runInTenant with a context built from the job payload (the
+      # team is server-derived at enqueue time), so the same RLS net applies.
+      DATABASE_URL: postgresql://pm_app:${PM_APP_PASSWORD:-pmapp}@${PM_CONTAINER_PREFIX:-persistent-memory}-postgres:5432/${POSTGRES_DB:-persistent_memory}
+      # Owner URL for any control-table reads the worker needs (kept consistent
+      # with the api; the worker stays off the control plane in the current plan).
+      DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER:-pmuser}:${POSTGRES_PASSWORD:-pmpass}@${PM_CONTAINER_PREFIX:-persistent-memory}-postgres:5432/${POSTGRES_DB:-persistent_memory}
+      REDIS_URL: redis://${PM_CONTAINER_PREFIX:-persistent-memory}-redis:6379
+      QDRANT_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env.persistent-memory}
+      GRAPHITI_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-graphiti:8100
+      MINIO_ENDPOINT: http://${PM_CONTAINER_PREFIX:-persistent-memory}-minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-pmadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-pmadminsecret}
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-ollama}
+      EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:4b}
+      EMBED_DIM: ${EMBED_DIM:-2560}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-server}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # EXTRACTION_PROVIDER / EXTRACTION_MODEL also load from env_file (single-source).
+      # Secrets (ANTHROPIC/OPENAI/VOYAGE API keys, TOKEN_PEPPER) load from
+      # env_file: .env.persistent-memory — NOT re-declared here (see the api service
+      # for why an environment: ${VAR:-} override would blank them).
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-falkordb}
+      SEMAPHORE_LIMIT: ${SEMAPHORE_LIMIT:-10}
+      # Ingest-pipeline tunables.
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      GRAPHITI_TIMEOUT_MS: ${GRAPHITI_TIMEOUT_MS:-120000}
+      CHUNK_MAX_TOKENS: ${CHUNK_MAX_TOKENS:-512}
+      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-64}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      ARGON2_MEMORY_KIB: ${ARGON2_MEMORY_KIB:-19456}
+      ARGON2_TIME_COST: ${ARGON2_TIME_COST:-2}
+      ARGON2_PARALLELISM: ${ARGON2_PARALLELISM:-1}
+      # DLP: the doc-ingest scan + the pii-scan scheduled job call the sidecar.
+      DLP_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-dlp:8200
+      PII_ENTITIES: ${PII_ENTITIES:-}
+      PII_SCORE_THRESHOLD: ${PII_SCORE_THRESHOLD:-0.5}
+      DLP_TIMEOUT_MS: ${DLP_TIMEOUT_MS:-4000}
+      PII_INGEST_GATE_ENABLED: ${PII_INGEST_GATE_ENABLED:-true}
+      # (The periodic pii-scan is enabled/paused per-job from the dashboard Workers
+      # page — the ScheduledJob row is the toggle; no separate env flag.)
+      # SMTP relay creds + ALERT_EMAIL_FROM (incl. the SMTP_PASS secret) load from
+      # env_file: .env.persistent-memory — NOT re-declared here (an environment:
+      # ${VAR:-} override would blank them, per the api service note above).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started   # qdrant has no healthcheck (Choice A) — gate on start, not health
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+      dlp:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Real liveness probe: index.ts refreshes pm:worker:heartbeat in Redis every
+      # tick (EX 60). The probe checks the key exists — proving the consumer is
+      # alive, not merely that a node process exists. node:22-alpine has no
+      # redis-cli, so we GET via a one-liner node script against REDIS_URL.
+      test: ["CMD", "node", "-e", "const{Redis}=require('ioredis');const c=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1,enableReadyCheck:false});c.get('pm:worker:heartbeat').then(v=>{c.quit();process.exit(v?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-documentation — versioned MkDocs site served by Node.
+  # Internal-only on 8000; host access goes through dashboard-gateway at /docs/.
+  # ---------------------------------------------------------------------------
+  documentation:
+    build:
+      context: ../..
+      dockerfile: apps/documentation/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-documentation:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-documentation
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8000"
+    environment:
+      NODE_ENV: production
+      PORT: "8000"
+      HOSTNAME: "0.0.0.0"
+      DOCUMENTATION_SITE_DIR: /site
+      DOCUMENTATION_VERSION: "0.2.8"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # persistent-memory-dashboard-gateway — stable localhost front door.
+  # Owns host 3200 permanently, proxies app traffic to dashboard, and serves the
+  # update handoff screen while dashboard is being rebuilt/recreated behind it.
+  # The authenticated dashboard proxies /docs/* to documentation.
+  # ---------------------------------------------------------------------------
+  dashboard-gateway:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard-gateway/Dockerfile
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-dashboard-gateway:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-dashboard-gateway
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${PM_HOST_BIND:-127.0.0.1}:${PM_DASHBOARD_PORT:-3200}:3200"
+    environment:
+      NODE_ENV: production
+      PORT: "3200"
+      DASHBOARD_BASE_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-dashboard:3000
+      HANDOFF_STATE_PATH: /run/persistent-memory/update-coordinator-state/dashboard-handoff.json
+      LEGACY_HANDOFF_STATE_PATH: /run/persistent-memory/update-state/dashboard-handoff.json
+    volumes:
+      - "../..:/workspace:ro"
+      - "${PM_LEGACY_HANDOFF_STATE_DIR:-../../.local/update-state}:/run/persistent-memory/update-state:ro"
+      - "${PM_COORDINATOR_STATE_DIR:-../../.local/update-coordinator-state}:/run/persistent-memory/update-coordinator-state:ro"
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # ---------------------------------------------------------------------------
+  # Next.js dashboard. Build context is the repo root so
+  # the dashboard capability layer is available to compatibility exports).
+  # Internal-only on 3000; host access goes through dashboard-gateway on 3200.
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        # Inlined into the client bundle at `next build` (browser → host port).
+        # Vestigial here (the browser never calls the api directly; the token
+        # stays server-side), but kept correct for any future client display.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8090}
+        # BUILD-TIME so Next inlines it into the Edge middleware bundle
+        # (a runtime-only env wouldn't reach middleware). local = no-auth dashboard.
+        DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-server}
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-dashboard:latest
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-dashboard
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3000"
+    env_file:
+      - ${PM_RUNTIME_ENV_FILE:-../../.env.persistent-memory}
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # Browser-facing: developer hits the API via the published host port.
+      # NEXT_PUBLIC_ vars are inlined at `next build` — changing this needs a
+      # rebuild, not just a restart.
+      NEXT_PUBLIC_API_URL: http://localhost:8090
+      # Server-side (dashboard -> api) uses the container name + internal port.
+      API_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-api:8090
+      # Server-side documentation proxy keeps /docs/* behind dashboard auth.
+      DOCUMENTATION_BASE_URL: http://${PM_CONTAINER_PREFIX:-persistent-memory}-documentation:8000
+      # Runtime env for the NODE server-side reads (session.ts/layout);
+      # must match the build arg above (both from ${DEPLOYMENT_MODE}). The Edge
+      # middleware uses the build-inlined value; the node side uses this.
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-server}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-server}
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-falkordb}
+      # The dashboard never calls docker-control directly (it goes through the api).
+      # Null the inherited token so a dashboard-tier compromise can't reach the
+      # socket sidecar. `environment:` overrides `env_file:`.
+      DOCKER_CONTROL_TOKEN: ""
+      UPDATE_RUNNER_TOKEN: ""
+      USAGE_INGEST_TOKEN: ""
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Real probe: the Next.js app serves GET /api/health (no auth, no api call).
+      # node:alpine ships wget via busybox.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - persistent_memory_network
+
+  # One-release updater compatibility. A pre-upgrade update-runner still asks
+  # Compose to start the old service key after fast-forwarding this file. The
+  # explicit profile keeps it out of normal stacks; targeting it creates the
+  # canonical persistent-memory-dashboard container and preserves the old DNS
+  # name only long enough for the already-running gateway to finish the update.
+  admin:
+    profiles: ["legacy-admin-upgrade"]
+    extends:
+      service: dashboard
+    container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-dashboard-legacy-upgrade
+    networks:
+      persistent_memory_network:
+        aliases:
+          - persistent-memory-admin
+
+volumes:
+  persistent_memory_qdrant_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_qdrant_data
+  persistent_memory_falkordb_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_falkordb_data
+  persistent_memory_neo4j_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_neo4j_data
+  persistent_memory_postgres_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_postgres_data
+  persistent_memory_redis_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_redis_data
+  persistent_memory_minio_data:
+    name: ${PM_VOLUME_PREFIX:-persistent_memory}_minio_data
+
+networks:
+  persistent_memory_network:
+    driver: bridge
+    name: ${PM_NETWORK_NAME:-persistent_memory_network}

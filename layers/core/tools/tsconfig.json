@@ -1,0 +1,17 @@
+{
+  // persistent-memory-tools — Node / ESM / strict.
+  //
+  // The only file in this package is rls-check.mjs, a plain Node ESM script run
+  // directly via `node layers/core/tools/rls-check.mjs` (the repo-root `rls:check` script).
+  // It is not compiled, so there are no TypeScript inputs and no build step.
+  // `include` is intentionally empty; this config exists only to anchor editor
+  // tooling at the strict base settings.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": true
+  },
+  "include": [],
+  "exclude": ["node_modules", "dist"]
+}

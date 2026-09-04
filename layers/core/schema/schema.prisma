@@ -1,0 +1,988 @@
+// ============================================================================
+// persistent-memory — Postgres data model
+//
+// ACCESS MODEL: docs/internal/users_roles.md is the source of truth. Two
+// orthogonal dimensions — team membership (none, or exactly one team) and
+// admin_level (none/admin/superuser). Reads are UNIVERSAL (any team member
+// reads any team); writes are current-team + per-author bounded.
+//
+// TWO PLANES:
+//   • CONTROL plane  — Team / AppUser. NOT team-partitioned, NO RLS. Guarded at
+//                      the API by admin_level. A team-less super-admin is the
+//                      independent global admin; admins are always team-bound.
+//   • DATA plane     — Source / Document / Chunk / Entity / Claim / Relationship
+//                      / Investigation / InvestigationLink / IngestJob / Memory.
+//                      Every row carries team_id (FK→Team, Cascade) + project
+//                      String @default("general") (NEVER NULL) + created/updated.
+//                      Memory also carries created_by_id (author) for the RLS
+//                      ownership floor. RLS (ENABLE + FORCE) lives in
+//                      layers/core/schema/rls.sql — Prisma has no native RLS (prisma#12735).
+//
+// Vectors live in QDRANT, never Postgres. Chunk/Memory store only the Qdrant
+// pointer + embedding bookkeeping (qdrant_point_id, embedding_model_id,
+// embedding_dim, embedding_status) — no pgvector column. Document/Source carry
+// a MinIO object key for the original blob.
+//
+// Generator: Prisma 7 `prisma-client` (NOT legacy `prisma-client-js`) — required
+// so P3 can drive RLS session vars through @prisma/adapter-pg.
+//
+// PRISMA 7 NOTE: `datasource.url` is no longer allowed in the schema. The
+// connection URL (DATABASE_URL) lives in prisma.config.ts for the CLI/Migrate,
+// and the PrismaClient is constructed with a PrismaPg driver adapter at runtime
+// (api/worker P3, seed.ts here). The schema declares only the provider.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums ───────────────────────────────────────────────────────────────────
+
+/// Control plane: administration of the access system. Team membership (the
+/// AppUser.team_id FK) constrains an admin's DATA reach — team-less super-admin
+/// = global, team-bound admin = team-scoped. See docs/internal/users_roles.md.
+enum AdminLevel {
+  none // a plain user; data reach = team-bound, own-created writes
+  admin // always team-bound; manage own team's users + any memory of own team
+  superuser // independent (team-less) global admin; CRUD anything, any team
+}
+
+/// Multi-tier memory taxonomy (Phase 9, #11 — adopts LangMem's names). semantic =
+/// durable facts/knowledge (the default; most QA memories); episodic = events tied to
+/// a session; procedural = how-to/workflows/patterns; working = transient/scratch.
+/// Stamped server-side from source/category (default semantic), agent-overridable.
+enum MemoryTier {
+  semantic
+  episodic
+  procedural
+  working
+}
+
+/// Where a memory came from (Phase 9). Drives the rerank provenance gate: a memory's
+/// confidence is NEVER trusted without its provenance (memory-injection safety).
+enum SourceProvenance {
+  human_verified // from an explicit human source (user-correction, postmortem, confluence, heal-cycle)
+  api_return // returned by a deterministic API/tool (high trust, not human)
+  agent_inferred // the agent inferred it (gotcha-discovered, test-failure) — lowest trust, down-ranked
+}
+
+enum EmbeddingStatus {
+  pending // chunk/memory text exists; vector not yet uploaded (client-managed embeddings backfill)
+  embedded // vector present in Qdrant
+}
+
+/// Control-plane model dependency state. Failures are classified as either
+/// transiently `degraded` or action-blocking `unhealthy`; an absent observation
+/// is surfaced as `unknown` by the API without writing a row.
+enum ModelDependencyHealthState {
+  healthy
+  degraded
+  unhealthy
+  unknown
+}
+
+/// Embedding topology (Phase 9 System Settings). DB value `client_bridge` maps to
+/// the GET /config wire string `client-bridge` (Prisma enum values can't contain
+/// a hyphen). `server` = server-managed embeddings (server-side embedder); `client_bridge` = client-managed embeddings
+/// (each MCP bridges to its local Ollama at the pinned model).
+enum EmbeddingMode {
+  server
+  client_bridge
+}
+
+enum IngestStatus {
+  queued
+  extracting
+  embedding
+  completed
+  failed
+}
+
+/// Graphiti add_episode outcome for an ingest job, tracked SEPARATELY from the
+/// overall IngestStatus. Step 6 of the pipeline is best-effort: the job is still
+/// marked `completed` even when the episode write fails, so this field is the
+/// ONLY way to detect the "in Qdrant but not the graph" partial state (issue #9).
+/// Re-running graph-missing documents is not handled by the memory graph backfill;
+/// this status keeps the partial state queryable for a future document retry path.
+enum GraphStatus {
+  pending // job created; the episode write has not been attempted yet
+  ok // add_episode succeeded
+  failed // add_episode threw (best-effort; the job still completes — re-run in P5)
+  skipped // graph disabled / not configured — episode intentionally not attempted
+}
+
+/// The surface that owns a named project's memories. Project bindings live on
+/// the Personal stack; `general` is deliberately never persisted as Shared.
+enum MemorySurface {
+  personal
+  shared
+}
+
+/// The authoritative row represented by a Graphiti episode.
+enum GraphSubjectKind {
+  memory
+  document
+}
+
+/// A durable Graphiti lifecycle command. `replace` preserves the old episode
+/// until the worker has removed it and can safely write the replacement.
+enum GraphLifecycleOperationKind {
+  remove
+  replace
+}
+
+enum GraphLifecycleStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+/// Resumable installer/update migration states for graph v2 partitions.
+enum GraphMigrationState {
+  snapshot_confirmed
+  v2_rebuild_running
+  v2_rebuild_validating
+  legacy_cleanup_running
+  complete
+  failed
+}
+
+enum DashboardLoginMode {
+  password
+  sso
+}
+
+enum SourceKind {
+  document
+  memory
+  conversation
+}
+
+/// Closed set of agent-memory shapes (Shape A–E from the mem0 protocol).
+enum MemoryShape {
+  gotcha_fix // Shape A
+  user_correction // Shape B
+  tool_gap // Shape C
+  prd // Shape D
+  atomic // Shape E
+}
+
+// ============================================================================
+// CONTROL PLANE — NOT team-partitioned, NO RLS (guarded at API by admin_level)
+// ============================================================================
+
+model Team {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Control-plane relations
+  members        AppUser[]
+  grantsGiven    TeamGrant[] @relation("GrantorTeam")
+  grantsReceived TeamGrant[] @relation("GranteeTeam")
+  localIdentity  LocalIdentity?
+
+  // Data-plane back-relations (the data tables own the FK side)
+  sources            Source[]
+  documents          Document[]
+  chunks             Chunk[]
+  entities           Entity[]
+  claims             Claim[]
+  relationships      Relationship[]
+  investigations     Investigation[]
+  investigationLinks InvestigationLink[]
+  ingestJobs         IngestJob[]
+  memories           Memory[]
+  securityAlerts     SecurityAlert[]
+  notifySettings     NotifySettings?
+  browserPushSubscriptions BrowserPushSubscription[]
+  graphLifecycleOperations GraphLifecycleOperation[]
+  graphEpisodeProvenances GraphEpisodeProvenance[]
+  graphDeletePreviews GraphDeletePreview[]
+  projectMemoryBindings ProjectMemoryBinding[]
+
+  @@map("team")
+}
+
+model AppUser {
+  id String @id @default(uuid()) @db.Uuid
+
+  // NULLABLE: a team-less user is the independent (global) super-admin. Plain
+  // members and admins are always team-bound (enforced at the admin API). FK
+  // SetNull (not Cascade): deleting a team nulls membership, never deletes the
+  // user (a super-admin who happened to join that team survives, global again).
+  teamId String? @map("team_id") @db.Uuid
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  adminLevel AdminLevel @default(none) @map("admin_level")
+
+  // Opaque token: wire = `${tokenId}.${secret}`. API splits on '.', does ONE
+  // O(1) lookup by tokenId, then ONE argon2id verify of secret vs tokenHash.
+  // Revoke = NULL the hash (user row + audit survive).
+  tokenId      String?   @unique @map("token_id")
+  tokenHash    String?   @map("token_hash") // argon2id(secret + TOKEN_PEPPER)
+  tokenExpires DateTime? @map("token_expires") // NULL = non-expiring
+  tokenIssuedAt DateTime? @map("token_issued_at") // when the current token was minted
+
+  email       String? @unique
+  displayName String? @map("display_name")
+
+  // Dashboard password. In local mode this remains the optional soft lock; in
+  // server mode it is the human login credential. MCP/API/recovery use tokenHash.
+  passwordHash      String?   @map("password_hash")
+  passwordTemporary Boolean   @default(false) @map("password_temporary")
+  passwordChangedAt DateTime? @map("password_changed_at")
+  // Profile avatar object key in MinIO (pm-evidence bucket, `avatars/<userId>`). NULL =
+  // render colored initials.
+  avatarObjectKey String? @map("avatar_object_key")
+
+  // Memories this user authored. SetNull on delete → the row becomes unauthored
+  // (only team-admins/super-admins can then mutate it; a plain member cannot).
+  memoriesCreated Memory[] @relation("MemoryCreatedBy")
+  projectMemoryBindings ProjectMemoryBinding[]
+  localIdentity  LocalIdentity?
+  browserPushSubscriptions BrowserPushSubscription[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId])
+  @@map("app_user")
+}
+
+/// Local-mode singleton: records which real DB rows represent the no-auth local
+/// user/team. The IDs are generated by Postgres/Prisma and then read back from
+/// this row; the application must not carry hardcoded local user/team UUIDs.
+model LocalIdentity {
+  id        String   @id @default("singleton")
+  teamId    String   @unique @map("team_id") @db.Uuid
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String   @unique @map("user_id") @db.Uuid
+  user      AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("local_identity")
+}
+
+/// "MOUNT" — a directional cross-team MEMORY read link (was "grant"). The grantee
+/// team **mounts** the grantor team → the grantee's MCP can read the grantor's
+/// memories (own = primary, mounted = additional). It gates **MCP memory reads
+/// ONLY** (docs/internal/users_roles.md): documents/graph are universally shared,
+/// and the dashboard reads all teams per role regardless of mounts. Read-only —
+/// writes never cross teams.
+model TeamGrant {
+  id String @id @default(uuid()) @db.Uuid
+
+  grantorTeamId String @map("grantor_team_id") @db.Uuid // source: its memories become readable
+  grantorTeam   Team   @relation("GrantorTeam", fields: [grantorTeamId], references: [id], onDelete: Cascade)
+
+  granteeTeamId String @map("grantee_team_id") @db.Uuid // reader (the team that mounts)
+  granteeTeam   Team   @relation("GranteeTeam", fields: [granteeTeamId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([grantorTeamId, granteeTeamId]) // idempotent re-mount + read-path composite
+  @@index([granteeTeamId]) // "what may team X read?" (X's mounts)
+  @@index([grantorTeamId]) // "who mounts team X?" / revoke-on-delete
+  @@map("team_grant")
+}
+
+/// CONTROL plane: runtime-tunable system config (Phase 9). EXACTLY ONE row —
+/// `id` is pinned to "singleton" by @default + a DB CHECK constraint (added in
+/// the migration; not expressible in the Prisma schema). Holds the embedding
+/// topology (server-managed embeddings "server" / client-managed embeddings "client-bridge") + the team-wide pinned
+/// embedding model/dim. NOT team-partitioned, NO RLS (like Team/AppUser/
+/// TeamGrant) — read/written via ownerPrisma; pm_app has no grant on it.
+///
+/// embeddingMode is stored as the DB enum value `client_bridge` (Prisma enum
+/// values cannot contain a hyphen); the api maps it to the wire string
+/// `client-bridge` in GET /config and the settings routes.
+///
+/// GET /config and GET /dashboard/settings BOTH fall back to the env-derived pin
+/// when this row is absent (fresh DB before the seed upsert) — they must NEVER
+/// 500 on a missing singleton.
+model SystemSettings {
+  id               String        @id @default("singleton")
+  embeddingMode    EmbeddingMode @default(server) @map("embedding_mode")
+  activeEmbedModel String        @map("active_embed_model")
+  activeEmbedDim   Int           @map("active_embed_dim")
+  // Retired retention compatibility fields. Keep for one release while existing
+  // installs receive the archive-restoration migration; product code does not read them.
+  memoryArchiveConfidenceThreshold Float @default(0.35) @map("memory_archive_confidence_threshold")
+  memoryArchiveTtlDays             Int   @default(30) @map("memory_archive_ttl_days")
+  // Embedding-model switch status (Phase 10, #5). Null = idle. While a re-embed
+  // migration runs, the api stamps {state,from,to,migrated,startedAt,finishedAt?,error?}
+  // here so the dashboard shows progress and a concurrent switch is refused.
+  embeddingSwitch                 Json?    @map("embedding_switch")
+  // Fact extraction (Memory Shape gate) — dashboard-configurable, persisted with
+  // the singleton so model/API-key changes survive safe redeploys. The API returns
+  // only masked keys; raw keys are owner-only control data.
+  factExtractionProvider          String   @default("anthropic") @map("fact_extraction_provider")
+  factExtractionModel             String   @default("claude-haiku-4-5-20251001") @map("fact_extraction_model")
+  factExtractionAnthropicApiKey   String?  @map("fact_extraction_anthropic_api_key")
+  factExtractionOpenaiApiKey      String?  @map("fact_extraction_openai_api_key")
+  dashboardLoginMode              DashboardLoginMode @default(password) @map("dashboard_login_mode")
+  // V1 local-dashboard connector to one shared-memory server. The raw token is
+  // write-only in dashboard responses; server-side dashboard actions can use it
+  // to proxy Shared Memory API calls.
+  mcpSessionIdleTimeoutSeconds   Int      @default(900) @map("mcp_session_idle_timeout_seconds")
+  sharedMemoryApiUrl              String?  @map("shared_memory_api_url")
+  sharedMemoryToken               String?  @map("shared_memory_token")
+  sharedMemoryConnectedAt         DateTime? @map("shared_memory_connected_at")
+  sharedMemoryCheckedAt           DateTime? @map("shared_memory_checked_at")
+  sharedMemoryRemoteConfig        Json?    @map("shared_memory_remote_config")
+  sharedMemoryRemoteIdentity      Json?    @map("shared_memory_remote_identity")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+  updatedById                     String?  @map("updated_by_id") @db.Uuid // audit: which superuser; no FK (decoupled)
+
+  @@map("system_settings")
+}
+
+/// CONTROL plane: model-usage metrics — hourly rollups (operational, admin-only).
+/// One row per (hour, service, model, actor) with token + request counters for the
+/// dashboard Usage page. actorId is either a real AppUser id or "system" for
+/// background/internal usage. NOT team-partitioned, NO RLS — read/written ONLY via
+/// ownerPrisma (admin-gated at the API). It is created by the owner AFTER
+/// rls.sql's ALTER DEFAULT PRIVILEGES, so rls.sql REVOKEs the inherited pm_app
+/// grant (a control table pm_app must never touch). 90-day retention is swept by
+/// the worker. `id` is a surrogate BIGSERIAL; upserts target the unique tuple.
+model ModelUsageRollup {
+  id        BigInt   @id @default(autoincrement())
+  hourUtc   DateTime @map("hour_utc")
+  service   String
+  model     String
+  actorId   String   @default("system") @map("actor_id")
+  tokensIn  BigInt   @default(0) @map("tokens_in")
+  tokensOut BigInt   @default(0) @map("tokens_out")
+  requests  Int      @default(0)
+
+  @@unique([hourUtc, service, model, actorId])
+  @@index([hourUtc])
+  @@index([service, model])
+  @@index([actorId])
+  @@map("model_usage_rollup")
+}
+
+/// CONTROL plane (owner-only): one correlated Graphiti operation observation.
+/// It records usage without storing memory/document content and is the source
+/// for measuring project-partition savings before aggregating into rollups.
+model GraphUsageEvent {
+  id           BigInt   @id @default(autoincrement())
+  operationId  String   @map("operation_id")
+  subjectKind  GraphSubjectKind @map("subject_kind")
+  subjectId    String   @map("subject_id") @db.Uuid
+  teamId       String   @map("team_id") @db.Uuid
+  project      String
+  graphGroupId String   @map("graph_group_id")
+  stage        String
+  model        String?
+  tokensIn     BigInt   @default(0) @map("tokens_in")
+  tokensOut    BigInt   @default(0) @map("tokens_out")
+  durationMs   Int?     @map("duration_ms")
+  success      Boolean
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([operationId])
+  @@index([subjectKind, subjectId])
+  @@index([teamId, project, createdAt])
+  @@map("graph_usage_event")
+}
+
+/// CONTROL plane (owner-only): durable state of the updater's graph-v2
+/// rebuild/validation/legacy-cleanup lifecycle. The installer creates or resumes
+/// the single named run; its metrics are safe aggregate counts only.
+model GraphMigrationRun {
+  id          String              @id @default(uuid()) @db.Uuid
+  version     String              @unique
+  state       GraphMigrationState
+  snapshotId  String?             @map("snapshot_id")
+  metrics     Json?
+  lastError   String?             @map("last_error")
+  startedAt   DateTime            @default(now()) @map("started_at")
+  completedAt DateTime?           @map("completed_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("graph_migration_run")
+}
+
+/// CONTROL plane: one safe, durable observation per logical model dependency
+/// and observer scope. `observerScope` isolates client-managed dependencies so
+/// one local Ollama cannot mark every client unhealthy. This table contains
+/// canonical/redacted diagnostics only; no raw provider response or credential
+/// may be persisted. It is owner-only like ModelUsageRollup.
+model ModelDependencyHealth {
+  capability          String                     @map("capability")
+  observerScope       String                     @map("observer_scope")
+  state               ModelDependencyHealthState @default(healthy)
+  provider            String?
+  model               String?
+  lastSuccessAt       DateTime?                  @map("last_success_at")
+  firstFailureAt      DateTime?                  @map("first_failure_at")
+  lastFailureAt       DateTime?                  @map("last_failure_at")
+  failureCode         String?                    @map("failure_code")
+  safeMessage         String?                    @map("safe_message")
+  retryable           Boolean?
+  consecutiveFailures Int                        @default(0) @map("consecutive_failures")
+  observedAt          DateTime                   @map("observed_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+
+  @@id([capability, observerScope])
+  @@index([observedAt])
+  @@index([state])
+  @@map("model_dependency_health")
+}
+
+/// CONTROL plane: the managed scheduled-job registry — one row per code-registered
+/// background job (e.g. "usage-sweep"). The row is the DURABLE source of truth for
+/// the schedule (`cron`) + `enabled` flag; BullMQ job-schedulers (in Redis) drive
+/// the actual ticks and are reconciled to these rows on worker boot AND on every
+/// dashboard mutation. The remaining columns are run telemetry the worker stamps
+/// each run (status/lastRun/duration/error/logTail). NOT team-partitioned, NO RLS
+/// — read/written ONLY via ownerPrisma (admin-gated at the API), like
+/// system_settings / model_usage_rollup. Created by the owner AFTER rls.sql's ALTER
+/// DEFAULT PRIVILEGES, so rls.sql REVOKEs the inherited pm_app grant. `name` is the
+/// natural key (== the code registry key). Next-run time is read live from BullMQ,
+/// not stored here.
+model ScheduledJob {
+  name           String    @id // registry key, e.g. "usage-sweep"
+  cron           String // cron pattern (BullMQ repeat.pattern), e.g. "0 3 * * *"
+  enabled        Boolean   @default(true)
+  status         String    @default("idle") // idle | running | success | failed
+  lastRunAt      DateTime? @map("last_run_at")
+  lastFinishAt   DateTime? @map("last_finish_at")
+  lastDurationMs Int?      @map("last_duration_ms")
+  lastError      String?   @map("last_error")
+  logTail        String?   @map("log_tail") // last run's short summary (truncated)
+  errorCount     Int       @default(0) @map("error_count")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("scheduled_job")
+}
+
+// ============================================================================
+// DATA PLANE — team-partitioned; RLS (ENABLE + FORCE) applied via layers/core/schema/rls.sql
+// ============================================================================
+
+model Source {
+  id             String     @id @default(uuid()) @db.Uuid
+  teamId         String     @map("team_id") @db.Uuid
+  team           Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project        String     @default("general")
+  kind           SourceKind @default(document)
+  title          String?
+  uri            String?
+  minioObjectKey String?    @map("minio_object_key")
+  sessionId      String?    @map("session_id")
+  metadata       Json?
+
+  documents  Document[]
+  ingestJobs IngestJob[]
+  memories   Memory[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, kind])
+  @@index([sessionId])
+  @@map("source")
+}
+
+model Document {
+  id             String  @id @default(uuid()) @db.Uuid
+  teamId         String  @map("team_id") @db.Uuid
+  team           Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project        String  @default("general")
+  sourceId       String  @map("source_id") @db.Uuid
+  source         Source  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  title          String?
+  // Phase 11 (#6) document lifecycle. `filename` is the RAW upload filename — the
+  // stable logical-document identity within (teamId, project) that re-uploads dedup
+  // against (distinct from `title`, which the user can override). `contentHash` is
+  // sha256 of the normalized extracted text, set by the worker; a re-ingest whose
+  // hash is unchanged is skipped, a changed hash bumps `versionNumber` IN PLACE
+  // (stale content is superseded, not kept as a version chain — a search corpus
+  // wants the current version only).
+  filename       String? @map("filename")
+  contentHash    String? @map("content_hash")
+  versionNumber  Int     @default(1) @map("version_number")
+  mimeType       String? @map("mime_type")
+  minioObjectKey String? @map("minio_object_key")
+  pageCount      Int?    @map("page_count")
+  metadata       Json?
+  // Durable Graphiti provenance for the current document episode. The worker
+  // stamps these only after the Graphiti write succeeds.
+  graphGroupId   String? @map("graph_group_id")
+  graphEpisodeId String? @map("graph_episode_id")
+
+  chunks   Chunk[]
+  claims   Claim[]
+  entities Entity[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([graphGroupId])
+  @@index([sourceId])
+  // Dedup identity: re-uploads keyed by (team, project, filename) find the prior doc.
+  // UNIQUE (not just an index) so a concurrent first-upload race CANNOT create two
+  // logical docs — the DB rejects the second insert (P2002 → the api returns 409).
+  // Nullable `filename` (pre-P11 rows) is exempt: Postgres treats NULLs as distinct.
+  @@unique([teamId, project, filename])
+  @@map("document")
+}
+
+model Chunk {
+  // NO vector column — vectors live in Qdrant.
+  id               String          @id @default(uuid()) @db.Uuid
+  teamId           String          @map("team_id") @db.Uuid
+  team             Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project          String          @default("general")
+  documentId       String          @map("document_id") @db.Uuid
+  document         Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  ordinal          Int
+  content          String
+  tokenCount       Int?            @map("token_count")
+  qdrantPointId    String?         @map("qdrant_point_id") @db.Uuid
+  embeddingModelId String?         @map("embedding_model_id")
+  embeddingDim     Int?            @map("embedding_dim")
+  embeddingStatus  EmbeddingStatus @default(pending) @map("embedding_status")
+
+  // DLP scan cursor (Phase 8) — see Memory.piiScannedAt.
+  piiScannedAt DateTime? @map("pii_scanned_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([documentId, ordinal])
+  @@index([teamId, project])
+  @@index([teamId, embeddingStatus])
+  @@index([qdrantPointId])
+  @@index([piiScannedAt])
+  @@map("chunk")
+}
+
+model Entity {
+  id         String    @id @default(uuid()) @db.Uuid
+  teamId     String    @map("team_id") @db.Uuid
+  team       Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project    String    @default("general")
+  documentId String?   @map("document_id") @db.Uuid
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  name       String
+  entityType String    @map("entity_type")
+  metadata   Json?
+
+  relationshipsFrom Relationship[] @relation("RelationshipSubject")
+  relationshipsTo   Relationship[] @relation("RelationshipObject")
+  claims            Claim[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, name])
+  @@index([documentId])
+  @@map("entity")
+}
+
+model Claim {
+  id              String    @id @default(uuid()) @db.Uuid
+  teamId          String    @map("team_id") @db.Uuid
+  team            Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project         String    @default("general")
+  documentId      String?   @map("document_id") @db.Uuid
+  document        Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  subjectEntityId String?   @map("subject_entity_id") @db.Uuid
+  subjectEntity   Entity?   @relation(fields: [subjectEntityId], references: [id], onDelete: SetNull)
+  statement       String
+  validAt         DateTime? @map("valid_at")
+  invalidAt       DateTime? @map("invalid_at")
+  confidence      Float?
+  metadata        Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, validAt])
+  @@index([teamId, invalidAt])
+  @@index([subjectEntityId])
+  @@index([documentId])
+  @@map("claim")
+}
+
+model Relationship {
+  id              String    @id @default(uuid()) @db.Uuid
+  teamId          String    @map("team_id") @db.Uuid
+  team            Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project         String    @default("general")
+  subjectEntityId String    @map("subject_entity_id") @db.Uuid
+  subjectEntity   Entity    @relation("RelationshipSubject", fields: [subjectEntityId], references: [id], onDelete: Cascade)
+  objectEntityId  String    @map("object_entity_id") @db.Uuid
+  objectEntity    Entity    @relation("RelationshipObject", fields: [objectEntityId], references: [id], onDelete: Cascade)
+  predicate       String
+  validAt         DateTime? @map("valid_at")
+  invalidAt       DateTime? @map("invalid_at")
+  metadata        Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([subjectEntityId])
+  @@index([objectEntityId])
+  @@index([teamId, predicate])
+  @@map("relationship")
+}
+
+model Investigation {
+  id          String  @id @default(uuid()) @db.Uuid
+  teamId      String  @map("team_id") @db.Uuid
+  team        Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project     String  @default("general")
+  title       String
+  description String?
+  status      String  @default("open")
+  sessionId   String? @map("session_id")
+  metadata    Json?
+
+  links InvestigationLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, status])
+  @@map("investigation")
+}
+
+model InvestigationLink {
+  // Polymorphic edge (target_type, target_id) — links heterogeneous targets
+  // without a per-type FK column.
+  id              String        @id @default(uuid()) @db.Uuid
+  teamId          String        @map("team_id") @db.Uuid
+  team            Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project         String        @default("general")
+  investigationId String        @map("investigation_id") @db.Uuid
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  targetType      String        @map("target_type")
+  targetId        String        @map("target_id") @db.Uuid
+  note            String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([investigationId, targetType, targetId])
+  @@index([teamId, project])
+  @@index([targetType, targetId])
+  @@map("investigation_link")
+}
+
+model IngestJob {
+  id        String       @id @default(uuid()) @db.Uuid
+  teamId    String       @map("team_id") @db.Uuid
+  team      Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project   String       @default("general")
+  sourceId  String?      @map("source_id") @db.Uuid
+  source    Source?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  bullJobId String?      @map("bull_job_id")
+  status    IngestStatus @default(queued)
+  // Graphiti add_episode outcome, tracked independently of `status` (step 6 is
+  // best-effort, so `status` reaches `completed` even on a graph failure). This
+  // makes the "in Qdrant but not the graph" partial state QUERYABLE (issue #9).
+  graphStatus GraphStatus @default(pending) @map("graph_status")
+  sessionId String?      @map("session_id")
+  error     String?
+  attempts  Int          @default(0)
+  metadata  Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, status])
+  @@index([sourceId])
+  @@map("ingest_job")
+}
+
+model Memory {
+  // Agent text-memory, TEAM-scoped, passes the Shape gate at write time.
+  id               String          @id @default(uuid()) @db.Uuid
+  teamId           String          @map("team_id") @db.Uuid
+  team             Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project          String          @default("general")
+  sourceId         String?         @map("source_id") @db.Uuid
+  source           Source?         @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  content          String
+  category         String // free-form (open mem0 vocabulary)
+  shape            MemoryShape // closed enum A–E
+  entities         String[] // Postgres text[]
+  sessionId        String?         @map("session_id")
+  qdrantPointId    String?         @map("qdrant_point_id") @db.Uuid
+  embeddingModelId String?         @map("embedding_model_id")
+  embeddingDim     Int?            @map("embedding_dim")
+  embeddingStatus  EmbeddingStatus @default(pending) @map("embedding_status")
+  // Graphiti episode sync outcome for this memory. New/edited/imported content
+  // starts pending, the inline best-effort write flips to ok on success, and the
+  // scheduled memory-graph-backfill retries pending/failed rows.
+  graphStatus      GraphStatus     @default(pending) @map("graph_status")
+  // Optimistic version for graph content/project only. Metadata, session, access,
+  // and vector bookkeeping must not invalidate an in-flight graph stamp.
+  graphVersion     DateTime        @default(now()) @map("graph_version")
+  graphSyncedAt    DateTime?       @map("graph_synced_at")
+  graphError       String?         @map("graph_error")
+  // Exact Graphiti provenance. `graphEpisodeId` is the only supported deletion
+  // target; the old deterministic name is not sufficient to heal derived facts.
+  graphGroupId     String?         @map("graph_group_id")
+  graphEpisodeId   String?         @map("graph_episode_id")
+  metadata         Json?
+
+  // Author (server-stamped from the token on create/import/migrate). Drives the
+  // RLS ownership floor: a plain member may only edit/delete rows they created;
+  // a NULL author (legacy/migrated/worker rows) is mutable only by team-admins
+  // and super-admins. SetNull on user delete.
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdBy   AppUser? @relation("MemoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // DLP scan cursor (Phase 8): when the pii-scan job last checked this row. NULL =
+  // never scanned. The scan skips rows where piiScannedAt >= updatedAt (idempotent +
+  // re-scans edits) — the write-gate is the primary guard; this is the safety net.
+  piiScannedAt DateTime? @map("pii_scanned_at")
+
+  // ── Provenance / multi-tier (Phase 9, #11) ─────────────────────────────────
+  // Stamped server-side on write (tier/provenance from source; confidence from the
+  // LLM verdict). These drive the retrieval rerank (provenance × confidence).
+  memoryTier       MemoryTier       @default(semantic) @map("memory_tier")
+  sourceProvenance SourceProvenance @default(agent_inferred) @map("source_provenance")
+  confidence       Float            @default(0.6) // 0..1; LLM-rated, default per provenance
+  evidenceGap      Json?            @map("evidence_gap") // notes on missing/ambiguous evidence
+  // Reinforcement-on-access: bumped on every MCP retrieval so recency reflects use.
+  lastAccessedAt DateTime? @map("last_accessed_at")
+  accessCount    Int       @default(0) @map("access_count")
+  // Retired compatibility marker. The 0026 migration clears prior automatic values;
+  // current retrieval deliberately ignores it until a separately approved cleanup.
+  archivedAt DateTime? @map("archived_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  // User-visible record time. Unlike updatedAt, internal embedding, graph,
+  // access, and safety bookkeeping must never advance this value.
+  recordUpdatedAt DateTime @default(now()) @map("record_updated_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, category])
+  @@index([teamId, embeddingStatus])
+  @@index([teamId, graphStatus])
+  @@index([graphGroupId])
+  @@index([entities], type: Gin)
+  @@index([sessionId])
+  @@index([qdrantPointId])
+  @@index([createdById])
+  @@index([piiScannedAt])
+  @@index([teamId, archivedAt])
+  @@index([teamId, project, createdAt])
+  @@index([teamId, project, recordUpdatedAt])
+  @@index([teamId, project, lastAccessedAt])
+  @@map("memory")
+}
+
+/// DATA plane (RLS): a Personal-stack binding from an authenticated user and a
+/// named project to one memory surface. `general` is resolved directly to
+/// Personal by the MCP and never needs a Shared binding.
+model ProjectMemoryBinding {
+  id        String        @id @default(uuid()) @db.Uuid
+  teamId    String        @map("team_id") @db.Uuid
+  team      Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String        @map("user_id") @db.Uuid
+  user      AppUser       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   String
+  surface   MemorySurface
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  @@unique([userId, project])
+  @@index([teamId, project])
+  @@map("project_memory_binding")
+}
+
+/// DATA plane (RLS): idempotent, retryable graph lifecycle work. It deliberately
+/// stores subject IDs without foreign keys because a hard-deleted Memory/Document
+/// must leave its remove command available for the worker to finish.
+model GraphLifecycleOperation {
+  id          String                      @id @default(uuid()) @db.Uuid
+  teamId      String                      @map("team_id") @db.Uuid
+  team        Team                        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project     String
+  subjectKind GraphSubjectKind            @map("subject_kind")
+  subjectId   String                      @map("subject_id") @db.Uuid
+  operation   GraphLifecycleOperationKind
+  graphGroupId String                     @map("graph_group_id")
+  graphEpisodeId String                   @map("graph_episode_id")
+  status      GraphLifecycleStatus        @default(pending)
+  attempts    Int                         @default(0)
+  lastError   String?                     @map("last_error")
+  requestedAt DateTime                    @default(now()) @map("requested_at")
+  completedAt DateTime?                   @map("completed_at")
+  updatedAt   DateTime                    @updatedAt @map("updated_at")
+
+  @@unique([operation, graphGroupId, graphEpisodeId])
+  @@index([status, requestedAt])
+  @@index([teamId, project])
+  @@index([subjectKind, subjectId])
+  @@map("graph_lifecycle_operation")
+}
+
+/// DATA plane (RLS): every Graphiti episode ever written for one Memory or
+/// Document. The subject row keeps the current episode for fast reads; this
+/// append-only provenance is the deletion source of truth so an edit cannot
+/// orphan an older primary episode.
+model GraphEpisodeProvenance {
+  id          String           @id @default(uuid()) @db.Uuid
+  teamId      String           @map("team_id") @db.Uuid
+  team        Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project     String
+  subjectKind GraphSubjectKind @map("subject_kind")
+  subjectId   String           @map("subject_id") @db.Uuid
+  graphGroupId String          @map("graph_group_id")
+  graphEpisodeId String        @map("graph_episode_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@unique([graphGroupId, graphEpisodeId])
+  @@index([subjectKind, subjectId])
+  @@index([teamId, project])
+  @@map("graph_episode_provenance")
+}
+
+/// DATA plane (RLS): short-lived, single-use admin confirmation for one
+/// dashboard deletion. The API rechecks the row timestamp and live Graphiti
+/// impact before consuming it, so a stale or replayed preview cannot authorize a
+/// cascade.
+model GraphDeletePreview {
+  id          String           @id @default(uuid()) @db.Uuid
+  token       String           @unique
+  teamId      String           @map("team_id") @db.Uuid
+  team        Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  requestedById String         @map("requested_by_id") @db.Uuid
+  subjectKind GraphSubjectKind @map("subject_kind")
+  subjectId   String           @map("subject_id") @db.Uuid
+  subjectUpdatedAt DateTime    @map("subject_updated_at")
+  episodes    Json
+  impact      Json
+  expiresAt   DateTime         @map("expires_at")
+  consumedAt  DateTime?        @map("consumed_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@index([subjectKind, subjectId])
+  @@index([teamId, expiresAt])
+  @@map("graph_delete_preview")
+}
+
+/// DATA plane (RLS): a PII/secret finding raised by the DLP layer (Phase 8, #10).
+/// Written by the api write-gate's deeper scans and the worker (document ingest
+/// block + the `pii-scan` scheduled job) via the global-admin RLS path. READS are
+/// NOT universal (unlike the shared evidence tables): a finding reveals that a
+/// specific team holds sensitive data, so read is own-team OR global super-admin
+/// only (rls.sql §5b). Findings are stored REDACTED — never the raw secret/PII
+/// value (Presidio returns type+offset; gitleaks runs with --redact).
+model SecurityAlert {
+  id          String   @id @default(uuid()) @db.Uuid
+  teamId      String   @map("team_id") @db.Uuid
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project     String   @default("general")
+  // What triggered it. No FK — the offending row may be purged; the alert persists.
+  sourceKind  String   @map("source_kind") // 'memory' | 'chunk' | 'ingest'
+  rowId       String?  @map("row_id") @db.Uuid
+  detector    String // 'presidio' | 'gitleaks'
+  findingType String   @map("finding_type") // e.g. 'US_SSN', 'aws-access-token'
+  severity    String   @default("high") // 'low' | 'medium' | 'high'
+  redactedExcerpt String? @map("redacted_excerpt") // REDACTED context, never the raw value
+  count       Int      @default(1) // findings of this type in the row
+  resolved    Boolean  @default(false)
+  resolvedAt  DateTime? @map("resolved_at")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId, project])
+  @@index([teamId, severity])
+  @@index([teamId, resolved])
+  @@index([rowId])
+  @@map("security_alert")
+}
+
+/// CONTROL plane (NO RLS — owner-only via ownerPrisma, REVOKE pm_app in rls.sql):
+/// per-team notification routing for security alerts (Phase 8, #10). One row per
+/// team (team-admins edit their own) PLUS a GLOBAL row with teamId NULL that the
+/// super-admin edits so the support team is alerted on findings ACROSS ALL teams.
+/// @unique on the nullable teamId gives one row per team (Postgres NULLs are
+/// distinct, so the single global row is enforced by the admin API upsert, not the
+/// DB). Per-team recipients + Slack webhook live here; the SMTP RELAY credentials
+/// (host/user/pass) stay in env (never a secret in the DB).
+model NotifySettings {
+  id              String   @id @default(uuid()) @db.Uuid
+  teamId          String?  @unique @map("team_id") @db.Uuid
+  team            Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  enabled         Boolean  @default(false) // OFF until configured (P1) — inert before that anyway
+  emailRecipients String[] @default([]) @map("email_recipients") // Postgres text[]
+  slackWebhookUrl String?  @map("slack_webhook_url")
+  // Slack BOT delivery (alternative to the incoming webhook): a bot token (xoxb-…, a
+  // SECRET — NEVER returned by GET) + the channel ids it posts alerts to. When a token
+  // AND ≥1 channel are set the worker uses chat.postMessage per channel; else it falls
+  // back to slackWebhookUrl.
+  slackBotToken   String?  @map("slack_bot_token")
+  slackChannelIds String[] @default([]) @map("slack_channel_ids")
+  minSeverity     String   @default("high") @map("min_severity") // 'low' | 'medium' | 'high'
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("notify_settings")
+}
+
+/// CONTROL plane (NO RLS — owner-only via ownerPrisma): durable Web Push VAPID
+/// keys for the local personal dashboard. The public key is safe to expose to the
+/// browser; the private key stays server-side and signs Web Push requests.
+model BrowserPushConfig {
+  id         String   @id @default("singleton")
+  publicKey  String   @map("public_key")
+  privateKey String   @map("private_key")
+  subject    String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("browser_push_config")
+}
+
+/// CONTROL plane (NO RLS — owner-only via ownerPrisma): browser Push API
+/// subscriptions for local personal Chrome/browser notifications. The endpoint
+/// and keys are the PushSubscription material needed by the Web Push protocol.
+model BrowserPushSubscription {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String?  @map("user_id") @db.Uuid
+  user              AppUser? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId            String?  @map("team_id") @db.Uuid
+  team              Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  endpoint          String   @unique
+  p256dh            String
+  auth              String
+  enabled           Boolean  @default(true)
+  notificationTypes String[] @default([]) @map("notification_types")
+  userAgent         String?  @map("user_agent")
+  lastSeenAt        DateTime @default(now()) @map("last_seen_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([teamId])
+  @@index([userId])
+  @@map("browser_push_subscription")
+}

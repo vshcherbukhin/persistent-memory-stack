@@ -1,0 +1,29 @@
+{
+  // Shared compiler baseline for the persistent-memory workspace.
+  //
+  // packages/shared/, packages/db/, api/, worker/, and mcp/ extend this. It
+  // carries the strict/ESM/NodeNext settings that were previously duplicated in
+  // app tsconfigs. Each workspace keeps only the options that depend on its
+  // on-disk layout:
+  //   • packages/shared — composite + declaration + rootDir:"src".
+  //   • packages/db     — composite + declaration + repo-root rootDir because it
+  //                       owns the generated Prisma client import.
+  //   • apps/*          — app-local rootDir:"src" and built-package references.
+  // Those package-specific options live in each package's own tsconfig, never
+  // here — see the comment blocks there.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "types": ["node"]
+  }
+}

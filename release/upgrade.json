@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "release": "4.0.36",
+  "minimumSupportedSource": "4.0.24",
+  "compatibleMajorLine": 4,
+  "directFrom": ">=4.0.24 <4.0.37",
+  "bridges": [],
+  "requiredStops": [],
+  "coordinator": {
+    "minimumVersion": 1,
+    "bootstrap": true
+  }
+}

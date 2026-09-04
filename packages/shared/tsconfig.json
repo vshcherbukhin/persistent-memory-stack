@@ -1,0 +1,33 @@
+{
+  // @pm/shared — composite library build.
+  //
+  // composite + declaration are REQUIRED so api can consume this as a project
+  // reference (`tsc -b` builds packages/shared/dist + .d.ts before api type-checks) and
+  // import it by bare specifier `@pm/shared` resolved through the package
+  // `exports` map → ./dist/index.js + ./dist/index.d.ts.
+  //
+  // rootDir:"src" is LEGAL here (unlike packages/db) because shared contains ONLY src/
+  // — no out-of-tree generated-client sibling. So dist/ mirrors
+  // src/ exactly (dist/index.js, dist/embeddings/index.js, ...), matching the
+  // exports map. Do NOT consume this package by tsconfig path-alias into
+  // packages/shared/src from api: that would add a second source root to the api program
+  // and revive TS6059 + the ESM-emit break P3 fought. Built-package-via-exports
+  // is the only safe consumption.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // Source uses explicit `.ts` import specifiers (uniform with the api style).
+    // rewriteRelativeImportExtensions rewrites them to `.js` on EMIT — in BOTH
+    // the .js output and the .d.ts — so the published package + its types are
+    // valid Node ESM. Without this pair, tsc rejects the `.ts` specifiers
+    // (TS5097) when emitting.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

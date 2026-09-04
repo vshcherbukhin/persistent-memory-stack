@@ -1,0 +1,50 @@
+site_name: PM Management Documentation
+site_description: Product, operator, and architecture documentation for persistent-memory.
+docs_dir: documentation
+site_dir: .local/generated-docs/site
+strict: true
+exclude_docs: |
+  readme.md
+  node_modules/
+  package.json
+  package-lock.json
+  requirements.txt
+use_directory_urls: false
+theme:
+  name: material
+  custom_dir: documentation/overrides
+  logo: assets/images/pm-logo.svg
+  favicon: assets/images/pm-logo.svg
+  font: false
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.highlight
+    - search.suggest
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: pm-mermaid-source
+          format: !!python/name:pymdownx.superfences.fence_code_format
+extra_css:
+  - stylesheets/material-icons-outlined.css
+  - stylesheets/pm-management.css
+extra:
+  docs_version: 0.2.8

@@ -1,0 +1,30 @@
+# Keep local secrets, backups, and generated runtime state out of Docker build
+# contexts. Several images build from the repository root via
+# deploy/compose/docker-compose.yml.
+.git
+.gitignore
+.DS_Store
+
+node_modules/
+**/node_modules/
+generated/
+**/.next/
+apps/onboard/web/dist/
+layers/core/tools/dist/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+
+.env
+.env.*
+!.env.persistent-memory.example
+.env.persistent-memory
+.local/
+docs/internal/
+documentation/storybook/
+scratchpad/
+
+*.log
+*-state.json
+snapshots/migrate-report-*.json
+layers/core/tools/migrate-report-*.json

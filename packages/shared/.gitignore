@@ -1,0 +1,5 @@
+# Compiled output + incremental build info — regenerable, never commit.
+/dist/
+*.tsbuildinfo
+# Local install (deps hoist to the workspace root).
+/node_modules/

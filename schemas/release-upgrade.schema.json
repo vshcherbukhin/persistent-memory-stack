@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://persistent-memory.local/schemas/release-upgrade.schema.json",
+  "title": "Persistent Memory release upgrade contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "release",
+    "minimumSupportedSource",
+    "compatibleMajorLine",
+    "directFrom",
+    "bridges",
+    "requiredStops",
+    "coordinator"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "release": { "$ref": "#/$defs/version" },
+    "minimumSupportedSource": { "$ref": "#/$defs/version" },
+    "compatibleMajorLine": { "type": "integer", "minimum": 0 },
+    "directFrom": { "$ref": "#/$defs/range" },
+    "bridges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bridge" }
+    },
+    "requiredStops": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requiredStop" }
+    },
+    "coordinator": { "$ref": "#/$defs/coordinator" }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "range": { "type": "string", "minLength": 1 },
+    "bridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "requires", "reason"],
+      "properties": {
+        "from": { "$ref": "#/$defs/range" },
+        "to": { "$ref": "#/$defs/version" },
+        "requires": { "$ref": "#/$defs/range" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "requiredStop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "release", "reason"],
+      "properties": {
+        "when": { "$ref": "#/$defs/range" },
+        "release": { "$ref": "#/$defs/version" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "coordinator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumVersion", "bootstrap"],
+      "properties": {
+        "minimumVersion": { "type": "integer", "minimum": 1 },
+        "bootstrap": { "type": "boolean" }
+      }
+    }
+  }
+}

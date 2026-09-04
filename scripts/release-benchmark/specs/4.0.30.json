@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "release": "4.0.30",
+  "description": "Required release capability gates for the 4.0.30 System Health Report.",
+  "gates": [
+    { "id": "graph.named-project-scope", "expected": "Direct graph reads require named projects and named multi-project results retain project/surface/relation labels.", "proofType": "deterministic-contract" },
+    { "id": "graph.personal-general", "expected": "A non-project session resolves only to Personal general at the MCP boundary.", "proofType": "deterministic-contract" },
+    { "id": "recall.graph-picture", "expected": "Recall returns semantic memories, graph facts, entity expansion, timeline, contradictions, and follow-up identifiers.", "proofType": "measured-full-stack" },
+    { "id": "retrieval.relevance", "expected": "The fixed recall matrix returns the expected project-scoped semantic evidence for every query category.", "proofType": "measured-full-stack" },
+    { "id": "retrieval.multi-hop-context", "expected": "Entity expansion and graph facts connect the requested multi-hop project context.", "proofType": "measured-full-stack" },
+    { "id": "retrieval.duplicate-occupancy", "expected": "Top-k duplicate occupancy is measured and reported without automatic deduplication.", "proofType": "measured-full-stack" },
+    { "id": "retrieval.distractor-noise", "expected": "Similar-name distractors and unrelated facts are measured for recall noise without crossing the named project boundary.", "proofType": "measured-full-stack" },
+    { "id": "recall.cross-project-isolation", "expected": "A similarly named cross-project distractor cannot appear in a named-project recall.", "proofType": "measured-full-stack" },
+    { "id": "graph.temporal-history", "expected": "Recall distinguishes current facts from timeline and contradiction/supersession history.", "proofType": "measured-full-stack" },
+    { "id": "memory.add-update-provenance", "expected": "Memory add and update reach a stamped graph provenance state without a stale-version orphan.", "proofType": "measured-full-stack" },
+    { "id": "memory.delete-lifecycle", "expected": "Authorised non-primary deletion removes derived vector/episode/facts after lifecycle convergence.", "proofType": "measured-full-stack" },
+    { "id": "memory.primary-delete-guard", "expected": "Agent primary deletion is rejected; authorised dashboard deletion requires current impact confirmation.", "proofType": "deterministic-contract" },
+    { "id": "memory.verification-retired", "expected": "The retired verification control and score-driven archival path cannot act as a hidden trust or deletion bypass.", "proofType": "deterministic-contract" },
+    { "id": "graph.migration-recovery", "expected": "The Graph V2 rebuild validates, resumes safely, and removes legacy state only after validation.", "proofType": "deterministic-contract" },
+    { "id": "graph.usage-telemetry", "expected": "Graphiti usage headers persist correlated GraphUsageEvent telemetry without losing camel-case fields.", "proofType": "deterministic-contract" },
+    { "id": "access.team-surface-boundaries", "expected": "Own-team primary, mounted-team additional, unmounted exclusion, and cross-team write denial remain enforced.", "proofType": "integration" },
+    { "id": "security.write-gates", "expected": "DLP and structural/injection write gates reject unsafe content and keep alerts redacted.", "proofType": "integration" },
+    { "id": "documents.file-lifecycle", "expected": "Document evidence, chunks, vector search, provenance, and deletion obey the storage access boundary.", "proofType": "integration" },
+    { "id": "workers.catalog-and-retry", "expected": "The current worker catalog and lifecycle retry/reconciliation schedules are registered and authorized correctly.", "proofType": "integration" },
+    { "id": "workers.cadence-ui", "expected": "Worker cadence descriptions and schedule editor minute selections render the configured schedule without implying a one-minute run frequency.", "proofType": "manual-chrome" },
+    { "id": "updater.version-and-progress", "expected": "The selected release version remains fixed through update hops and progress observation is safe and recoverable.", "proofType": "deterministic-contract" },
+    { "id": "engineering.candidate-suite", "expected": "Candidate typecheck, tests, Graphiti cascade, upgrade validation, documentation build, and navigation checks pass.", "proofType": "build-static" },
+    { "id": "report.chrome-rendering", "expected": "The generated report renders correctly at wide and narrow widths in the real Chrome extension session.", "proofType": "manual-chrome" },
+    { "id": "validation.truth-judgement", "expected": "Automated factual-truth validation is deliberately deferred; provenance and confidence are not truth certification.", "proofType": "not-measured", "required": false },
+    { "id": "benchmark.cleanup", "expected": "The isolated harness removes its credentials, containers, volumes, and derived state after the run.", "proofType": "measured-full-stack" }
+  ]
+}

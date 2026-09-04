@@ -1,0 +1,26 @@
+{
+  // persistent-memory-worker (Phase 6) — Node / ESM / strict.
+  //
+  // The worker has ONLY src/ (no out-of-tree sibling like the generated Prisma
+  // client — that lives inside @pm/db, consumed as a built package). So unlike
+  // api/db it CAN use a clean rootDir:"src" → emit lands at dist/**.
+  // Wait: tsc -b with references resolves @pm/db + @pm/shared via their `exports`
+  // (bare specifiers), so the generated client is NOT in the worker's program.
+  // rootDir:"src" is therefore legal here.
+  //
+  // @pm/db + @pm/shared are consumed as BUILT PACKAGES via `exports` (project
+  // references make `tsc -b` build them first; the bare specifiers resolve
+  // through their package.json exports). NEVER path-alias their src into this
+  // program — that revives the TS6059/ESM-emit traps.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false
+  },
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/db" }, { "path": "../../layers/graph" }, { "path": "../../layers/evidence-files" }, { "path": "../../layers/security-dlp" }],
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

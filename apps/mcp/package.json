@@ -1,0 +1,31 @@
+{
+  "name": "persistent-memory-mcp",
+  "version": "0.4.8",
+  "private": true,
+  "description": "persistent-memory MCP — stream service for Personal Memories and optional Shared Memories. Maps tools to API endpoints, composes recall_context across memory + graph, and embeds locally for client-managed embeddings. The API is the authorization choke-point; the MCP does NO auth/RLS itself.",
+  "type": "module",
+  "bin": {
+    "persistent-memory-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -b tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -b tsconfig.json",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "test": "npm run build -w @pm/mcp-runtime && vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.0",
+    "@pm/mcp-runtime": "*",
+    "@pm/shared": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "js-tiktoken": "^1.0.21",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "persistent-memory-update-runner",
+  "version": "0.3.5",
+  "private": true,
+  "type": "module",
+  "description": "Restricted update sidecar for Persistent Memory release metadata and snapshot-safe updates.",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/apps/update-runner/src/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.9"
+  }
+}

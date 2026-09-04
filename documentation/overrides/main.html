@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% macro use_local_nav_icons(items) %}
+  {% for item in items %}
+    {% if item.meta and item.meta.icon and "/" not in item.meta.icon %}
+      {% set _ = item.meta.pop("icon") %}
+    {% endif %}
+    {% if item.children %}{{ use_local_nav_icons(item.children) }}{% endif %}
+  {% endfor %}
+{% endmacro %}
+{% set _ = use_local_nav_icons(nav) %}
+
+{% block scripts %}
+  <script src="{{ 'assets/javascripts/mermaid.min.js' | url }}?v={{ config.extra.docs_version }}-ui"></script>
+  <script
+    src="{{ 'javascripts/mermaid.mjs' | url }}?v={{ config.extra.docs_version }}-ui"
+  ></script>
+  {{ super() }}
+  <script
+    type="module"
+    src="{{ 'javascripts/release-history.mjs' | url }}?v={{ config.extra.docs_version }}-ui"
+  ></script>
+{% endblock %}

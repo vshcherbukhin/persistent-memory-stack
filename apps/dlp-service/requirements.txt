@@ -1,0 +1,15 @@
+# persistent-memory-dlp — pinned deps (Phase 8, #10).
+#
+# Detection is 100% the OFFICIAL libraries — this service is a thin FastAPI wrapper
+# (the same pattern as graphiti-service wraps graphiti-core). presidio-analyzer is
+# the EXACT package inside Microsoft's prebuilt presidio-analyzer image; we run it
+# as a library so the one sidecar can also host the official gitleaks binary
+# (installed in the Dockerfile) and serve BOTH api + worker over one /scan endpoint.
+#
+# Bounded ranges (not exact pins) so the first build resolves cleanly; the build log
+# records the resolved versions. spaCy is pulled transitively by presidio-analyzer;
+# the en_core_web_lg model is fetched in the Dockerfile to match the installed spaCy.
+presidio-analyzer>=2.2.355,<2.3
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic-settings>=2.5,<3

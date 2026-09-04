@@ -1,0 +1,15 @@
+{
+  "name": "persistent-memory-update-coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Compiled installer-managed coordinator for Persistent Memory release updates.",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}

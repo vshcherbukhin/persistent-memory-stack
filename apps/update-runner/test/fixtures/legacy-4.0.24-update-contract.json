@@ -1,0 +1,6 @@
+{
+  "prismaDir": "$REPO_ROOT/prisma",
+  "composeCommand": "docker compose",
+  "applyRlsCommand": "bash scripts/apply-rls.sh",
+  "verifyInstallPath": "$REPO_ROOT/scripts/verify-install.sh"
+}

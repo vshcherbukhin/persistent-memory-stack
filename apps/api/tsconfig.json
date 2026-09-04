@@ -1,0 +1,41 @@
+{
+  // persistent-memory-api (Phase 3, workspace-migrated in Phase 5) — Node / ESM / strict.
+  //
+  // Extends the workspace baseline (../../tsconfig.base.json). Only the
+  // layout-dependent options that DIFFER from shared live here:
+  //
+  // The Prisma 7 `prisma-client` generator emits TypeScript with EXPLICIT `.ts`
+  // import specifiers (e.g. `./enums.ts`). We import the generated client the
+  // same way when a local package owns generated source. Two compiler options make
+  // that work end to end:
+  //   • allowImportingTsExtensions   — lets source write `... from './x.ts'`
+  //   • rewriteRelativeImportExtensions — on EMIT, rewrites those `.ts`
+  //     specifiers to `.js` so the built `dist/` is runnable Node ESM.
+  // (tsx in dev resolves `.ts` specifiers natively; this pair only matters for
+  //  the `tsc` build.)
+  //
+  // EMIT LAYOUT (Phase 6 change): rootDir is now "src". The generated Prisma
+  // client was MIGRATED to @pm/db in Phase 6, so the api program no longer
+  // contains an out-of-tree sibling — its only source root is src/. tsc therefore
+  // emits to dist/** (NOT the old dist/api/src/** which existed only because the
+  // generated client forced the common root up to persistent-memory/). Entry
+  // point is dist/server.js. The Dockerfile + start script reflect this.
+  //
+  // WORKSPACE: @pm/shared AND @pm/db are consumed as BUILT PACKAGES via their
+  // `exports` maps, NOT path-aliases into their src. `references` makes `tsc -b`
+  // build packages/shared/dist + packages/db/dist (+ .d.ts) first; the bare `@pm/shared` / `@pm/db`
+  // imports resolve through their package.json `exports`. Adding either src to
+  // `include`/`paths` would add a second source root and revive the TS6059/
+  // ESM-emit break — never do that. (packages/db/ owns the generated-client import now.)
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false
+  },
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/db" }, { "path": "../../layers/memory-vector" }, { "path": "../../layers/graph" }, { "path": "../../layers/evidence-files" }, { "path": "../../layers/security-dlp" }],
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

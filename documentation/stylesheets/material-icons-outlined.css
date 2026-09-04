@@ -1,0 +1,24 @@
+@font-face {
+  font-family: "Material Icons Outlined";
+  font-style: normal;
+  font-weight: 400;
+  src: url("../assets/fonts/material-icons-outlined.woff2") format("woff2");
+}
+
+.material-icons-outlined {
+  direction: ltr;
+  display: inline-block;
+  font-family: "Material Icons Outlined";
+  font-feature-settings: "liga";
+  font-size: 18px;
+  font-style: normal;
+  font-weight: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  text-rendering: optimizeLegibility;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}

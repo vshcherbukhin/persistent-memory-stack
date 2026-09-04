@@ -1,0 +1,4 @@
+# Installed deps + compiled output — regenerable, never commit.
+/node_modules/
+/dist/
+# package-lock.json IS committed (reproducible Docker builds rely on it).
