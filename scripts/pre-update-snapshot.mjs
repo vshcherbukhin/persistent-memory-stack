@@ -91,25 +91,6 @@ function writeJson(path, value) {
   chmodSync(path, 0o600)
 }
 
-function updateNotificationSettingsFromEnv(env) {
-  const provider = env.UPDATE_CHECK_PROVIDER === 'bitbucket' || env.UPDATE_CHECK_PROVIDER === 'git' ? env.UPDATE_CHECK_PROVIDER : 'none'
-  const scope = env.UPDATE_BITBUCKET_SCOPE === 'user' ? 'user' : 'project'
-  return {
-    enabled: provider !== 'none',
-    provider,
-    bitbucket: {
-      url: env.UPDATE_BITBUCKET_URL || '',
-      tokenConfigured: Boolean(env.UPDATE_BITBUCKET_TOKEN),
-      scope,
-      project: env.UPDATE_BITBUCKET_PROJECT || '',
-      user: env.UPDATE_BITBUCKET_USER || '',
-      repo: env.UPDATE_BITBUCKET_REPO || '',
-      branch: env.UPDATE_BITBUCKET_BRANCH || '',
-    },
-    note: 'Bitbucket token is redacted here; the raw value is preserved in the .env.persistent-memory snapshot.',
-  }
-}
-
 function runToFile(command, commandArgs, stdoutPath, stderrPath, options = {}) {
   const stdoutFd = openSync(stdoutPath, 'w', 0o600)
   const stderrFd = openSync(stderrPath, 'w', 0o600)
@@ -207,7 +188,6 @@ function main() {
     includes: [
       '.env.persistent-memory',
       'compose service inventory',
-      'redacted update notification settings',
       'postgres pg_dump when available',
       'qdrant/falkordb/neo4j/postgres/redis/minio volume archives when volumes exist',
       'mcp config report',
@@ -215,7 +195,6 @@ function main() {
   })
   copyFileSync(envPath, join(backupPath, '.env.persistent-memory'))
   chmodSync(join(backupPath, '.env.persistent-memory'), 0o600)
-  writeJson(join(backupPath, 'update-notification-settings.json'), updateNotificationSettingsFromEnv(env))
 
   const composeArgs = ['compose', '-f', join(repoRoot, 'deploy', 'compose', 'docker-compose.yml'), '--env-file', envPath]
   if ((env.PM_MCP_RUNTIME ?? 'node') === 'stream') composeArgs.push('--profile', 'mcp-stream')
@@ -261,4 +240,4 @@ function main() {
   info(`Snapshot written to ${backupPath}`)
 }
 
-main()
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

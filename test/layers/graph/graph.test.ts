@@ -18,10 +18,12 @@ describe('graph layer', () => {
       status: 502,
       detail: 'boom',
     })
-    expect(graphSyncPendingPatch()).toEqual({
+    const graphVersion = new Date('2026-07-08T12:00:00.000Z')
+    expect(graphSyncPendingPatch(graphVersion)).toEqual({
       graphStatus: 'pending',
       graphSyncedAt: null,
       graphError: null,
+      graphVersion,
     })
     expect(graphSyncSuccessPatch(new Date('2026-07-08T12:00:00.000Z'))).toMatchObject({
       graphStatus: 'ok',

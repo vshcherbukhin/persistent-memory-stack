@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { access, chmod, copyFile, link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,14 +10,16 @@ export function deployedStatePathFor(repoRoot, handoffStateDir) {
     const stateDir = handoffStateDir ? resolve(handoffStateDir) : join(resolve(repoRoot), '.local', 'update-state');
     return join(stateDir, 'last-successful-update.json');
 }
-function canonicalInstallationRoot(repoRoot) {
-    const resolved = resolve(repoRoot);
+export function canonicalInstallationRoot(repoRoot, platform = process.platform) {
+    const resolved = (platform === 'win32' ? win32 : posix).resolve(repoRoot);
     const releaseWorktreeSegment = '/.local/release-worktrees/';
-    const index = resolved.indexOf(releaseWorktreeSegment);
+    const comparable = platform === 'win32' ? resolved.replace(/\\/gu, '/').toLowerCase() : resolved;
+    const index = comparable.indexOf(releaseWorktreeSegment);
     return index >= 0 ? resolved.slice(0, index) : resolved;
 }
 function installationIdFor(repoRoot) {
-    return createHash('sha256').update(canonicalInstallationRoot(repoRoot)).digest('hex').slice(0, 24);
+    const root = canonicalInstallationRoot(repoRoot);
+    return createHash('sha256').update(process.platform === 'win32' ? root.toLowerCase() : root).digest('hex').slice(0, 24);
 }
 async function writeJsonAtomic(path, value) {
     const directory = dirname(path);
@@ -113,16 +115,28 @@ function versionFromDurableState(value) {
     if (!value || typeof value !== 'object')
         return undefined;
     const version = value.version;
-    return typeof version === 'string' && /^\d+\.\d+\.\d+$/u.test(version) ? version : undefined;
+    return typeof version === 'string' && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version) ? version : undefined;
+}
+function hasReleaseLine(value, releaseLine, key = 'releaseLine') {
+    return !!releaseLine && !!value && typeof value === 'object'
+        && value[key] === releaseLine;
+}
+export async function coordinatorReleaseLineFor(repoRoot) {
+    const source = await readJson(join(repoRoot, 'layers', 'update-ops', 'update-flow', 'public-source.json'));
+    if (typeof source.releaseLine !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(source.releaseLine)) {
+        throw new Error('The initiating checkout is missing its trusted public release line.');
+    }
+    return source.releaseLine;
 }
 export async function resolveDeployedVersion(options) {
     try {
-        const stateVersion = versionFromDurableState(await readJson(options.statePath));
+        const state = await readJson(options.statePath);
+        const stateVersion = hasReleaseLine(state, options.releaseLine) ? versionFromDurableState(state) : undefined;
         if (stateVersion)
             return stateVersion;
     }
     catch {
-        // Legacy installations may not have a durable marker yet; use their live dashboard next.
+        // A fresh install may not have a durable marker yet; use its live dashboard next.
     }
     if (!options.liveReleaseHistoryUrl) {
         throw new Error(`Cannot determine the deployed release: no valid durable state at ${options.statePath}.`);
@@ -131,7 +145,7 @@ export async function resolveDeployedVersion(options) {
         const response = await fetch(options.liveReleaseHistoryUrl, { signal: AbortSignal.timeout(2_000) });
         const history = await response.text();
         const version = /^##\s+([0-9]+\.[0-9]+\.[0-9]+)\b/mu.exec(history)?.[1];
-        if (response.ok && version)
+        if (response.ok && version && history.includes(`<!-- persistent-memory-release-line: ${options.releaseLine} -->`))
             return version;
     }
     catch {
@@ -149,10 +163,14 @@ export async function planCoordinatorBootstrap(options) {
         readJson(options.packagePath),
         resolveDeployedVersion({
             statePath: options.deployedStatePath,
+            releaseLine: options.releaseLine,
             liveReleaseHistoryUrl: options.liveReleaseHistoryUrl,
         }),
         loadUpgradeContract(options.upgradeContractModuleUrl),
     ]);
+    if (!hasReleaseLine(packageJson, options.releaseLine, 'persistentMemoryReleaseLine')) {
+        throw new Error('Coordinator target package does not belong to the current public release line.');
+    }
     const packageVersion = versionFromDurableState(packageJson);
     if (!packageVersion)
         throw new Error(`Coordinator target package is missing a valid version: ${options.packagePath}`);
@@ -163,6 +181,7 @@ export async function planCoordinatorBootstrap(options) {
     const path = upgrade.planUpgradePath(sourceVersion, contract, contracts);
     const plan = {
         protocolVersion: 1,
+        releaseLine: options.releaseLine,
         sourceVersion,
         targetVersion: contract.release,
         path,
@@ -173,7 +192,7 @@ export async function planCoordinatorBootstrap(options) {
 }
 async function runCommand(command, args, cwd) {
     return await new Promise((resolveRun) => {
-        const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         let stdout = '';
         let stderr = '';
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -188,22 +207,23 @@ async function gitOutput(repoRoot, args) {
         throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`.trim());
     return result.stdout.trim();
 }
-async function versionAtCommit(repoRoot, commit) {
+async function versionAtCommit(repoRoot, commit, releaseLine) {
     try {
         const raw = await gitOutput(repoRoot, ['show', `${commit}:package.json`]);
-        return versionFromDurableState(JSON.parse(raw));
+        const packageJson = JSON.parse(raw);
+        return hasReleaseLine(packageJson, releaseLine, 'persistentMemoryReleaseLine') ? versionFromDurableState(packageJson) : undefined;
     }
     catch {
         return undefined;
     }
 }
 /** Loads only contracts reachable from the trusted selected branch. */
-export async function loadTrustedUpgradeContracts(repoRoot, branch, moduleUrl) {
+export async function loadTrustedUpgradeContracts(repoRoot, branch, releaseLine, moduleUrl) {
     const upgrade = await loadUpgradeContract(moduleUrl);
     const commits = (await gitOutput(repoRoot, ['rev-list', `origin/${branch}`])).split(/\r?\n/u).filter(Boolean);
     const rawContracts = new Map();
     for (const commit of commits) {
-        const version = await versionAtCommit(repoRoot, commit);
+        const version = await versionAtCommit(repoRoot, commit, releaseLine);
         if (!version || rawContracts.has(version))
             continue;
         try {
@@ -220,11 +240,11 @@ export async function loadTrustedUpgradeContracts(repoRoot, branch, moduleUrl) {
     }
     return contracts;
 }
-export async function coordinatorReleaseWorktree(repoRoot, coordinatorHome, branch, release) {
+export async function coordinatorReleaseWorktree(repoRoot, coordinatorHome, branch, release, releaseLine) {
     const commits = (await gitOutput(repoRoot, ['rev-list', `origin/${branch}`])).split(/\r?\n/u).filter(Boolean);
     let commit;
     for (const candidate of commits) {
-        if (await versionAtCommit(repoRoot, candidate) === release) {
+        if (await versionAtCommit(repoRoot, candidate, releaseLine) === release) {
             commit = candidate;
             break;
         }
@@ -268,6 +288,7 @@ function isExecutionState(value) {
 function newExecutionState(plan) {
     return {
         protocolVersion: 1,
+        releaseLine: plan.releaseLine,
         sourceVersion: plan.sourceVersion,
         targetVersion: plan.targetVersion,
         path: [...plan.path],
@@ -278,13 +299,15 @@ function newExecutionState(plan) {
     };
 }
 function matchesPlan(state, plan) {
-    return state.sourceVersion === plan.sourceVersion
+    return state.releaseLine === plan.releaseLine
+        && state.sourceVersion === plan.sourceVersion
         && state.targetVersion === plan.targetVersion
         && state.path.join('\u0000') === plan.path.join('\u0000')
         && state.targetRevision === plan.targetRevision;
 }
 function matchesReleasePath(state, plan) {
-    return state.sourceVersion === plan.sourceVersion
+    return state.releaseLine === plan.releaseLine
+        && state.sourceVersion === plan.sourceVersion
         && state.targetVersion === plan.targetVersion
         && state.path.join('\u0000') === plan.path.join('\u0000');
 }
@@ -309,6 +332,7 @@ export async function clearHandoffForNoopRun(options) {
         return false;
     await writeJsonAtomic(options.handoffPath, {
         id: options.runId,
+        ...(typeof input.releaseLine === 'string' ? { releaseLine: input.releaseLine } : {}),
         source: typeof input.source === 'string' ? input.source : 'update-coordinator',
         phase: 'idle',
         updatedAt: new Date().toISOString(),
@@ -331,6 +355,7 @@ export async function publishCoordinatorFailureForRun(options) {
     const updatedAt = new Date().toISOString();
     const state = {
         id: options.runId,
+        ...(typeof input.releaseLine === 'string' ? { releaseLine: input.releaseLine } : {}),
         source: typeof input.source === 'string' ? input.source : 'update-coordinator',
         phase: 'failed',
         message: 'Update coordinator stopped before the lifecycle could start. Review the error below, then use the terminal for full details.',
@@ -517,26 +542,48 @@ async function installFromCli(argv) {
     else
         process.stdout.write(`INFO: [update-coordinator] installed ${installation.home}\n`);
 }
+export function legacyUpdateInvocation(legacyScript, args, env, platform = process.platform, pathExists = existsSync) {
+    if (platform !== 'win32')
+        return { command: 'bash', args: [legacyScript, ...args], env };
+    // The native launcher validates Git for Windows and exports its exact Bash.
+    // Never fall back to System32/bash.exe: that starts a different WSL host.
+    const bash = env.PM_GIT_BASH;
+    const gitRoot = bash ? win32.resolve(win32.dirname(bash), /[\\/]usr[\\/]bin[\\/]bash\.exe$/iu.test(bash) ? '../..' : '..') : '';
+    if (!bash || !win32.isAbsolute(bash) || win32.basename(bash).toLowerCase() !== 'bash.exe'
+        || !pathExists(bash) || !pathExists(win32.join(gitRoot, 'usr', 'bin', 'cygpath.exe'))) {
+        throw new Error('Windows updates require Git for Windows Bash. Run npm run update-persistent-memory from PowerShell so the launcher selects it.');
+    }
+    return {
+        command: bash,
+        args: ['--noprofile', '--norc', legacyScript.replace(/\\/gu, '/'), ...args],
+        env: { ...env, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' },
+    };
+}
 async function runLegacyUpdate(legacyScript, args, env) {
-    return await runProcess('bash', [legacyScript, ...args], env.PM_COORDINATOR_SOURCE_ROOT ?? process.cwd(), env);
+    const invocation = legacyUpdateInvocation(legacyScript, args, env);
+    return await runProcess(invocation.command, invocation.args, env.PM_COORDINATOR_SOURCE_ROOT ?? process.cwd(), invocation.env);
 }
 async function runProcess(command, args, cwd, env) {
     return await new Promise((resolveRun, rejectRun) => {
-        const child = spawn(command, args, { cwd, stdio: 'inherit', env });
+        const child = spawn(command, args, { cwd, stdio: 'inherit', env, windowsHide: true });
         child.once('error', rejectRun);
         child.once('close', (code) => resolveRun(code ?? 1));
     });
 }
 export async function planLegacyBridge(options) {
     const [sourceVersion, packageJson] = await Promise.all([
-        resolveDeployedVersion({ statePath: options.deployedStatePath, liveReleaseHistoryUrl: options.liveReleaseHistoryUrl }),
+        resolveDeployedVersion({ statePath: options.deployedStatePath, releaseLine: options.releaseLine, liveReleaseHistoryUrl: options.liveReleaseHistoryUrl }),
         readJson(options.packagePath),
     ]);
+    if (!hasReleaseLine(packageJson, options.releaseLine, 'persistentMemoryReleaseLine')) {
+        throw new Error('Coordinator target package does not belong to the current public release line.');
+    }
     const targetVersion = versionFromDurableState(packageJson);
     if (!targetVersion)
         throw new Error(`Coordinator target package is missing a valid version: ${options.packagePath}`);
     const plan = {
         protocolVersion: 1,
+        releaseLine: options.releaseLine,
         sourceVersion,
         targetVersion,
         path: [targetVersion],
@@ -563,6 +610,7 @@ async function main() {
     const lock = await acquireCoordinatorLock(coordinatorHome, { adoptExisting: process.env.PM_COORDINATOR_LOCK_HELD === '1' });
     try {
         const sourceRoot = resolve(process.env.PM_COORDINATOR_SOURCE_ROOT ?? cli.repoRoot);
+        const releaseLine = await coordinatorReleaseLineFor(sourceRoot);
         const branch = process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
         const packagePath = join(cli.repoRoot, 'package.json');
         const contractPath = join(cli.repoRoot, 'release', 'upgrade.json');
@@ -571,9 +619,10 @@ async function main() {
         let legacyBridge = false;
         try {
             await access(contractPath, constants.R_OK);
-            const contracts = await loadTrustedUpgradeContracts(sourceRoot, branch);
+            const contracts = await loadTrustedUpgradeContracts(sourceRoot, branch, releaseLine);
             plan = await planCoordinatorBootstrap({
                 repoRoot: cli.repoRoot,
+                releaseLine,
                 coordinatorHome,
                 contractPath,
                 packagePath,
@@ -589,7 +638,7 @@ async function main() {
             // established one-hop lifecycle available while still snapshotting and
             // recording recovery state in the installer-managed coordinator.
             legacyBridge = true;
-            plan = await planLegacyBridge({ coordinatorHome, deployedStatePath: statePath, liveReleaseHistoryUrl, packagePath });
+            plan = await planLegacyBridge({ coordinatorHome, releaseLine, deployedStatePath: statePath, liveReleaseHistoryUrl, packagePath });
         }
         const targetRevision = await gitOutput(cli.repoRoot, ['rev-parse', 'HEAD']).catch(() => undefined);
         if (targetRevision)
@@ -613,7 +662,7 @@ async function main() {
                 const finalHop = release === plan.targetVersion;
                 const hopRoot = finalHop
                     ? cli.repoRoot
-                    : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release);
+                    : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release, releaseLine);
                 const handoffStateDir = handoffStateDirFor(hopRoot, coordinatorHome, legacyBridge);
                 const exitCode = await runLegacyUpdate(cli.legacyScript, cli.args, {
                     ...process.env,

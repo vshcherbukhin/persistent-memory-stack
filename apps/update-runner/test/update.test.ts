@@ -1,482 +1,291 @@
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createUpdateRunner, runtimeServices, updateNotificationSettingsBackup } from '../src/update.ts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createUpdateRunner, runtimeServices } from '../src/update.ts'
+import { createPublicUpdateMetadataCache, fetchPublicUpdateMetadata, isPublicUpdateRepository, publicUpdateSource } from '../../../layers/update-ops/update-flow/github.ts'
 
-describe('update-runner Node compatibility', () => {
-  it('keeps the Node strip-types dependency graph free of constructor parameter properties', async () => {
-    const source = await readFile(new URL('../../../layers/update-ops/update-flow/update.ts', import.meta.url), 'utf8')
-
-    expect(source).not.toMatch(/constructor\(\s*\n?\s*(?:public |private |protected |readonly )/u)
-  })
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
 })
 
-function git(cwd: string, args: string[]): void {
-  const result = spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_AUTHOR_EMAIL: 'test@example.invalid',
-      GIT_AUTHOR_NAME: 'Persistent Memory Test',
-      GIT_COMMITTER_EMAIL: 'test@example.invalid',
-      GIT_COMMITTER_NAME: 'Persistent Memory Test',
-    },
-  })
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`)
-  }
-}
-
-describe('update status checks', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
-  it('stays quiet when remote metadata cannot be fetched', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    git(repoDir, ['init', '-b', 'master'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-    git(repoDir, ['remote', 'add', 'origin', 'file:///definitely/missing/persistent-memory.git'])
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      currentVersion: '1.0.0',
-      latestVersion: null,
-      updateAvailable: false,
-      autoUpdateReady: false,
-      logs: [],
-    })
-  })
-
-  it('detects newer releases through configured Bitbucket Server metadata without enabling auto-update', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_PROJECT=PM',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=master',
-      '',
-    ].join('\n'))
-    git(repoDir, ['init', '-b', 'master'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-
-    const releaseHistory = [
-      '# Release History',
-      '',
-      '## 1.1.0 - 2026-07-04',
-      '',
-      '| Service | Version | Change |',
-      '| --- | --- | --- |',
-      '| update-runner | 0.2.0 | Added Bitbucket checks. |',
-      '',
-      '- New update detection.',
-      '',
-    ].join('\n')
-
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === 'http://dashboard:3000/release-history.md') return new Response('not found', { status: 404 })
-      expect(init?.headers).toMatchObject({ authorization: 'Bearer bb-token' })
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'remote-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '1.1.0' }), { status: 200 })
-      if (url.includes('/raw/release-history.md')) return new Response(releaseHistory, { status: 200 })
-      return new Response('not found', { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      currentVersion: '1.0.0',
-      latestVersion: '1.1.0',
-      updateBranch: 'master',
-      latestCommit: 'remote-sha',
-      updateAvailable: true,
-      autoUpdateReady: false,
-      releaseNotes: { version: '1.1.0', latest: true },
-    })
-  })
-
-  it('shows dev branch updates when the commit changed without a version bump', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=dev',
-      '',
-    ].join('\n'))
-    git(repoDir, ['init', '-b', 'dev'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === 'http://dashboard:3000/release-history.md') return new Response('not found', { status: 404 })
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'dev-remote-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '1.0.0' }), { status: 200 })
-      if (url.includes('/raw/release-history.md')) return new Response('# Release History\n\n## 1.0.0 - 2026-07-04\n\n- Same version dev update.\n', { status: 200 })
-      return new Response('not found', { status: 404 })
-    }) as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      currentVersion: '1.0.0',
-      latestVersion: '1.0.0',
-      updateBranch: 'dev',
-      latestCommit: 'dev-remote-sha',
-      updateAvailable: true,
-      autoUpdateReady: false,
-    })
-  })
-
-  it('hides dev branch updates after the deployed marker reaches the remote commit', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=dev',
-      '',
-    ].join('\n'))
-    await mkdir(join(repoDir, '.local', 'update-state'), { recursive: true })
-    await writeFile(join(repoDir, '.local', 'update-state', 'last-successful-update.json'), `${JSON.stringify({
-      id: '2026-07-06T21:50:00Z-1.0.0',
-      source: 'update-script',
-      version: '1.0.0',
-      finishedAt: '2026-07-06T21:50:00Z',
-      branch: 'dev',
-      commit: 'dev-remote-sha',
-    })}\n`)
-    git(repoDir, ['init', '-b', 'dev'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === 'http://dashboard:3000/release-history.md') return new Response('not found', { status: 404 })
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'dev-remote-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '1.0.0' }), { status: 200 })
-      if (url.includes('/raw/release-history.md')) return new Response('# Release History\n\n## 1.0.0 - 2026-07-04\n\n- Same version dev update.\n', { status: 200 })
-      return new Response('not found', { status: 404 })
-    }) as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      currentVersion: '1.0.0',
-      latestVersion: '1.0.0',
-      updateBranch: 'dev',
-      latestCommit: 'dev-remote-sha',
-      updateAvailable: false,
-    })
-  })
-
-  it('compares remote releases against the deployed dashboard version, not only the bind-mounted repo version', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '3.7.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=master',
-      '',
-    ].join('\n'))
-    git(repoDir, ['init', '-b', 'master'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-
-    const deployedHistory = '# Release History\n\n## 3.6.9 - 2026-07-04\n\n- Deployed dashboard release.\n'
-    const remoteHistory = '# Release History\n\n## 3.7.0 - 2026-07-04\n\n- Remote release.\n'
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === 'http://dashboard:3000/release-history.md') return new Response(deployedHistory, { status: 200 })
-      expect(init?.headers).toMatchObject({ authorization: 'Bearer bb-token' })
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'remote-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '3.7.0' }), { status: 200 })
-      if (url.includes('/raw/release-history.md')) return new Response(remoteHistory, { status: 200 })
-      return new Response('not found', { status: 404 })
-    }) as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      currentVersion: '3.6.9',
-      latestVersion: '3.7.0',
-      updateAvailable: true,
-    })
-  })
-
-  it('reports the terminal updater success marker so open dashboard tabs can reload promptly', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '3.7.4' })}\n`)
-    await mkdir(join(repoDir, '.local', 'update-state'), { recursive: true })
-    await writeFile(join(repoDir, '.local', 'update-state', 'last-successful-update.json'), `${JSON.stringify({
-      id: '2026-07-04T01:02:03Z-3.7.5',
-      source: 'update-script',
-      version: '3.7.5',
-      finishedAt: '2026-07-04T01:02:03Z',
-    })}\n`)
-    git(repoDir, ['init', '-b', 'master'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })) as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      lastSuccessfulUpdate: {
-        id: '2026-07-04T01:02:03Z-3.7.5',
-        source: 'update-script',
-        version: '3.7.5',
-        finishedAt: '2026-07-04T01:02:03Z',
-      },
-    })
-  })
-
-  it('supports Bitbucket personal repositories under users/{slug}/repos/{repo}', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=master',
-      '',
-    ].join('\n'))
-    git(repoDir, ['init', '-b', 'master'])
-    git(repoDir, ['add', 'package.json'])
-    git(repoDir, ['commit', '-m', 'init'])
-
-    const urls: string[] = []
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      urls.push(url)
-      if (url === 'http://dashboard:3000/release-history.md') return new Response('not found', { status: 404 })
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'personal-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '1.2.0' }), { status: 200 })
-      if (url.includes('/raw/release-history.md')) return new Response('# Release History\n\n## 1.2.0 - 2026-07-04\n\n- Personal repo update.\n', { status: 200 })
-      return new Response('not found', { status: 404 })
-    }) as unknown as typeof fetch)
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.status()).resolves.toMatchObject({
-      latestVersion: '1.2.0',
-      latestCommit: 'personal-sha',
-      updateAvailable: true,
-    })
-    const bitbucketUrls = urls.filter((url) => url.includes('/rest/api/1.0/'))
-    expect(bitbucketUrls.every((url) => url.includes('/rest/api/1.0/users/example.user/repos/persistent-memory/'))).toBe(true)
-  })
+const sha = 'a'.repeat(40)
+const baseUrl = 'https://api.github.com/repos/vshcherbukhin/persistent-memory-stack/'
+const history = (version: string) => `<!-- persistent-memory-release-line: public-v1 -->\n# Release History\n\n## ${version} - 2026-09-06\n\n- [mcp-restart] Updated memory tools.\n`
+const metadataFetch = (version = '1.1.0') => vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+  const url = String(input)
+  if (url.includes('/branches/')) return new Response(JSON.stringify({ commit: { sha } }))
+  if (url.includes('/contents/package.json')) return new Response(JSON.stringify({ version, persistentMemoryReleaseLine: publicUpdateSource.releaseLine }))
+  if (url.includes('/contents/release-history.md')) return new Response(history(version))
+  throw new Error('Unexpected fixture request')
 })
 
-describe('snapshot-safe update service selection', () => {
-  it('rebuilds the canonical dashboard, gateway, and documentation services', () => {
-    expect(runtimeServices({ PM_MCP_RUNTIME: 'node' })).toEqual([
-      'api',
-      'dashboard',
-      'documentation',
-      'dashboard-gateway',
-      'worker',
-      'docker-control',
-      'graphiti',
-      'dlp',
+beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 }))))
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.mocked(spawn).mockReset() })
+
+describe('public release source', () => {
+  it('uses the committed canonical manifest and supports Node strip-types execution', async () => {
+    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', releaseLine: 'public-v1' })
+    for (const file of ['update.ts', 'github.ts']) {
+      const source = await readFile(new URL(`../../../layers/update-ops/update-flow/${file}`, import.meta.url), 'utf8')
+      expect(source).not.toMatch(/constructor\(\s*\n?\s*(?:public |private |protected |readonly )/u)
+    }
+  })
+
+  it('always requests public master without authentication and reads both files at its immutable commit', async () => {
+    vi.stubEnv('UPDATE_GITHUB_OWNER', 'untrusted-owner')
+    vi.stubEnv('UPDATE_GITHUB_REPO', 'another-repo')
+    vi.stubEnv('UPDATE_GITHUB_BRANCH', 'dev')
+    vi.stubEnv('UPDATE_GITHUB_TOKEN', 'fixture-private-token')
+    const fetchMock = metadataFetch()
+    await expect(fetchPublicUpdateMetadata(fetchMock)).resolves.toEqual({ latestCommit: sha, latestVersion: '1.1.0', releaseHistory: history('1.1.0') })
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      `${baseUrl}branches/master`, `${baseUrl}contents/package.json?ref=${sha}`, `${baseUrl}contents/release-history.md?ref=${sha}`,
     ])
-    expect(runtimeServices({ PM_MCP_RUNTIME: 'stream' })).toContain('mcp')
-    expect(runtimeServices({ PM_MCP_RUNTIME: 'stream' })).not.toContain('admin')
+    const signals = new Set(fetchMock.mock.calls.map(([, init]) => init?.signal))
+    expect(signals.size).toBe(1)
+    expect([...signals][0]).toBeInstanceOf(AbortSignal)
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.headers).not.toHaveProperty('authorization')
+      expect(JSON.stringify(init)).not.toContain('fixture-private-token')
+      expect(init?.redirect).toBe('error')
+    }
+  })
+
+  it.each([301, 401, 403, 404, 429, 500])('refuses HTTP %s without exposing remote response contents', async status => {
+    const fetchMock = vi.fn(async () => new Response('private fixture response', { status, headers: { location: 'https://other.example/private' } }))
+    const result = fetchPublicUpdateMetadata(fetchMock)
+    await expect(result).rejects.toThrow(`HTTP ${status}`)
+    await expect(result).rejects.not.toThrow('private fixture response')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps network and malformed commit errors safe', async () => {
+    await expect(fetchPublicUpdateMetadata(vi.fn(async () => { throw new Error('private network details') }))).rejects.not.toThrow('private network details')
+    for (const body of ['not json', '{}', '{"commit":{"sha":"master"}}']) {
+      const fetchMock = vi.fn(async () => new Response(body))
+      await expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('invalid release metadata')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it.each([undefined, 'private-v0'])('refuses old master4.x metadata with release line %s before fetching history', async releaseLine => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/branches/')
+      ? new Response(JSON.stringify({ commit: { sha } }))
+      : new Response(JSON.stringify({ version: '4.0.37', persistentMemoryReleaseLine: releaseLine })))
+    await expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('public release line is not available')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock })
+    await expect(cache.read()).resolves.toBeNull()
+  })
+
+  it.each(['{}', '{"version":"text"}', '{"version":"1.2.3-dev"}', '{"version":123}', '{"version":"01.2.3"}'])('rejects invalid versions before fetching history: %s', pkg => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/branches/') ? new Response(JSON.stringify({ commit: { sha } })) : new Response(pkg))
+    return expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('invalid release metadata').then(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
+
+  it.each([
+    'https://github.com/vshcherbukhin/persistent-memory-stack.git', 'https://GitHub.com/Vshcherbukhin/Persistent-Memory-Stack',
+    'git@github.com:vshcherbukhin/persistent-memory-stack.git', 'ssh://git@github.com/vshcherbukhin/persistent-memory-stack.git',
+  ])('recognizes the canonical repository identity: %s', remote => expect(isPublicUpdateRepository(remote)).toBe(true))
+
+  it.each([
+    'https://github.com/another-owner/persistent-memory-stack.git', 'https://github.com/vshcherbukhin/another-repo.git',
+    'https://github.com.evil.example/vshcherbukhin/persistent-memory-stack.git', 'https://user@github.com/vshcherbukhin/persistent-memory-stack.git',
+    'https://github.com/vshcherbukhin/other/../persistent-memory-stack.git', 'ssh://git@github.com:2222/vshcherbukhin/persistent-memory-stack.git',
+  ])('refuses a different or ambiguous repository identity: %s', remote => expect(isPublicUpdateRepository(remote)).toBe(false))
+})
+
+describe('anonymous request budget', () => {
+  it('coalesces concurrent polling and reuses metadata for fifteen minutes', async () => {
+    let now = 0
+    const fetchMock = metadataFetch()
+    const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock, now: () => now })
+    const pending = Array.from({ length: 40 }, () => cache.read())
+    expect(new Set(pending).size).toBe(1)
+    await Promise.all(pending)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    now = 15 * 60_000 - 1
+    await Promise.all(Array.from({ length: 100 }, () => cache.read()))
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    now++
+    await cache.read()
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+  })
+
+  it('backs off repeated failures for one, two, four, eight, then fifteen minutes', async () => {
+    let now = 0
+    const fetchMock = vi.fn(async () => new Response('', { status: 503 }))
+    const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock, now: () => now })
+    for (const [index, delay] of [1, 2, 4, 8, 15, 15].entries()) {
+      await expect(cache.read()).resolves.toBeNull()
+      expect(fetchMock).toHaveBeenCalledTimes(index + 1)
+      now += delay * 60_000 - 1
+      await cache.read()
+      expect(fetchMock).toHaveBeenCalledTimes(index + 1)
+      now++
+    }
+  })
+
+  it.each([
+    { 'retry-after': '1800' },
+    { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1800' },
+    { 'retry-after': 'Thu, 01 Jan 1970 00:30:00 GMT' },
+  ])('honors server rate-limit deadlines beyond the ordinary backoff: %j', headers => {
+    let now = 0
+    const responseHeaders = new Headers()
+    for (const [name, value] of Object.entries(headers)) if (value !== undefined) responseHeaders.set(name, value)
+    const fetchMock = vi.fn(async () => new Response('', { status: 429, headers: responseHeaders }))
+    const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock, now: () => now })
+    return cache.read().then(async () => {
+      now = 30 * 60_000 - 1
+      await cache.read()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      now++
+      await cache.read()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('retains the last valid release during failures and resets the failure delay after recovery', async () => {
+    let now = 0
+    const fetchMock = metadataFetch()
+    const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock, now: () => now })
+    const previous = await cache.read()
+    now = 15 * 60_000
+    fetchMock.mockImplementation(async () => new Response('', { status: 503 }))
+    await expect(cache.read()).resolves.toEqual(previous)
+    now += 60_000
+    fetchMock.mockImplementation(metadataFetch('1.2.0'))
+    await expect(cache.read()).resolves.toMatchObject({ latestVersion: '1.2.0' })
+    now += 15 * 60_000
+    fetchMock.mockImplementation(async () => new Response('', { status: 503 }))
+    await cache.read()
+    const calls = fetchMock.mock.calls.length
+    now += 60_000
+    await cache.read()
+    expect(fetchMock).toHaveBeenCalledTimes(calls + 1)
   })
 })
 
-describe('update notification settings', () => {
-  it('builds a redacted backup shape for update notification settings', () => {
-    expect(updateNotificationSettingsBackup({
-      UPDATE_CHECK_PROVIDER: 'bitbucket',
-      UPDATE_BITBUCKET_URL: 'https://stash.example.test',
-      UPDATE_BITBUCKET_TOKEN: 'secret-token',
-      UPDATE_BITBUCKET_SCOPE: 'user',
-      UPDATE_BITBUCKET_USER: 'example.user',
-      UPDATE_BITBUCKET_REPO: 'persistent-memory',
-      UPDATE_BITBUCKET_BRANCH: 'master',
-    }, 'fallback')).toEqual({
-      enabled: true,
-      provider: 'bitbucket',
-      bitbucket: {
-        url: 'https://stash.example.test',
-        tokenConfigured: true,
-        scope: 'user',
-        project: '',
-        user: 'example.user',
-        repo: 'persistent-memory',
-        branch: 'master',
-      },
-      note: 'Bitbucket token is redacted here; the raw value is preserved in the .env.persistent-memory snapshot.',
-    })
+describe('runner status and explicit update boundary', () => {
+  async function fixture(version = '1.0.0', branch = 'master') {
+    const repoDir = await mkdtemp(join(tmpdir(), 'pm-public-update-'))
+    await writeFile(join(repoDir, 'package.json'), JSON.stringify({ version }))
+    const metadataCache = createPublicUpdateMetadataCache({ fetchImpl: metadataFetch() })
+    const runner = createUpdateRunner({ repoDir, branch, backupRoot: join(repoDir, '.local', 'backups') }, { metadataCache })
+    return { runner, repoDir }
+  }
+
+  it('checks public master without an environment file and preserves release notes and MCP restart detection', async () => {
+    const { runner, repoDir } = await fixture('1.0.0', 'dev')
+    await expect(runner.status()).resolves.toMatchObject({ currentVersion: '1.0.0', latestVersion: '1.1.0', updateBranch: 'master', updateAvailable: true, autoUpdateReady: false, mcpRestartRequired: true, logs: [] })
+    expect(existsSync(join(repoDir, '.env.persistent-memory'))).toBe(false)
   })
 
-  it('reads redacted Bitbucket settings from the runtime env file', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=bb-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=master',
-      '',
-    ].join('\n'))
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await expect(runner.settings()).resolves.toEqual({
-      enabled: true,
-      provider: 'bitbucket',
-      bitbucket: {
-        url: 'https://stash.example.test',
-        tokenConfigured: true,
-        scope: 'user',
-        project: '',
-        user: 'example.user',
-        repo: 'persistent-memory',
-        branch: 'master',
-      },
-    })
+  it('uses semver for public release notices, independent of an operator branch', async () => {
+    const { runner } = await fixture('1.1.0', 'dev')
+    await expect(runner.status()).resolves.toMatchObject({ updateBranch: 'master', updateAvailable: false })
   })
 
-  it('saves Bitbucket settings and preserves the token when no replacement is provided', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    await writeFile(join(repoDir, '.env.persistent-memory'), [
-      'DATABASE_URL=postgresql://example',
-      'UPDATE_CHECK_PROVIDER=bitbucket',
-      'UPDATE_BITBUCKET_URL=https://stash.example.test',
-      'UPDATE_BITBUCKET_TOKEN=old-token',
-      'UPDATE_BITBUCKET_SCOPE=user',
-      'UPDATE_BITBUCKET_USER=example.user',
-      'UPDATE_BITBUCKET_REPO=persistent-memory',
-      'UPDATE_BITBUCKET_BRANCH=master',
-      '',
-    ].join('\n'))
-
-    const runner = createUpdateRunner({
-      repoDir,
-      backupRoot: join(repoDir, '.local', 'update-backups'),
-      branch: 'master',
-    })
-
-    await runner.saveSettings({
-      enabled: true,
-      provider: 'bitbucket',
-      bitbucket: {
-        url: 'https://stash.example.test',
-        token: '',
-        scope: 'project',
-        project: 'ENG',
-        user: '',
-        repo: 'example-service',
-        branch: 'release',
-      },
-    })
-
-    const env = await readFile(join(repoDir, '.env.persistent-memory'), 'utf8')
-    expect(env).toContain('DATABASE_URL=postgresql://example')
-    expect(env).toContain('UPDATE_CHECK_PROVIDER=bitbucket')
-    expect(env).toContain('UPDATE_BITBUCKET_URL=https://stash.example.test')
-    expect(env).toContain('UPDATE_BITBUCKET_TOKEN=old-token')
-    expect(env).toContain('UPDATE_BITBUCKET_SCOPE=project')
-    expect(env).toContain('UPDATE_BITBUCKET_PROJECT=ENG')
-    expect(env).toContain('UPDATE_BITBUCKET_USER=')
-    expect(env).toContain('UPDATE_BITBUCKET_REPO=example-service')
-    expect(env).toContain('UPDATE_BITBUCKET_BRANCH=release')
+  it('compares against the deployed dashboard and retains the post-update success signal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(history('1.0.0'))))
+    const { runner, repoDir } = await fixture('1.1.0')
+    await mkdir(join(repoDir, '.local', 'update-state'), { recursive: true })
+    const signal = { id: 'fixture-success', source: 'update-script', releaseLine: 'public-v1', version: '1.0.0', finishedAt: '2026-09-06T10:00:00Z', branch: 'dev', commit: sha }
+    await writeFile(join(repoDir, '.local', 'update-state', 'last-successful-update.json'), JSON.stringify(signal))
+    await expect(runner.status()).resolves.toMatchObject({ currentVersion: '1.0.0', latestVersion: '1.1.0', updateAvailable: true, lastSuccessfulUpdate: signal })
   })
 
-  it('tests proposed Bitbucket settings without persisting them', async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), 'pm-update-runner-'))
-    await writeFile(join(repoDir, 'package.json'), `${JSON.stringify({ version: '1.0.0' })}\n`)
-    const envPath = join(repoDir, '.env.persistent-memory')
-    const originalEnv = ['UPDATE_CHECK_PROVIDER=none', 'UPDATE_BITBUCKET_TOKEN=old-token', ''].join('\n')
-    await writeFile(envPath, originalEnv)
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes('/commits')) return new Response(JSON.stringify({ values: [{ id: 'verified-sha' }] }), { status: 200 })
-      if (url.includes('/raw/package.json')) return new Response(JSON.stringify({ version: '1.0.1' }), { status: 200 })
-      return new Response('# Release History\n\n## 1.0.1 - 2026-07-13\n', { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+  it('ignores old unmarked deployed history and success markers after the public reset', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('# Release History\n\n## 4.0.37 - 2026-09-01\n')))
+    const { runner, repoDir } = await fixture('1.0.0')
+    await mkdir(join(repoDir, '.local', 'update-state'), { recursive: true })
+    const path = join(repoDir, '.local', 'update-state', 'last-successful-update.json')
+    const oldMarker = JSON.stringify({ id: 'old-success', source: 'update-script', version: '4.0.37', finishedAt: '2026-09-01T10:00:00Z' })
+    await writeFile(path, oldMarker)
+    await expect(runner.status()).resolves.toMatchObject({ releaseLine: 'public-v1', currentVersion: '1.0.0', lastSuccessfulUpdate: undefined })
+    await expect(readFile(path, 'utf8')).resolves.toBe(oldMarker)
+  })
 
-    const runner = createUpdateRunner({ repoDir, backupRoot: join(repoDir, '.local', 'update-backups'), branch: 'master' })
+  it('shares one default metadata cache across runner instances', async () => {
+    const fetchMock = metadataFetch()
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => String(input).startsWith(baseUrl) ? fetchMock(input, init) : new Response('', { status: 404 })))
+    const { repoDir } = await fixture()
+    const cfg = { repoDir, branch: 'master', backupRoot: join(repoDir, '.local', 'backups') }
+    await Promise.all([createUpdateRunner(cfg).status(), createUpdateRunner(cfg).status()])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
 
-    await expect(runner.testSettings({
-      enabled: true,
-      provider: 'bitbucket',
-      bitbucket: {
-        url: 'https://stash.example.test',
-        token: 'new-token',
-        scope: 'user',
-        user: 'example.user',
-        repo: 'persistent-memory',
-        branch: 'master',
-      },
-    })).resolves.toEqual({
-      ok: true,
-      provider: 'bitbucket',
-      repository: 'example.user/persistent-memory',
-      branch: 'master',
-      latestCommit: 'verified-sha',
-      latestVersion: '1.0.1',
-    })
+  it('refuses a different checkout origin before any snapshot, fetch, merge, or service change', async () => {
+    const commands: string[][] = []
+    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
+      commands.push([command, ...args])
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => { child.stdout.end('https://github.com/other-owner/other-repo.git\n'); child.emit('close', 0) })
+      return child
+    }) as unknown as typeof spawn)
+    const { runner, repoDir } = await fixture()
+    await runner.start()
+    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: false, error: expect.stringContaining('does not match') } }))
+    expect(commands).toEqual([['git', '-c', `safe.directory=${repoDir}`, 'remote', 'get-url', 'origin']])
+    expect(existsSync(join(repoDir, '.local', 'backups'))).toBe(false)
+  })
 
-    await expect(readFile(envPath, 'utf8')).resolves.toBe(originalEnv)
+  it('keeps an explicit operator dev update separate from public master checks', async () => {
+    const commands: string[][] = []
+    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
+      commands.push([command, ...args])
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => {
+        child.stdout.end(args.includes('get-url') ? 'git@github.com:vshcherbukhin/persistent-memory-stack.git\n'
+          : args.includes('show') ? JSON.stringify({ persistentMemoryReleaseLine: 'public-v1' }) : '')
+        child.emit('close', 0)
+      })
+      return child
+    }) as unknown as typeof spawn)
+    const { runner, repoDir } = await fixture('1.0.0', 'dev')
+    await writeFile(join(repoDir, '.env.persistent-memory'), 'DATABASE_MIGRATE_URL=postgresql://fixture-only\nPM_MCP_RUNTIME=stream\n')
+    await runner.start()
+    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: true } }))
+    expect(commands.find(command => command.includes('fetch'))?.slice(-4)).toEqual(['fetch', '--quiet', 'origin', 'dev'])
+    expect(commands.find(command => command.includes('merge'))?.slice(-3)).toEqual(['merge', '--ff-only', 'origin/dev'])
+    const { lastRun } = await runner.logs()
+    expect(existsSync(join(lastRun!.backupPath!, 'manifest.json'))).toBe(true)
+    expect(existsSync(join(lastRun!.backupPath!, 'update-notification-settings.json'))).toBe(false)
+    const marker = JSON.parse(await readFile(join(repoDir, '.local', 'update-state', 'last-successful-update.json'), 'utf8'))
+    expect(marker.branch).toBe('dev')
+    expect(marker.releaseLine).toBe('public-v1')
+    await expect(runner.status()).resolves.toMatchObject({ updateBranch: 'master' })
+  })
+
+  it('refuses an old unmarked branch target before merging or rebuilding services', async () => {
+    const commands: string[][] = []
+    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
+      commands.push([command, ...args])
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => {
+        child.stdout.end(args.includes('get-url') ? 'https://github.com/vshcherbukhin/persistent-memory-stack.git\n'
+          : args.includes('show') ? JSON.stringify({ version: '4.0.37' }) : '')
+        child.emit('close', 0)
+      })
+      return child
+    }) as unknown as typeof spawn)
+    const { runner, repoDir } = await fixture('1.0.0')
+    await writeFile(join(repoDir, '.env.persistent-memory'), 'DATABASE_MIGRATE_URL=postgresql://fixture-only\n')
+    await runner.start()
+    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: false, error: expect.stringContaining('does not contain the public release line') } }))
+    expect(commands.some(command => command.includes('merge'))).toBe(false)
+    expect(commands.some(command => command[0] === 'docker' && command.includes('up'))).toBe(false)
+  })
+
+  it('keeps the canonical services for an explicitly requested snapshot-safe update', () => {
+    expect(runtimeServices({ PM_MCP_RUNTIME: 'node' })).toEqual(['api', 'dashboard', 'documentation', 'dashboard-gateway', 'worker', 'docker-control', 'graphiti', 'dlp'])
+    expect(runtimeServices({ PM_MCP_RUNTIME: 'stream' })).toContain('mcp')
   })
 })

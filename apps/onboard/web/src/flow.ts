@@ -13,7 +13,6 @@ export type Phase =
   | 'embedding'
   | 'pullModel'
   | 'extraction'
-  | 'updates'
   | 'ecosystem'
   | 'registration'
   | 'rule'
@@ -23,9 +22,9 @@ export type Phase =
   | 'done'
 
 export const FLOW_PHASES: Record<Flow, Phase[]> = {
-  full: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'updates', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
-  engine: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'updates', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
-  mcp: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'updates', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
+  full: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
+  engine: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
+  mcp: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
 }
 
 export interface FlowOptions {

@@ -135,7 +135,8 @@ export async function deliverBrowserPushRows(
   let attempted = 0
   for (const row of rows) {
     if (!row.enabled) continue
-    if (!row.notificationTypes.includes(notification.type)) continue
+    // Release notices follow the browser opt-in, without a separate event preference.
+    if (notification.type !== 'newReleases' && !row.notificationTypes.includes(notification.type)) continue
     attempted += 1
     try {
       await send({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, payload)
@@ -217,17 +218,18 @@ export async function updateBrowserPushPreferences(userId: string, types: unknow
 
 export async function sendBrowserPushNotification(input: BrowserPushNotifyInput): Promise<number> {
   if (config.DEPLOYMENT_MODE !== 'local') return 0
+  const ignoreTypeFilter = input.ignoreTypeFilter || input.type === 'newReleases'
   const cfg = await ensureBrowserPushConfig()
   const rows = await ownerPrisma.browserPushSubscription.findMany({
     where: {
       enabled: true,
       ...(input.teamId ? { teamId: input.teamId } : {}),
       ...(input.userId ? { userId: input.userId } : {}),
-      ...(input.ignoreTypeFilter ? {} : { notificationTypes: { has: input.type } }),
+      ...(ignoreTypeFilter ? {} : { notificationTypes: { has: input.type } }),
     },
     select: { id: true, endpoint: true, p256dh: true, auth: true, enabled: true, notificationTypes: true },
   })
-  const deliveryRows = input.ignoreTypeFilter
+  const deliveryRows = ignoreTypeFilter
     ? rows.map((row) => ({ ...row, notificationTypes: row.notificationTypes.includes(input.type) ? row.notificationTypes : [...row.notificationTypes, input.type] }))
     : rows
   return deliverBrowserPushRows(

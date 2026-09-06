@@ -2,15 +2,19 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   acquireCoordinatorLock,
   clearHandoffForNoopRun,
+  coordinatorReleaseLineFor,
+  coordinatorReleaseWorktree,
   deployedStatePathFor,
   executeCoordinatorPlan,
   handoffStateDirFor,
   installCoordinator,
+  loadTrustedUpgradeContracts,
   planLegacyBridge,
   planCoordinatorBootstrap,
   publishCoordinatorFailureForRun,
@@ -19,6 +23,8 @@ import {
 } from '../../../apps/update-coordinator/src/index.ts'
 
 const tempRoots: string[] = []
+const releaseLine = 'public-v1'
+const contractModuleUrl = new URL('../../../layers/update-ops/release-versioning/upgrade-contract.ts', import.meta.url).href
 
 async function tempRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'pm-update-coordinator-'))
@@ -94,6 +100,7 @@ describe('update coordinator bootstrap', () => {
     const handoffPath = join(stateDir, 'dashboard-handoff.json')
     await writeFile(handoffPath, JSON.stringify({
       id: 'no-op-run',
+      releaseLine: 'public-v1',
       source: 'update-script',
       phase: 'updating',
       message: 'Pulling updates.',
@@ -126,7 +133,7 @@ describe('update coordinator bootstrap', () => {
       },
     })
 
-    expect(JSON.parse(await readFile(handoffPath, 'utf8'))).toMatchObject({ id: 'no-op-run', phase: 'idle' })
+    expect(JSON.parse(await readFile(handoffPath, 'utf8'))).toMatchObject({ id: 'no-op-run', releaseLine: 'public-v1', phase: 'idle' })
     await executeCoordinatorPlan({
       coordinatorHome: installation.installationHome,
       plan: { ...plan, targetRevision: 'commit-b' },
@@ -142,6 +149,7 @@ describe('update coordinator bootstrap', () => {
     const handoffPath = join(root, 'dashboard-handoff.json')
     await writeFile(handoffPath, JSON.stringify({
       id: 'coordinator-run',
+      releaseLine: 'public-v1',
       source: 'update-script',
       phase: 'updating',
       message: 'Pulling updates.',
@@ -152,6 +160,7 @@ describe('update coordinator bootstrap', () => {
 
     await expect(publishCoordinatorFailureForRun({ handoffPath, runId: 'coordinator-run' })).resolves.toBe(true)
     await expect(readFile(handoffPath, 'utf8')).resolves.toContain('"phase": "failed"')
+    await expect(readFile(handoffPath, 'utf8')).resolves.toContain('"releaseLine": "public-v1"')
     await expect(readFile(handoffPath, 'utf8')).resolves.toContain('Update coordinator stopped before the lifecycle could start.')
   })
 
@@ -319,19 +328,22 @@ describe('update coordinator bootstrap', () => {
   })
 
   it('reads the deployed-release marker from the updater handoff directory when operators relocate it', () => {
-    expect(deployedStatePathFor('/workspace/persistent-memory')).toBe('/workspace/persistent-memory/.local/update-state/last-successful-update.json')
-    expect(deployedStatePathFor('/workspace/persistent-memory', '/var/lib/persistent-memory/update-state')).toBe('/var/lib/persistent-memory/update-state/last-successful-update.json')
+    const root = resolve('fixture-checkout')
+    const relocated = join(tmpdir(), 'pm-relocated-state')
+    expect(deployedStatePathFor(root)).toBe(join(root, '.local', 'update-state', 'last-successful-update.json'))
+    expect(deployedStatePathFor(root, relocated)).toBe(join(relocated, 'last-successful-update.json'))
   })
 
   it('keeps an exact legacy release available through a coordinator-managed one-hop bridge', async () => {
     const { root, installation } = await installFixture()
     const repoRoot = join(root, 'checkout')
     const statePath = join(repoRoot, '.local', 'update-state', 'last-successful-update.json')
-    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.27' }))
-    await writeFile(statePath, JSON.stringify({ version: '4.0.25' }))
+    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.27', persistentMemoryReleaseLine: 'fixture-line' }))
+    await writeFile(statePath, JSON.stringify({ version: '4.0.25', releaseLine: 'fixture-line' }))
 
     await expect(planLegacyBridge({
       coordinatorHome: installation.installationHome,
+      releaseLine: 'fixture-line',
       deployedStatePath: statePath,
       liveReleaseHistoryUrl: 'http://127.0.0.1:9/release-history.md',
       packagePath: join(repoRoot, 'package.json'),
@@ -339,16 +351,24 @@ describe('update coordinator bootstrap', () => {
   })
 
   it('uses the legacy target handoff mount while bridging a gateway that predates coordinator state', () => {
-    expect(handoffStateDirFor('/tmp/release-4.0.27', '/tmp/coordinator', true)).toBe('/tmp/release-4.0.27/.local/update-state')
-    expect(handoffStateDirFor('/tmp/release-4.0.28', '/tmp/coordinator', false)).toBe('/tmp/coordinator/state')
+    const legacyRoot = join(tmpdir(), 'release-4.0.27')
+    const modernRoot = join(tmpdir(), 'release-4.0.28')
+    const coordinatorRoot = join(tmpdir(), 'coordinator')
+    expect(handoffStateDirFor(legacyRoot, coordinatorRoot, true)).toBe(join(legacyRoot, '.local', 'update-state'))
+    expect(handoffStateDirFor(modernRoot, coordinatorRoot, false)).toBe(join(coordinatorRoot, 'state'))
   })
 
   // The contract assertion deliberately emits both coordinator artifacts. Allow
   // a cold TypeScript build instead of using Vitest's unit-test default.
   it('ships an emitted coordinator bootstrap artifact with its shared contract library', async () => {
-    execFileSync('npm', ['run', 'build:update-coordinator'], {
+    const { npmInvocation } = await import(new URL('../../../scripts/host-runtime.mjs', import.meta.url).href) as {
+      npmInvocation: (args: string[]) => { command: string; args: string[] }
+    }
+    const invocation = npmInvocation(['run', 'build:update-coordinator'])
+    execFileSync(invocation.command, invocation.args, {
       cwd: new URL('../../../', import.meta.url),
       stdio: 'pipe',
+      windowsHide: true,
     })
 
     const artifact = new URL('../../../deploy/update-coordinator/coordinator.mjs', import.meta.url)
@@ -369,12 +389,12 @@ describe('update coordinator bootstrap', () => {
     const installer = new URL('../../../scripts/install-update-coordinator.mjs', import.meta.url)
     await mkdir(repoRoot, { recursive: true })
 
-    const home = execFileSync('node', [
-      installer.pathname,
+    const home = execFileSync(process.execPath, [
+      fileURLToPath(installer),
       '--root', repoRoot,
       '--base-dir', baseDir,
       '--print-home',
-    ], { encoding: 'utf8' }).trim()
+    ], { encoding: 'utf8', windowsHide: true }).trim()
 
     expect(home.startsWith(repoRoot)).toBe(false)
     await expect(readFile(join(home, 'coordinator.mjs'), 'utf8')).resolves.not.toHaveLength(0)
@@ -383,13 +403,17 @@ describe('update coordinator bootstrap', () => {
   it('installs a private coordinator home outside the checkout and worktrees', async () => {
     const { root, installation } = await installFixture()
 
-    expect(installation.home).toMatch(new RegExp(`^${join(root, 'coordinator-home', installation.installationId, 'bundles')}/[a-f0-9]{24}$`))
+    expect(dirname(installation.home)).toBe(join(root, 'coordinator-home', installation.installationId, 'bundles'))
+    expect(basename(installation.home)).toMatch(/^[a-f0-9]{24}$/u)
     expect(installation.installationHome).toBe(join(root, 'coordinator-home', installation.installationId))
     expect(installation.home.startsWith(join(root, 'checkout'))).toBe(false)
     expect(await readFile(join(installation.home, 'coordinator.mjs'), 'utf8')).toBe('export {}\n')
-    expect((await stat(installation.home)).mode & 0o777).toBe(0o700)
-    expect((await stat(join(installation.installationHome, 'bundles'))).mode & 0o777).toBe(0o700)
-    expect((await stat(join(installation.installationHome, 'installation.json'))).mode & 0o777).toBe(0o600)
+    // Windows chmod controls the owner read/write bits; profile ACLs supply the
+    // access boundary. POSIX hosts also enforce the requested group/other bits.
+    const permissionMask = process.platform === 'win32' ? 0o600 : 0o777
+    expect((await stat(installation.home)).mode & permissionMask).toBe(0o700 & permissionMask)
+    expect((await stat(join(installation.installationHome, 'bundles'))).mode & permissionMask).toBe(0o700 & permissionMask)
+    expect((await stat(join(installation.installationHome, 'installation.json'))).mode & permissionMask).toBe(0o600)
   })
 
   it('keeps a running coordinator bundle immutable when a second launcher installs a newer artifact', async () => {
@@ -457,7 +481,7 @@ describe('update coordinator bootstrap', () => {
   it.each(['4.0.25', '4.0.26', '4.0.27'])('plans the %s bootstrap from durable deployed state instead of a manually pulled checkout version', async (deployedVersion) => {
     const { root, installation } = await installFixture()
     const repoRoot = join(root, 'checkout')
-    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.28' }))
+    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.28', persistentMemoryReleaseLine: 'fixture-line' }))
     await writeFile(join(repoRoot, 'release-upgrade.json'), JSON.stringify({
       schemaVersion: 1,
       release: '4.0.28',
@@ -469,11 +493,12 @@ describe('update coordinator bootstrap', () => {
       coordinator: { minimumVersion: 1, bootstrap: true },
     }))
     await writeFile(join(repoRoot, '.local', 'update-state', 'last-successful-update.json'), JSON.stringify({
-      id: 'previous-release', source: 'update-script', version: deployedVersion, finishedAt: '2026-07-14T00:00:00.000Z',
+      id: 'previous-release', releaseLine: 'fixture-line', source: 'update-script', version: deployedVersion, finishedAt: '2026-07-14T00:00:00.000Z',
     }))
 
     const plan = await planCoordinatorBootstrap({
       repoRoot,
+      releaseLine: 'fixture-line',
       coordinatorHome: installation.installationHome,
       contractPath: join(repoRoot, 'release-upgrade.json'),
       packagePath: join(repoRoot, 'package.json'),
@@ -490,7 +515,7 @@ describe('update coordinator bootstrap', () => {
   it('permits a same-version trusted branch update after target resolution', async () => {
     const { root, installation } = await installFixture()
     const repoRoot = join(root, 'checkout')
-    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.28' }))
+    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '4.0.28', persistentMemoryReleaseLine: 'fixture-line' }))
     await writeFile(join(repoRoot, 'release-upgrade.json'), JSON.stringify({
       schemaVersion: 1,
       release: '4.0.28',
@@ -501,10 +526,11 @@ describe('update coordinator bootstrap', () => {
       requiredStops: [],
       coordinator: { minimumVersion: 1, bootstrap: true },
     }))
-    await writeFile(join(repoRoot, '.local', 'update-state', 'last-successful-update.json'), JSON.stringify({ version: '4.0.28' }))
+    await writeFile(join(repoRoot, '.local', 'update-state', 'last-successful-update.json'), JSON.stringify({ version: '4.0.28', releaseLine: 'fixture-line' }))
 
     await expect(planCoordinatorBootstrap({
       repoRoot,
+      releaseLine: 'fixture-line',
       coordinatorHome: installation.installationHome,
       contractPath: join(repoRoot, 'release-upgrade.json'),
       packagePath: join(repoRoot, 'package.json'),
@@ -513,18 +539,99 @@ describe('update coordinator bootstrap', () => {
     })).resolves.toMatchObject({ sourceVersion: '4.0.28', targetVersion: '4.0.28', path: [] })
   })
 
-  it('uses live dashboard release metadata when a legacy installation has no durable marker', async () => {
+  it('uses matching live dashboard release metadata when a fresh installation has no durable marker', async () => {
     const root = await tempRoot()
-    const fetchMock = vi.fn(async () => new Response('## 4.0.27\n', { status: 200 }))
+    const fetchMock = vi.fn(async () => new Response('<!-- persistent-memory-release-line: public-v1 -->\n## 1.0.0\n', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(resolveDeployedVersion({
       statePath: join(root, 'missing-marker.json'),
+      releaseLine,
       liveReleaseHistoryUrl: 'http://dashboard.example.test/release-history.md',
-    })).resolves.toBe('4.0.27')
+    })).resolves.toBe('1.0.0')
     expect(fetchMock).toHaveBeenCalledWith(
       'http://dashboard.example.test/release-history.md',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it.each([undefined, 'old-line'])('ignores a %s old deployed marker and resolves the current public dashboard without rewriting state', async (oldLine) => {
+    const root = await tempRoot()
+    const statePath = join(root, 'last-successful-update.json')
+    const oldState = JSON.stringify({ version: '4.0.37', releaseLine: oldLine })
+    await writeFile(statePath, oldState)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!-- persistent-memory-release-line: public-v1 -->\n## 1.0.0\n')))
+    await expect(resolveDeployedVersion({ statePath, releaseLine, liveReleaseHistoryUrl: 'http://dashboard.example.test/history' })).resolves.toBe('1.0.0')
+    await expect(readFile(statePath, 'utf8')).resolves.toBe(oldState)
+  })
+
+  it.each(['## 4.0.37\n', '<!-- persistent-memory-release-line: old-line -->\n## 1.0.0\n'])('rejects deployed history outside the selected release line: %s', async (history) => {
+    const root = await tempRoot()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(history)))
+    await expect(resolveDeployedVersion({ statePath: join(root, 'missing.json'), releaseLine, liveReleaseHistoryUrl: 'http://dashboard.example.test/history' })).rejects.toThrow('Cannot determine the deployed release')
+  })
+
+  it('rejects an unmarked target before writing either a contract plan or legacy bridge plan', async () => {
+    const { root, installation } = await installFixture()
+    const repoRoot = join(root, 'checkout')
+    const packagePath = join(repoRoot, 'package.json')
+    const deployedStatePath = join(repoRoot, 'deployed.json')
+    const contractPath = join(repoRoot, 'upgrade.json')
+    await writeFile(packagePath, JSON.stringify({ version: '1.0.0' }))
+    await writeFile(deployedStatePath, JSON.stringify({ version: '1.0.0', releaseLine }))
+    await writeFile(contractPath, await readFile(new URL('../../../release/upgrade.json', import.meta.url)))
+    const options = { repoRoot, coordinatorHome: installation.installationHome, releaseLine, packagePath, deployedStatePath, contractPath, liveReleaseHistoryUrl: 'http://dashboard.example.test/history', upgradeContractModuleUrl: contractModuleUrl }
+    await expect(planCoordinatorBootstrap(options)).rejects.toThrow('target package does not belong')
+    await expect(planLegacyBridge(options)).rejects.toThrow('target package does not belong')
+    expect(existsSync(join(installation.installationHome, 'state', 'active-plan.json'))).toBe(false)
+  })
+
+  it('selects public contracts and exact worktrees while skipping unmarked, foreign-line, and reused historical versions', async () => {
+    const repoRoot = await tempRoot()
+    const git = (...args: string[]) => execFileSync('git', ['-c', `safe.directory=${repoRoot.replace(/\\/gu, '/')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: repoRoot, encoding: 'utf8', windowsHide: true }).trim()
+    git('init', '--quiet')
+    await mkdir(join(repoRoot, 'release'))
+    await mkdir(join(repoRoot, 'layers', 'update-ops', 'update-flow'), { recursive: true })
+    await writeFile(join(repoRoot, 'layers', 'update-ops', 'update-flow', 'public-source.json'), JSON.stringify({ releaseLine }))
+    await expect(coordinatorReleaseLineFor(repoRoot)).resolves.toBe(releaseLine)
+    await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '1.0.0', persistentMemoryReleaseLine: releaseLine }))
+    await writeFile(join(repoRoot, 'release', 'upgrade.json'), await readFile(new URL('../../../release/upgrade.json', import.meta.url)))
+    git('add', '.')
+    git('commit', '--quiet', '-m', 'Public initial release')
+    const publicCommit = git('rev-parse', 'HEAD')
+    for (const pkg of [{ version: '4.0.37' }, { version: '1.0.0' }, { version: '1.0.0', persistentMemoryReleaseLine: 'old-line' }]) {
+      await writeFile(join(repoRoot, 'package.json'), JSON.stringify(pkg))
+      await writeFile(join(repoRoot, 'release', 'upgrade.json'), '{"invalidHistoricalContract":true}')
+      git('add', '.')
+      git('commit', '--quiet', '-m', 'Historical fixture outside public release line')
+    }
+    git('update-ref', 'refs/remotes/origin/master', 'HEAD')
+    const contracts = await loadTrustedUpgradeContracts(repoRoot, 'master', releaseLine, contractModuleUrl)
+    expect([...contracts.keys()]).toEqual(['1.0.0'])
+    await expect(coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '4.0.37', releaseLine)).rejects.toThrow('unavailable from trusted origin/master')
+    const worktree = await coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '1.0.0', releaseLine)
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8', windowsHide: true }).trim()).toBe(publicCommit)
+    expect(JSON.parse(await readFile(join(worktree, 'package.json'), 'utf8'))).toMatchObject({ persistentMemoryReleaseLine: releaseLine })
+  })
+
+  it('does not reuse a completed plan from an old release line with the same version numbers', async () => {
+    const { installation } = await installFixture()
+    const calls: string[] = []
+    const plan = { protocolVersion: 1 as const, sourceVersion: '1.0.0', targetVersion: '1.0.0', path: ['1.0.0'], targetRevision: 'same-revision', plannedAt: '2026-09-06T00:00:00.000Z' }
+    await executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan, snapshot: async () => {}, runHop: async () => {} })
+    await expect(executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan: { ...plan, releaseLine }, snapshot: async () => { calls.push('snapshot') }, runHop: async () => { calls.push('hop') } })).resolves.toMatchObject({ releaseLine, status: 'complete' })
+    expect(calls).toEqual(['snapshot', 'hop'])
+  })
+
+  it('does not resume or overwrite an unfinished plan from an old release line', async () => {
+    const { installation } = await installFixture()
+    const plan = { protocolVersion: 1 as const, sourceVersion: '1.0.0', targetVersion: '1.0.1', path: ['1.0.1'], targetRevision: 'old-revision', plannedAt: '2026-09-06T00:00:00.000Z' }
+    await expect(executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan, snapshot: async () => {}, runHop: async () => { throw new Error('fixture failure') } })).rejects.toThrow('fixture failure')
+    const statePath = join(installation.installationHome, 'state', 'hop-progress.json')
+    const originalState = await readFile(statePath, 'utf8')
+    const work = vi.fn(async () => {})
+    await expect(executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan: { ...plan, releaseLine, targetRevision: 'public-revision' }, snapshot: work, runHop: work })).rejects.toThrow('different update plan')
+    expect(work).not.toHaveBeenCalled()
+    await expect(readFile(statePath, 'utf8')).resolves.toBe(originalState)
   })
 })

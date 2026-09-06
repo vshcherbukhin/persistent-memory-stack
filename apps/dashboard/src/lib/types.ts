@@ -349,6 +349,7 @@ export interface UpdateRunSummary {
 }
 
 export interface PostUpdateSignal {
+  releaseLine?: string
   id: string
   source: 'update-script' | 'update-runner'
   version: string
@@ -358,6 +359,7 @@ export interface PostUpdateSignal {
 }
 
 export interface UpdateStatus {
+  releaseLine?: string
   currentVersion: string
   latestVersion: string | null
   updateAvailable: boolean
@@ -377,43 +379,6 @@ export interface UpdateLogState {
   running: boolean
   logs: string[]
   lastRun?: UpdateRunSummary
-}
-
-export type UpdateSettingsProvider = 'none' | 'bitbucket' | 'git'
-export type UpdateBitbucketScope = 'project' | 'user'
-export interface UpdateNotificationSettings {
-  enabled: boolean
-  provider: UpdateSettingsProvider
-  bitbucket: {
-    url: string
-    tokenConfigured: boolean
-    scope: UpdateBitbucketScope
-    project: string
-    user: string
-    repo: string
-    branch: string
-  }
-}
-export interface UpdateNotificationSettingsInput {
-  enabled: boolean
-  provider?: 'none' | 'bitbucket'
-  bitbucket?: {
-    url?: string
-    token?: string
-    scope?: UpdateBitbucketScope
-    project?: string
-    user?: string
-    repo?: string
-    branch?: string
-  }
-}
-export interface UpdateConnectionTestResult {
-  ok: true
-  provider: 'bitbucket'
-  repository: string
-  branch: string
-  latestCommit: string
-  latestVersion: string | null
 }
 
 export type BrowserPushNotificationType =

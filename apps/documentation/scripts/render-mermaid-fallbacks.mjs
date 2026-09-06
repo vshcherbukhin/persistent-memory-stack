@@ -12,7 +12,7 @@ const documentationDir = resolve(rootDir, 'documentation')
 const assetsDir = resolve(documentationDir, 'assets/diagrams')
 const configPath = resolve(documentationDir, 'mermaid-fallback-config.json')
 const manifestPath = resolve(assetsDir, 'manifest.json')
-const mmdcPath = resolve(rootDir, 'apps/documentation/node_modules/.bin/mmdc')
+const mmdcPath = resolve(rootDir, 'apps/documentation/node_modules/@mermaid-js/mermaid-cli/src/cli.js')
 const checkOnly = process.argv.includes('--check')
 const mermaidBlock = /^```mermaid\r?\n([\s\S]*?)^```\s*$/gm
 const fallbackImage = /^!\[Diagram fallback: [^\]]+\]\([^)]+\)\r?\n\r?\n/gm
@@ -56,7 +56,9 @@ async function collectDiagrams(config) {
   const sources = []
 
   for (const file of files) {
-    const original = await readFile(file, 'utf8')
+    // Git may check out Markdown as CRLF on Windows. Content hashes and generated
+    // links must have the same meaning as the LF originals on macOS/Linux.
+    const original = (await readFile(file, 'utf8')).replace(/\r\n/g, '\n')
     const withoutFallbacks = original.replace(fallbackImage, '')
     const relativeSource = relative(documentationDir, file).split(sep).join('/')
     let sequence = 0
@@ -95,7 +97,7 @@ async function assertFresh({ diagrams, sources }) {
   }
 
   const expectedManifest = `${JSON.stringify(manifestFor(diagrams), null, 2)}\n`
-  const actualManifest = await readFile(manifestPath, 'utf8')
+  const actualManifest = (await readFile(manifestPath, 'utf8')).replace(/\r\n/g, '\n')
   if (actualManifest !== expectedManifest) {
     throw new Error('Mermaid source or fallback configuration changed. Run npm run diagrams:render --prefix apps/documentation.')
   }
@@ -115,9 +117,10 @@ async function assertFresh({ diagrams, sources }) {
 }
 
 function render(input, output) {
-  const result = spawnSync(mmdcPath, ['-i', input, '-o', output, '-c', configPath, '-b', 'transparent'], {
+  const result = spawnSync(process.execPath, [mmdcPath, '-i', input, '-o', output, '-c', configPath, '-b', 'transparent'], {
     cwd: rootDir,
     encoding: 'utf8',
+    windowsHide: true,
   })
   if (result.status !== 0) throw new Error(`Mermaid CLI failed: ${result.stderr || result.stdout || 'unknown error'}`)
 }
@@ -148,7 +151,7 @@ async function writeFallbacks({ diagrams, sources }) {
   await writeFile(manifestPath, `${JSON.stringify(manifestFor(diagrams), null, 2)}\n`)
 }
 
-const config = await readFile(configPath, 'utf8')
+const config = (await readFile(configPath, 'utf8')).replace(/\r\n/g, '\n')
 const collected = await collectDiagrams(config)
 if (checkOnly) {
   await assertFresh(collected)

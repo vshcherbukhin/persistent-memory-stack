@@ -32,9 +32,6 @@ import type {
   NotifySettings,
   NotifySettingsInput,
   UpdateLogState,
-  UpdateNotificationSettings,
-  UpdateNotificationSettingsInput,
-  UpdateConnectionTestResult,
   UpdateStatus,
   MemorySurface,
   PublicConfig,
@@ -353,11 +350,6 @@ export const api = {
   updateStatus: () => call<UpdateStatus>('/dashboard/update'),
   updateLogs: () => call<UpdateLogState>('/dashboard/update/logs'),
   startUpdate: () => call<{ ok: boolean }>('/dashboard/update/start', { method: 'POST' }),
-  getUpdateSettings: () => call<UpdateNotificationSettings>('/dashboard/update/settings'),
-  saveUpdateSettings: (b: UpdateNotificationSettingsInput) =>
-    call<UpdateNotificationSettings>('/dashboard/update/settings', { method: 'PATCH', body: JSON.stringify(b) }),
-  testUpdateSettings: (b: UpdateNotificationSettingsInput) =>
-    call<UpdateConnectionTestResult>('/dashboard/update/test', { method: 'POST', body: JSON.stringify(b) }),
   getBrowserPushPublicKey: () => call<{ publicKey: string }>('/dashboard/browser-push/public-key'),
   saveBrowserPushSubscription: (b: BrowserPushSubscriptionInput) =>
     call<{ enabled: boolean; notificationTypes: BrowserPushNotificationType[] }>('/dashboard/browser-push/subscription', { method: 'PUT', body: JSON.stringify(b) }),

@@ -114,7 +114,7 @@ flowchart TD
 | Data plane (`/memories`, `/ingest`, `/graph`, `/documents`, …) | Bearer token (server mode) / synthetic super-user (local) | encapsulated scope; `runInTenant` per request |
 | Dashboard control plane (`/dashboard/*` canonical routes; `/admin/*` compatibility alias) | Bearer + `requireAdmin` | a few reads (Services/Usage/Workers) outside `requireAdmin` |
 | `/dashboard/services` → `docker-control` | api holds `DOCKER_CONTROL_TOKEN` | reads any-auth, mutations superuser; sidecar proxied; UI credentials admin/superuser only |
-| `/dashboard/update` → `update-runner` | api holds `UPDATE_RUNNER_TOKEN`; optional Bitbucket REST token in `.env.persistent-memory` for read-only update checks | status/log/start/settings/test are superuser-only; sidecar is internal-only, tests never persist settings, failures redact tokens and carry a request id, and snapshots run before trusted update execution |
+| `/dashboard/update` → `update-runner` | api holds `UPDATE_RUNNER_TOKEN`; public release checks send no GitHub credentials | status/log/start are superuser-only; sidecar is internal-only, source checks are read-only, and snapshots run before trusted update execution |
 | `/health`, `/config` | none | open; `/config` exposes `deploymentMode` read-only |
 | `dlp-service` `POST /scan` | none (internal-only) | api + worker call fail-closed |
 

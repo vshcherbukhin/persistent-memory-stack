@@ -6,9 +6,11 @@ set -euo pipefail
 # ${VAR:-default} interpolation matches the runtime env_file values.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUNTIME_ROOT="${PM_RUNTIME_ROOT:-$REPO_ROOT}"
-DASHBOARD_SOURCE_ROOT="${PM_DASHBOARD_SOURCE_ROOT:-$REPO_ROOT}"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
+RUNTIME_ROOT="$(pm_host_path "${PM_RUNTIME_ROOT:-$REPO_ROOT}")"
+DASHBOARD_SOURCE_ROOT="$(pm_host_path "${PM_DASHBOARD_SOURCE_ROOT:-$REPO_ROOT}")"
 ENV_RUNTIME="$RUNTIME_ROOT/.env.persistent-memory"
 COMPOSE_FILE="$RUNTIME_ROOT/deploy/compose/docker-compose.yml"
 HANDOFF_STATE_DIR="$RUNTIME_ROOT/.local/update-state"
@@ -167,6 +169,7 @@ configure_dashboard_source_override() {
     return 1
   fi
   COMPOSE_SOURCE_OVERRIDE="$(mktemp "${TMPDIR:-/tmp}/persistent-memory-dashboard-source.XXXXXX.yml")"
+  COMPOSE_SOURCE_OVERRIDE="$(pm_host_path "$COMPOSE_SOURCE_OVERRIDE")"
   DASHBOARD_SOURCE_ROOT="$DASHBOARD_SOURCE_ROOT" \
   DASHBOARD_SERVICE="$service" \
   COMPOSE_SOURCE_OVERRIDE="$COMPOSE_SOURCE_OVERRIDE" \
@@ -198,6 +201,7 @@ dashboard_handoff_write() {
   HANDOFF_TARGET_VERSION="$target_version" \
   HANDOFF_ERROR="$error" \
   HANDOFF_PROGRESS="$progress" \
+  PM_PUBLIC_SOURCE_FILE="$REPO_ROOT/layers/update-ops/update-flow/public-source.json" \
   node -e '
 const fs = require("fs");
 const file = process.env.HANDOFF_FILE;
@@ -206,6 +210,7 @@ const updatedAt = process.env.HANDOFF_UPDATED_AT;
 const version = process.env.HANDOFF_TARGET_VERSION || "";
 const state = {
   id: process.env.HANDOFF_ID,
+  releaseLine: JSON.parse(fs.readFileSync(process.env.PM_PUBLIC_SOURCE_FILE, "utf8")).releaseLine,
   source: "update-script",
   phase,
   message: process.env.HANDOFF_MESSAGE,

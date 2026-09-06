@@ -7,7 +7,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
 ENV_RUNTIME="$REPO_ROOT/.env.persistent-memory"
 RLS_SQL="$REPO_ROOT/layers/core/schema/rls.sql"
 

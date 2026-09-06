@@ -4,7 +4,7 @@ import {
   detectMcpRestartRequired,
   parseReleaseHistory,
 } from '../../../layers/update-ops/release-versioning/release.ts'
-import { updateNotificationSettingsBackup } from '../../../layers/update-ops/update-flow/update.ts'
+import { publicUpdateSource, isPublicUpdateRepository } from '../../../layers/update-ops/update-flow/github.ts'
 
 describe('update-ops layer', () => {
   it('exposes release-versioning helpers from the layer path', () => {
@@ -32,25 +32,8 @@ describe('update-ops layer', () => {
   })
 
   it('exposes update-flow helpers from the layer path', () => {
-    expect(updateNotificationSettingsBackup({
-      UPDATE_CHECK_PROVIDER: 'bitbucket',
-      UPDATE_BITBUCKET_URL: 'https://stash.example.test',
-      UPDATE_BITBUCKET_TOKEN: 'secret-token',
-      UPDATE_BITBUCKET_SCOPE: 'user',
-      UPDATE_BITBUCKET_USER: 'example.user',
-      UPDATE_BITBUCKET_REPO: 'persistent-memory',
-    }, 'master')).toMatchObject({
-      enabled: true,
-      provider: 'bitbucket',
-      bitbucket: {
-        url: 'https://stash.example.test',
-        tokenConfigured: true,
-        scope: 'user',
-        user: 'example.user',
-        repo: 'persistent-memory',
-        branch: 'master',
-      },
-      note: expect.stringContaining('token is redacted'),
-    })
+    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', releaseLine: 'public-v1' })
+    expect(isPublicUpdateRepository('https://github.com/vshcherbukhin/persistent-memory-stack.git')).toBe(true)
+    expect(isPublicUpdateRepository('https://github.com/another-owner/persistent-memory-stack.git')).toBe(false)
   })
 })

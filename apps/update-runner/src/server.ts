@@ -2,21 +2,15 @@ import http from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import {
   createUpdateRunner,
-  UpdateRunnerError,
-  type UpdateConnectionTestResult,
   type UpdateLogState,
-  type UpdateNotificationSettings,
-  type UpdateNotificationSettingsInput,
   type UpdateStatus,
 } from './update.js'
+import { publicUpdateSource } from '../../../layers/update-ops/update-flow/github.js'
 
 export interface UpdateRunnerOps {
   status(): Promise<UpdateStatus>
   start(): Promise<{ ok: boolean }>
   logs(): Promise<UpdateLogState>
-  settings(): Promise<UpdateNotificationSettings>
-  saveSettings(input: UpdateNotificationSettingsInput): Promise<UpdateNotificationSettings>
-  testSettings(input: UpdateNotificationSettingsInput): Promise<UpdateConnectionTestResult>
 }
 
 export interface RouteResult {
@@ -36,7 +30,6 @@ export async function route(
   pathname: string,
   _query: URLSearchParams,
   ops: UpdateRunnerOps,
-  body?: unknown,
 ): Promise<RouteResult> {
   if (pathname === '/status') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
@@ -49,15 +42,6 @@ export async function route(
   if (pathname === '/logs') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
     return { status: 200, body: await ops.logs() }
-  }
-  if (pathname === '/settings') {
-    if (method === 'GET') return { status: 200, body: await ops.settings() }
-    if (method === 'PATCH') return { status: 200, body: await ops.saveSettings(body as UpdateNotificationSettingsInput) }
-    return { status: 405, body: { error: 'method_not_allowed' } }
-  }
-  if (pathname === '/test') {
-    if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
-    return { status: 200, body: await ops.testSettings(body as UpdateNotificationSettingsInput) }
   }
   return { status: 404, body: { error: 'not_found' } }
 }
@@ -78,21 +62,14 @@ export function createServer(deps: ServerDeps): http.Server {
       if (url.pathname === '/health' && req.method === 'GET') return send(200, { ok: true })
       if (!authOk(req.headers.authorization, deps.token)) return send(401, { error: 'unauthorized' })
       try {
-        let body: unknown
-        if ((url.pathname === '/settings' && req.method === 'PATCH') || (url.pathname === '/test' && req.method === 'POST')) {
-          const chunks: Buffer[] = []
-          for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-          body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
-        }
-        const result = await route(req.method ?? 'GET', url.pathname, url.searchParams, deps.ops, body)
+        const result = await route(req.method ?? 'GET', url.pathname, url.searchParams, deps.ops)
         send(result.status, result.body)
       } catch (err) {
         const requestId = randomUUID()
-        const known = err instanceof UpdateRunnerError ? err : undefined
-        const status = known?.statusCode ?? 500
-        const error = known?.code ?? 'internal'
-        const message = known?.message ?? 'The update runner could not complete the request.'
-        const details = known?.details ?? 'Check the update-runner service logs with the request id and try again.'
+        const status = 500
+        const error = 'internal'
+        const message = 'The update runner could not complete the request.'
+        const details = 'Check the update-runner service logs with the request id and try again.'
         console.error(`ERROR: [update-runner] request failed ${req.method ?? 'GET'} ${url.pathname} requestId=${requestId} code=${error} message=${message}`)
         send(status, { error, message, details, requestId })
       }
@@ -103,7 +80,7 @@ export function createServer(deps: ServerDeps): http.Server {
 export function start(): http.Server {
   const repoDir = process.env.UPDATE_REPO_DIR ?? '/workspace'
   const backupRoot = process.env.UPDATE_BACKUP_ROOT ?? `${repoDir}/.local/update-backups`
-  const branch = process.env.UPDATE_BRANCH ?? 'master'
+  const branch = process.env.UPDATE_BRANCH ?? publicUpdateSource.branch
   const token = process.env.UPDATE_RUNNER_TOKEN ?? ''
   const port = Number.parseInt(process.env.PORT ?? '9092', 10)
   const ops = createUpdateRunner({ repoDir, backupRoot, branch })

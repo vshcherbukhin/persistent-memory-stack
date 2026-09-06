@@ -32,13 +32,27 @@ Defined in the root `package.json` `scripts`:
 
 | Command | Wraps | What it does |
 |---|---|---|
-| `npm run install-persistent-memory` | `bash deploy/scripts/onboard.sh` | First-time guided install (local web wizard) |
-| `npm run update-persistent-memory` | `bash deploy/scripts/update.sh` | Snapshot → pull → rebuild → migrate → validate Graph V2 → restart |
-| `npm run uninstall-persistent-memory` | `bash deploy/scripts/uninstall.sh` | Optional memory export → remove containers, volumes, images, and generated env |
+| `npm run check:host` | Host preflight | Check prerequisites without installing or registering agents |
+| `npm run install-persistent-memory` | `scripts/host-lifecycle.mjs` | First-time guided install (local web wizard) |
+| `npm run update-persistent-memory` | Host launcher → `deploy/scripts/update.sh` | Snapshot → pull → rebuild → migrate → validate Graph V2 → restart |
+| `npm run start-persistent-memory` | Host launcher → `deploy/scripts/start.sh` | Start the existing stack |
+| `npm run stop-persistent-memory` | Host launcher → `deploy/scripts/stop.sh` | Stop containers while preserving named volumes and the environment |
+| `npm run verify-persistent-memory` | Host launcher → `deploy/scripts/verify-install.sh` | Check the installed stack |
+| `npm run uninstall-persistent-memory` | Host launcher → `deploy/scripts/uninstall.sh` | Optional memory export → remove containers, volumes, images, and generated env |
 
 Everything else in the normal install/update path (`install.sh`, `start.sh`,
 `stop.sh`, `verify-install.sh`, `onboard.sh`, `update.sh`) is an internal helper.
 The exception is the operator-only shared-server scripts documented below.
+
+On Windows, use `npm.cmd` from PowerShell with these same command names. The Node
+launcher selects **Git for Windows Bash** for shell helpers and retains native
+Windows Node, Docker, Ollama, paths, and user-home agent configuration. It does
+not dispatch the installer to WSL. `PM_GIT_BASH` can identify a custom Git Bash
+installation by absolute executable path. On macOS, helpers use system Bash.
+Both hosts require Node 22.12+ or a newer supported LTS version; Node 24 LTS is
+the recommended installation target. See
+[Windows preparation](../installation/windows-installation.md) for the manual
+prerequisite and first-install sequence.
 
 ### Graph V2 update safety
 
@@ -59,14 +73,23 @@ handoff. Invalid or unavailable probe data is a warning only: it neither
 changes the migration command nor blocks the update, and the probe exits with
 the foreground migration process.
 
-### Install (`deploy/scripts/onboard.sh`)
+### Install (`scripts/host-lifecycle.mjs`)
 
-`onboard.sh` launches a **local web wizard** on `http://127.0.0.1:4319` (host-only,
+The host launcher opens a **local web wizard** on `http://127.0.0.1:4319` (host-only,
 binds 127.0.0.1; `ONBOARD_PORT` overrides). It compiles the installer server with
 `tsc` and runs `node apps/onboard/dist/apps/onboard/server/index.js`, detects prerequisites, generates `.env.persistent-memory`, runs
 the install with live progress, then hands off to the dashboard and
 self-terminates (`POST /api/shutdown`). It is **never containerized or shipped** — see
 `../components/onboard.md`.
+
+On Windows, prepare Node, Git for Windows, and Docker Desktop manually, then
+reopen the terminal before launching the wizard. Docker Desktop uses its WSL 2
+backend in Linux-container mode. The Ollama prerequisite card offers **Install**
+for a missing native Ollama application and **Start** for an installed but
+stopped application. Node and Docker cards retain manual instructions.
+`check:host` diagnoses missing Ollama but does not require it before the wizard
+can launch. Linux runtime images and Compose service definitions remain shared
+between the hosts.
 
 On macOS, missing Homebrew is shown as a manual prerequisite rather than an
 automatic step, because the official installer may require an Administrator user.
@@ -91,7 +114,11 @@ apply order is load-bearing in the `install.sh` schema/RLS step:
    container as the owner — creates the RLS-subject `pm_app` role, grants, GUC
    helper functions, and the policies. Must run **after** migrate, **before** the
    app connects as `pm_app`. This avoids any host-side `psql` dependency.
-3. `seed` as the owner — the bootstrap team-less super-admin + a show-once token.
+3. `seed` as the owner — initialize embedding and extraction settings only when
+   the settings row is missing, preserving existing values. Personal mode stops
+   there; the API creates or reuses its internal local `Team`/`AppUser` identity
+   after migration. Server mode also creates a team-less super-admin with
+   show-once credentials only when no superuser exists.
 4. restart `api` + `worker` through `docker compose -f deploy/compose/docker-compose.yml --env-file
    .env.persistent-memory ...` so compose-time interpolation and container runtime
    env use the same `PM_APP_PASSWORD`.
@@ -165,6 +192,10 @@ embedding topology/model/dim, saves the connection in the local stack, and resta
 the stream MCP best-effort so it sees the new surface.
 The Extraction LLM wizard step probes the selected provider/API key before it
 allows the user to continue, matching the dashboard's fact-extraction test path.
+The internal personal identity is local database bookkeeping, separate from
+the optional Shared Memories server connection. Seed does not create demo QA
+teams or sample access grants in either mode, and does not delete existing
+records. Rerunning seed preserves saved embedding and extraction settings.
 
 Both scripts prompt for the Docker project name, host bind address, optional port
 overrides, client-facing API URL, bootstrap super-admin email/display name,
@@ -195,8 +226,7 @@ conflicts fail before a partial stack is created. Default local ports are:
 
 ### Update (`deploy/scripts/update.sh`)
 
-Steps (from the script's `--help`): snapshot `.env.persistent-memory`, a redacted
-`update-notification-settings.json` summary, Compose state, Postgres, data volumes,
+Steps (from the script's `--help`): snapshot `.env.persistent-memory`, Compose state, Postgres, data volumes,
 and MCP report under `.local/update-backups/<timestamp>/`
 → backfill missing env keys from the updated template and generate any missing
 machine-owned secrets while preserving existing values
@@ -270,19 +300,16 @@ setup` calls do not create duplicate snapshots.
 
 Every published release includes `release/upgrade.json`: a machine-readable
 statement of the minimum supported source release, the direct compatibility
-range, and any future bridge requirements. `npm run update-persistent-memory`
-first installs the compiled update coordinator outside the repository and any
+range, and any future bridge requirements. Public release metadata is identified
+by the public-v1 release line, independently of numerical versions. The command
+`npm run update-persistent-memory` first installs the compiled update coordinator outside the repository and any
 release worktrees. That private, per-install location holds the atomic update
 lock and the active/completed plan, so a checked-out version cannot replace the
 update controller while it is running.
 
-An untouched 4.0.24 updater can update directly to 4.0.29. That release retains
-thin compatibility adapters for the historical updater while it completes its
-first fetch-and-build cycle, then installs the coordinator during setup.
-Releases 4.0.0–4.0.23 need one manual `git pull --ff-only origin master`
-bootstrap before running the updater because their updater predates the moved
-deployment layout. Coordinator-capable updates resolve the actual branch or
-exact-release target before planning. The
+Version 1.0.0 is the first public release. Its contract establishes the supported
+source baseline for future updates. The coordinator resolves the actual branch
+or exact-release target before planning. The
 coordinator starts from the durable `last-successful-update.json` marker, not
 the checked-out `package.json`; this makes a manual `git pull` safe because it
 cannot be mistaken for an installed update. Older installations without a
@@ -297,9 +324,8 @@ detached worktrees for intermediate releases. It takes one durable snapshot
 before the first hop, records each verified hop, and resumes at the first
 unfinished hop after interruption. It never performs an automatic database
 rollback; recovery remains an explicit operator restore. A malformed recovery
-record fails closed instead of replaying a path. Exact releases that predate
-`release/upgrade.json` remain supported as a coordinator-recorded one-hop legacy
-bridge, including `npm run update-persistent-memory -- --release 4.0.27`.
+record fails closed instead of replaying a path. Public release targets must
+belong to the public release line and meet the published compatibility contract.
 Browser presence and browser compatibility never gate this terminal safety path.
 
 If a trusted branch publishes a corrected revision of the exact same target
@@ -319,38 +345,35 @@ logs, and the internal start endpoint are all superuser-only because they expose
 host update state and the sidecar can mutate the stack.
 `/admin/update` remains available as a one-release compatibility alias.
 
-The dashboard does not expose one-click updating. When a newer release is known,
-it shows a persistent update card, release notes, and the copyable
-terminal command. For `master` this is `npm run update-persistent-memory`; for
-`dev` it is `npm run update-persistent-memory -- --dev`; for other trusted
-branches it is `npm run update-persistent-memory -- --branch <branch>`.
-Full-local installs can opt into
-update detection in the wizard by entering Bitbucket/Stash URL, token, repository
-owner scope, repository slug, and branch, then clicking **Test Bitbucket
-connection**. Next stays disabled until the connection test succeeds.
-For normal teammate release checks this branch should be `master`. For local
-integration testing it may be temporarily set to `dev`; switch it back before
-validating release behavior for other teammates. Non-`master` update checks are
-allowed to surface newer commits even when the product semver intentionally stays
-unchanged during dev work. To do that without confusing the bind-mounted checkout
-with the running containers, successful updates record the deployed branch and
-commit in `.local/update-state/last-successful-update.json`; if that marker is
-missing commit data for a non-`master` branch, the dashboard prompts once so the
-stack can be rebuilt onto the tracked branch.
-`UPDATE_BITBUCKET_SCOPE=project` uses
-`/projects/<UPDATE_BITBUCKET_PROJECT>/repos/<UPDATE_BITBUCKET_REPO>`;
-`UPDATE_BITBUCKET_SCOPE=user` uses
-`/users/<UPDATE_BITBUCKET_USER>/repos/<UPDATE_BITBUCKET_REPO>`. The runner then
-uses read-only Bitbucket REST metadata (`UPDATE_CHECK_PROVIDER=bitbucket`) to read
-latest commit, `package.json`, and `release-history.md`. If Bitbucket/VPN/auth
-metadata is unavailable, status checks stay quiet and the dashboard shows no
-update card.
+The dashboard automatically checks the application's public GitHub `master`
+branch for newer releases. No update-source settings or GitHub credentials are
+required. It shows release notes and the copyable
+`npm run update-persistent-memory -- --branch master` command; the user starts
+the update from a terminal. This explicitly selects the public release branch
+even when the local checkout is on another branch.
 
-All concrete repository identifiers belong in `.env.persistent-memory` or the
-dashboard-managed settings above. Shipping UI placeholders, MCP schemas, prompts,
-tests, and documentation use fictional examples. The root
-`npm run test:deployment-agnosticism` check is part of `npm test` and rejects known
-deployment-, employer-, or author-specific identifiers in tracked paths or text.
+The shared source is declared once in
+`layers/update-ops/update-flow/public-source.json`. Checks read branch metadata,
+`package.json`, and `release-history.md` at the same commit without changing the
+checkout. Successful metadata is cached for 15 minutes and concurrent requests
+share one fetch. Failed checks retry after 1, 2, 4, 8, then 15 minutes, honoring
+GitHub's longer rate-limit or Retry-After delay. The last valid release metadata
+remains available during a transient failure. If no successful check exists yet,
+no update card is shown until a check succeeds.
+
+An update verifies that the checkout origin names the built-in public repository
+before snapshots or service changes. Matching HTTPS and normal GitHub SSH origins
+are supported. The installer does not manage source credentials or rewrite Git
+remotes.
+
+Operators can still explicitly run `npm run update-persistent-memory -- --dev`
+or `npm run update-persistent-memory -- --branch <branch>` for a trusted branch.
+These commands do not change automatic public-master release checks. Successful
+updates record the deployed branch and commit in
+`.local/update-state/last-successful-update.json`.
+
+Product-source identity belongs in the shared manifest; deployment-specific
+examples in shipping UI, prompts, tests, and documentation remain generic.
 
 For the current installed version, update-runner prefers the deployed dashboard's
 served `release-history.md` over the bind-mounted repo `package.json`. That avoids
@@ -363,8 +386,7 @@ normally proxies to the internal Next.js dashboard container on `dashboard:3000`
 installer-managed state mount before lifecycle changes. The gateway retains one legacy
 read fallback to `.local/update-state/dashboard-handoff.json` while older launchers are
 within the supported window. Open local dashboard
-tabs poll `/api/update/handoff` independently of Application updates notification
-settings, show a full-screen blocking overlay, and avoid normal dashboard reloads
+tabs poll `/api/update/handoff` independently of release checks, show a full-screen blocking overlay, and avoid normal dashboard reloads
 until the handoff reaches `complete` and dashboard readiness passes. The updater
 confirms the gateway has received the initial event and gives open tabs a short
 moment to switch before snapshot and rebuild work begins. If the user closes and
@@ -402,29 +424,18 @@ At the end of a successful terminal update, the coordinator-owned handoff reache
 script output and `/api/update/dashboard-ready` succeed. The browser sets the
 post-update release-notes flag from the durable completed handoff, verifies the
 stable gateway readiness endpoint, reloads once, and opens the release notes
-modal. This modal handoff is not gated by update-notification permissions: if no
+modal. If no
 browser was open during the update, the first later dashboard visit consumes the
 unseen completed event. The legacy `lastSuccessfulUpdate` marker remains a
 compatibility fallback and is marked as seen in localStorage.
 The browser also records the shown update version, so a later-arriving completion
 marker for the same release cannot reopen the modal after the user closes it.
 
-Local super-admins can review and update those Bitbucket notification settings
-from Notifications -> Application updates. The card edits `.env.persistent-memory`
-through the API and internal `update-runner` only; the browser never receives the
-stored token. Leaving the token field blank preserves the current token, and
-turning notifications off preserves the repository values for later re-enable.
-**Test connection** verifies the entered source without writing it. A failed test
-returns a safe remediation message and request id; the update-runner service log
-records the same id without storing or printing the token.
-Every update snapshot also writes `update-notification-settings.json` so operators
-can verify the Bitbucket update-notification settings were captured; the token is
-redacted there but preserved in the copied `.env.persistent-memory`. This artifact
-backs up the dashboard release-update integration. Per-browser Chrome/browser
-notification permission still belongs to the browser profile, while the local
-personal stack stores the Push subscription endpoint/keys and durable VAPID keys
-in Postgres control-plane tables so notifications survive dashboard/container
-rebuilds as long as the browser subscription remains valid.
+Application release checks run automatically and do not have editable source or
+credential fields. Per-browser notification permission still belongs to the
+browser profile. The local personal stack stores Push subscription endpoints/keys
+and durable VAPID keys in Postgres control-plane tables so browser notifications
+survive dashboard/container rebuilds while the subscription remains valid.
 
 Personal Chrome/browser notifications use the standard Web Push flow: the
 dashboard asks Chrome for permission from the System notifications setting,
@@ -538,8 +549,11 @@ npm run test:integration    # vitest against live containers (test/integration)
 npm run rls:check           # the RLS floor verifier (layers/core/tools/rls-check.mjs)
 ```
 
-`npm run setup` = `npm install && npm run prisma:generate` (the prerequisite for any
-build, run by `update.sh`).
+`npm run setup` runs the protected pre-update snapshot, installs root
+dependencies, generates the Prisma client, builds and installs the update
+coordinator, compiles onboarding helpers, and refreshes installer-owned agent
+artifacts. The same setup entry point is used by the wizard and updater; it is
+more than a dependency-install command.
 
 ### Server stack and MCP runtime
 
@@ -581,6 +595,12 @@ Embeddings are served by **Ollama running on the HOST**, not a container — con
 reach it at `host.docker.internal:11434` (default `OLLAMA_URL`). `start.sh` /
 `verify-install.sh` probe it from the host at `localhost:11434` and warn if the
 configured `EMBED_MODEL` (default `qwen3-embedding:4b`) is not pulled.
+
+On Windows this is the native Ollama application. Keep it and Docker Desktop
+running when using the stack. A successful host probe does not establish that
+containers can reach Ollama; check the dashboard's host-Ollama row after install.
+For bind-address and Windows firewall troubleshooting, see
+[Ollama: host and container addresses](../installation/windows-installation.md#ollama-host-and-container-addresses).
 
 The dashboard's host-Ollama row is a separate runtime check, not a Docker-service
 row: it calls `OLLAMA_URL/api/tags`, verifies reachability, and when Ollama is the
@@ -782,9 +802,8 @@ Selected operational env (defaults in `deploy/compose/docker-compose.yml` / the 
 `WORKER_MEM_LIMIT` (`1g`), `WORKER_CONCURRENCY` (`2`), `INGEST_MAX_FILE_BYTES`,
 `PII_GATE_ENABLED` / `PII_INGEST_GATE_ENABLED`, `GRAPH_BACKEND` (`falkordb`),
 `DOCKER_GID` (native-Linux socket gid), `DOCKER_CONTROL_TOKEN`,
-`UPDATE_RUNNER_TOKEN`, `USAGE_INGEST_TOKEN`, and optional Bitbucket update-check
-keys (`UPDATE_CHECK_PROVIDER`, `UPDATE_BITBUCKET_SCOPE`,
-`UPDATE_BITBUCKET_PROJECT` or `UPDATE_BITBUCKET_USER`, `UPDATE_BITBUCKET_*`).
+`UPDATE_RUNNER_TOKEN` and `USAGE_INGEST_TOKEN`. Public update checks require no
+additional configuration.
 
 ---
 
@@ -833,6 +852,7 @@ ownership floor across the data tables).
 ## Invariants & gotchas
 
 - **Lifecycle commands.** `install-persistent-memory`, `update-persistent-memory`,
+  `start-persistent-memory`, `stop-persistent-memory`, `verify-persistent-memory`,
   and `uninstall-persistent-memory` are the user-facing lifecycle entry points;
   the remaining `.sh` files are internal (the committed documentation, "Build / run / test").
 - **`update` runs what it pulls** — trusted-remote-only, `--ff-only`, author NOT

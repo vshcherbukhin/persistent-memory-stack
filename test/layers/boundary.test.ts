@@ -58,8 +58,9 @@ describe('layer boundaries', () => {
       .split('\0')
       .filter(Boolean)
       .filter((path) => path !== 'test/layers/boundary.test.ts')
-      // This compatibility test intentionally asserts the historical paths.
+      // This compatibility test and its frozen contract intentionally assert historical paths.
       .filter((path) => path !== 'apps/update-runner/test/legacy-4.0.24-update-bridge.test.ts')
+      .filter((path) => path !== 'apps/update-runner/test/fixtures/legacy-4.0.24-update-contract.json')
       .filter((path) => !path.endsWith('release-history.md'))
       .filter((path) => !path.startsWith('.local/'))
       .filter((path) => !path.startsWith('.codex/rules/') && !path.startsWith('.claude/rules/'))

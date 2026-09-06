@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-update-runner",
-  "version": "0.3.5",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Restricted update sidecar for Persistent Memory release metadata and snapshot-safe updates.",

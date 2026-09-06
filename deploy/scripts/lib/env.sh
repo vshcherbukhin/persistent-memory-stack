@@ -226,7 +226,7 @@ pm_env_generate_core_secrets() {
 pm_env_validate_deploy_required() {
     local file="${1:?env file required}"
     local missing=()
-    local key value graph extraction embed provider
+    local key value graph extraction embed
 
     for key in \
         TOKEN_PEPPER PM_HOST_BIND OLLAMA_URL EMBED_PROVIDER EMBED_MODEL EMBED_DIM EMBEDDING_MODE \
@@ -270,18 +270,6 @@ pm_env_validate_deploy_required() {
     embed="$(pm_env_get EMBED_PROVIDER "" "$file")"
     if [ "$embed" = "voyage" ] && [ -z "$(pm_env_get VOYAGE_API_KEY "" "$file")" ]; then missing+=("VOYAGE_API_KEY"); fi
     if [ "$embed" = "openai" ] && [ -z "$(pm_env_get OPENAI_API_KEY "" "$file")" ]; then missing+=("OPENAI_API_KEY"); fi
-
-    provider="$(pm_env_get UPDATE_CHECK_PROVIDER none "$file")"
-    if [ "$provider" = "bitbucket" ]; then
-        for key in UPDATE_BITBUCKET_URL UPDATE_BITBUCKET_TOKEN UPDATE_BITBUCKET_REPO UPDATE_BITBUCKET_BRANCH; do
-            [ -n "$(pm_env_get "$key" "" "$file")" ] || missing+=("$key")
-        done
-        if [ "$(pm_env_get UPDATE_BITBUCKET_SCOPE project "$file")" = "user" ]; then
-            [ -n "$(pm_env_get UPDATE_BITBUCKET_USER "" "$file")" ] || missing+=("UPDATE_BITBUCKET_USER")
-        else
-            [ -n "$(pm_env_get UPDATE_BITBUCKET_PROJECT "" "$file")" ] || missing+=("UPDATE_BITBUCKET_PROJECT")
-        fi
-    fi
 
     if [ "${#missing[@]}" -gt 0 ]; then
         printf 'Missing required env value(s): %s\n' "${missing[*]}" >&2

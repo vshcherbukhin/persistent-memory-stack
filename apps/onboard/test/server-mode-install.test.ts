@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { Server } from 'node:net'
 import {
+  canBindPort,
   buildInstallStepEnv,
   buildComposeArgs,
   buildNpmInstallArgs,
@@ -44,6 +47,12 @@ const secrets: ServerModeSecrets = {
 }
 
 describe('server mode installer rendering', () => {
+  it.each(['EADDRINUSE', 'EACCES', 'EPERM'])('rejects ports when the host bind probe returns %s', async (code) => {
+    const server = Object.assign(new EventEmitter(), {
+      listen: () => server.emit('error', Object.assign(new Error(code), { code })),
+    })
+    await expect(canBindPort('127.0.0.1', 12090, () => server as unknown as Server)).resolves.toBe(false)
+  })
   it('uses isolated Docker-safe defaults for client-managed and server-managed servers', () => {
     const clientManaged = defaultsForServerMode('client-managed')
     const serverManaged = defaultsForServerMode('server-managed')

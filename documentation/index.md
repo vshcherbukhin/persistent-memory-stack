@@ -21,3 +21,4 @@ to a server.
 - [Security](stack-architecture/security.md)
 - [Access Model](stack-architecture/access-model.md)
 - [Installation](installation/installation-steps.md)
+- [Windows preparation](installation/windows-installation.md)

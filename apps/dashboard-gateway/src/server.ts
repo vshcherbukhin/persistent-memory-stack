@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 const DEFAULT_COORDINATOR_STATE_PATH = '/run/persistent-memory/update-coordinator-state/dashboard-handoff.json'
 const DEFAULT_LEGACY_STATE_PATH = '/run/persistent-memory/update-state/dashboard-handoff.json'
 const HANDOFF_PROTOCOL_VERSION = 1
+const PUBLIC_RELEASE_LINE = 'public-v1'
 const DEFAULT_DASHBOARD_BASE_URL = 'http://persistent-memory-dashboard:3000'
 const ACTIVE_SHELL_PHASES = new Set<HandoffPhase>(['updating', 'rebuilding-dashboard', 'verifying', 'failed'])
 const PHASES = new Set<HandoffPhase>(['idle', 'updating', 'rebuilding-dashboard', 'verifying', 'complete', 'failed'])
@@ -64,6 +65,7 @@ export interface IdleHandoffState {
 
 export interface ActiveHandoffState {
   active: true
+  releaseLine: string
   id: string
   source: HandoffSource
   phase: Exclude<HandoffPhase, 'idle'>
@@ -187,6 +189,7 @@ function sanitizeProbe(value: unknown): HandoffProbe | undefined {
 function compatibilityState(input: Record<string, unknown>): ActiveHandoffState {
   return {
     active: true,
+    releaseLine: PUBLIC_RELEASE_LINE,
     id: stringValue(input.id) ?? 'unsupported-handoff',
     source: 'update-coordinator',
     phase: 'updating',
@@ -199,7 +202,7 @@ function compatibilityState(input: Record<string, unknown>): ActiveHandoffState 
 
 function parseHandoffState(value: unknown): HandoffState {
   const input = value as Record<string, unknown> | null
-  if (!input) return idle()
+  if (!input || typeof input !== 'object' || input.releaseLine !== PUBLIC_RELEASE_LINE) return idle()
   if ('protocolVersion' in input && input.protocolVersion !== HANDOFF_PROTOCOL_VERSION) {
     return compatibilityState(input)
   }
@@ -225,6 +228,7 @@ function parseHandoffState(value: unknown): HandoffState {
 
   const state: ActiveHandoffState = {
     active: true,
+    releaseLine: PUBLIC_RELEASE_LINE,
     id,
     source: source as HandoffSource,
     phase: phase as ActiveHandoffState['phase'],
@@ -287,7 +291,7 @@ export async function readHandoffState(path: string, legacyPath?: string): Promi
 }
 
 export function shouldServeUpdateShell(state: HandoffState): boolean {
-  return state.active && ACTIVE_SHELL_PHASES.has(state.phase)
+  return state.active && state.releaseLine === PUBLIC_RELEASE_LINE && ACTIVE_SHELL_PHASES.has(state.phase)
 }
 
 function textHeader(value: string | string[] | undefined): string {
@@ -400,8 +404,8 @@ export function createUpdateHtml(initialState: HandoffState): string {
   </main>
   <script>
     const initialState = ${safeState};
-    const releaseKey = 'pm:post-update-release-notes-version';
-    const handoffSeenKey = 'pm:update-handoff-seen-id';
+    const releaseKey = 'pm:public-v1:post-update-release-notes-version';
+    const handoffSeenKey = 'pm:public-v1:update-handoff-seen-id';
     const shell = document.getElementById('shell');
     const message = document.getElementById('message');
     const probe = document.getElementById('probe');
@@ -419,7 +423,7 @@ export function createUpdateHtml(initialState: HandoffState): string {
     const title = document.querySelector('.update-handoff-title');
     let reloadScheduled = false;
     let readinessPolling = false;
-    const progressStorageKey = 'pm:update-handoff-progress';
+    const progressStorageKey = 'pm:public-v1:update-handoff-progress';
     let displayedRunId = initialState && initialState.active ? initialState.id : null;
     let displayedProgress = initialState && initialState.active ? (Number.isFinite(initialState.progress) ? initialState.progress : phaseProgress(initialState.phase)) : 5;
     try {

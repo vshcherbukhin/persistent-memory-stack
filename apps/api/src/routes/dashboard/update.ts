@@ -10,12 +10,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
 import { requireSuperuser } from '../../authz/guards.ts'
 import {
-  getUpdateSettings,
   getUpdateLogs,
   getUpdateStatus,
-  saveUpdateSettings,
   startUpdate,
-  testUpdateSettings,
   UpdateRunnerRequestError,
   UpdateRunnerUnavailableError,
 } from '../../services/update-runner.ts'
@@ -41,15 +38,18 @@ const UpdateRunSummary = z.object({
   error: z.string().optional(),
 })
 const PostUpdateSignal = z.object({
+  releaseLine: z.string().optional(),
   id: z.string(),
   source: z.enum(['update-script', 'update-runner']),
   version: z.string(),
   finishedAt: z.string(),
 })
 const UpdateStatus = z.object({
+  releaseLine: z.string().optional(),
   currentVersion: z.string(),
   latestVersion: z.string().nullable(),
   updateAvailable: z.boolean(),
+  updateBranch: z.string().optional(),
   autoUpdateReady: z.boolean().optional(),
   currentCommit: z.string().optional(),
   latestCommit: z.string().optional(),
@@ -64,41 +64,6 @@ const UpdateLogs = z.object({
   running: z.boolean(),
   logs: z.array(z.string()),
   lastRun: UpdateRunSummary.optional(),
-})
-const UpdateBitbucketSettings = z.object({
-  url: z.string(),
-  tokenConfigured: z.boolean(),
-  scope: z.enum(['project', 'user']),
-  project: z.string(),
-  user: z.string(),
-  repo: z.string(),
-  branch: z.string(),
-})
-const UpdateSettings = z.object({
-  enabled: z.boolean(),
-  provider: z.enum(['none', 'bitbucket', 'git']),
-  bitbucket: UpdateBitbucketSettings,
-})
-const UpdateSettingsInput = z.object({
-  enabled: z.boolean(),
-  provider: z.enum(['none', 'bitbucket']).optional(),
-  bitbucket: z.object({
-    url: z.string().optional(),
-    token: z.string().optional(),
-    scope: z.enum(['project', 'user']).optional(),
-    project: z.string().optional(),
-    user: z.string().optional(),
-    repo: z.string().optional(),
-    branch: z.string().optional(),
-  }).optional(),
-})
-const UpdateConnectionTest = z.object({
-  ok: z.literal(true),
-  provider: z.literal('bitbucket'),
-  repository: z.string(),
-  branch: z.string(),
-  latestCommit: z.string(),
-  latestVersion: z.string().nullable(),
 })
 const ErrorBody = z.object({
   error: z.string(),
@@ -159,54 +124,4 @@ export async function dashboardUpdateRoutes(app: FastifyInstance): Promise<void>
     },
   )
 
-  z4.get(
-    '/update/settings',
-    { preHandler: [requireSuperuser], schema: { response: { 200: UpdateSettings, ...UpdateRunnerErrors } } },
-    async (_req, reply) => {
-      try {
-        return reply.code(200).send(await getUpdateSettings())
-      } catch (err) {
-        if (err instanceof UpdateRunnerUnavailableError) return reply.code(503).send({ error: err.code, message: err.message })
-        if (err instanceof UpdateRunnerRequestError && err.statusCode === 422) return reply.code(422).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        if (err instanceof UpdateRunnerRequestError) return reply.code(500).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        throw err
-      }
-    },
-  )
-
-  z4.patch(
-    '/update/settings',
-    {
-      preHandler: [requireSuperuser],
-      schema: { body: UpdateSettingsInput, response: { 200: UpdateSettings, ...UpdateRunnerErrors } },
-    },
-    async (req, reply) => {
-      try {
-        return reply.code(200).send(await saveUpdateSettings(req.body))
-      } catch (err) {
-        if (err instanceof UpdateRunnerUnavailableError) return reply.code(503).send({ error: err.code, message: err.message })
-        if (err instanceof UpdateRunnerRequestError && err.statusCode === 422) return reply.code(422).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        if (err instanceof UpdateRunnerRequestError) return reply.code(500).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        throw err
-      }
-    },
-  )
-
-  z4.post(
-    '/update/test',
-    {
-      preHandler: [requireSuperuser],
-      schema: { body: UpdateSettingsInput, response: { 200: UpdateConnectionTest, ...UpdateRunnerErrors } },
-    },
-    async (req, reply) => {
-      try {
-        return reply.code(200).send(await testUpdateSettings(req.body))
-      } catch (err) {
-        if (err instanceof UpdateRunnerUnavailableError) return reply.code(503).send({ error: err.code, message: err.message })
-        if (err instanceof UpdateRunnerRequestError && err.statusCode === 422) return reply.code(422).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        if (err instanceof UpdateRunnerRequestError) return reply.code(500).send({ error: err.code, message: err.message, details: err.details, requestId: err.requestId })
-        throw err
-      }
-    },
-  )
 }

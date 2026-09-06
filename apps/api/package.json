@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-api",
-  "version": "0.5.10",
+  "version": "1.0.0",
   "private": true,
   "description": "persistent-memory API (Phase 3) — the single authorization choke-point + identity layer. Fastify + Zod + Prisma 7 (PrismaPg adapter) + argon2id token auth + Postgres RLS tenant context.",
   "type": "module",

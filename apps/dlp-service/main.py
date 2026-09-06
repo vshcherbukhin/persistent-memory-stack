@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="persistent-memory-dlp", lifespan=lifespan)
+app = FastAPI(title="persistent-memory-dlp", version="1.0.0", lifespan=lifespan)
 
 
 def _gitleaks_version() -> str:

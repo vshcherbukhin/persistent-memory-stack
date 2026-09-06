@@ -66,7 +66,7 @@ no-cache response headers through both authenticated documentation routes.
 
 Capture screenshots from the real dashboard at 1920 x 873. Before committing,
 blur memory content and author cells, memory view/edit content, Application
-updates user and Bitbucket URL fields, and the profile email. Never commit a raw
+updates owner and repository fields, and the profile email. Never commit a raw
 capture containing those values.
 
 The Memory Graph guide keeps two Chrome-rendered references: a project-scoped 3D

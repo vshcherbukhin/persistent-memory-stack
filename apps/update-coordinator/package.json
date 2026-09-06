@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-update-coordinator",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Compiled installer-managed coordinator for Persistent Memory release updates.",

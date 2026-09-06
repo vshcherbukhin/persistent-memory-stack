@@ -23,17 +23,22 @@ set -Eeuo pipefail
 
 # This script lives in deploy/scripts/; the repo root is two levels up.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SOURCE_REPO_ROOT="${PM_COORDINATOR_SOURCE_ROOT:-$SCRIPT_REPO_ROOT}"
-REPO_ROOT="${PM_COORDINATOR_RESOLVED_ROOT:-$SOURCE_REPO_ROOT}"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+SCRIPT_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
+SOURCE_REPO_ROOT="$(pm_host_path "${PM_COORDINATOR_SOURCE_ROOT:-$SCRIPT_REPO_ROOT}")"
+REPO_ROOT="$(pm_host_path "${PM_COORDINATOR_RESOLVED_ROOT:-$SOURCE_REPO_ROOT}")"
 SOURCE_ENV_RUNTIME="$SOURCE_REPO_ROOT/.env.persistent-memory"
 # shellcheck source=deploy/scripts/lib/update-handoff-state.sh
 . "$SCRIPT_DIR/lib/update-handoff-state.sh"
 LEGACY_HANDOFF_STATE_DIR="$(pm_normalize_handoff_state_dir "$SOURCE_REPO_ROOT" "${PM_LEGACY_HANDOFF_STATE_DIR:-}")"
+LEGACY_HANDOFF_STATE_DIR="$(pm_host_path "$LEGACY_HANDOFF_STATE_DIR")"
 RUNTIME_HANDOFF_STATE_DIR="$(pm_normalize_handoff_state_dir "$SOURCE_REPO_ROOT" "${PM_HANDOFF_STATE_DIR:-$LEGACY_HANDOFF_STATE_DIR}")"
+RUNTIME_HANDOFF_STATE_DIR="$(pm_host_path "$RUNTIME_HANDOFF_STATE_DIR")"
 HANDOFF_STATE_DIR="$RUNTIME_HANDOFF_STATE_DIR"
 HANDOFF_STATE_FILE="$HANDOFF_STATE_DIR/dashboard-handoff.json"
 DEPLOYED_STATE_DIR="${PM_COORDINATOR_DEPLOYED_STATE_DIR:-$RUNTIME_HANDOFF_STATE_DIR}"
+DEPLOYED_STATE_DIR="$(pm_host_path "$DEPLOYED_STATE_DIR")"
 PM_LEGACY_HANDOFF_STATE_DIR="$LEGACY_HANDOFF_STATE_DIR"
 PM_HANDOFF_STATE_DIR="$RUNTIME_HANDOFF_STATE_DIR"
 export PM_LEGACY_HANDOFF_STATE_DIR PM_HANDOFF_STATE_DIR
@@ -50,11 +55,12 @@ HANDOFF_PROBE_PID=""
 
 # shellcheck source=deploy/scripts/lib/env.sh
 . "$SCRIPT_DIR/lib/env.sh"
+. "$SCRIPT_DIR/lib/public-update-source.sh"
 
 configure_update_context() {
-    REPO_ROOT="$1"
+    REPO_ROOT="$(pm_host_path "$1")"
     cd "$REPO_ROOT"
-    ENV_RUNTIME="${PM_COORDINATOR_ENV_RUNTIME:-$REPO_ROOT/.env.persistent-memory}"
+    ENV_RUNTIME="$(pm_host_path "${PM_COORDINATOR_ENV_RUNTIME:-$REPO_ROOT/.env.persistent-memory}")"
     PRISMA_DIR="$REPO_ROOT/layers/core/schema"
     COMPOSE_FILE="$REPO_ROOT/deploy/compose/docker-compose.yml"
     COMPOSE=(docker compose -f "$COMPOSE_FILE")
@@ -71,6 +77,7 @@ configure_update_context() {
 }
 
 configure_update_context "$REPO_ROOT"
+pm_assert_public_update_origin "$SOURCE_REPO_ROOT"
 # First-run/update builds are network-heavy across multiple Node images. Keep
 # Compose from launching all image builds at once unless an operator overrides it.
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
@@ -290,26 +297,6 @@ switch_to_update_branch_if_needed() {
 
 parse_update_args "$@"
 
-is_http_remote_url() {
-    case "${1:-}" in
-        http://*|https://*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-remote_username_from_url() {
-    local remote_url without_scheme userinfo
-    remote_url="${1:-}"
-    without_scheme="${remote_url#http://}"
-    without_scheme="${without_scheme#https://}"
-    case "$without_scheme" in
-        *@*) ;;
-        *) return 0 ;;
-    esac
-    userinfo="${without_scheme%%@*}"
-    printf '%s\n' "${userinfo%%:*}"
-}
-
 redacted_remote_url() {
     local remote_url scheme rest
     remote_url="${1:-origin}"
@@ -324,39 +311,7 @@ redacted_remote_url() {
 }
 
 git_fetch_origin_branch() {
-    local branch remote_url provider token git_user askpass rc
-    branch="$1"
-    remote_url="$(git remote get-url origin 2>/dev/null || echo "origin")"
-    provider="none"
-    token=""
-    git_user=""
-    if [ -f "$ENV_RUNTIME" ]; then
-        provider="$(pm_env_get UPDATE_CHECK_PROVIDER "none" "$ENV_RUNTIME")"
-        token="$(pm_env_get UPDATE_BITBUCKET_TOKEN "" "$ENV_RUNTIME")"
-        git_user="$(pm_env_get UPDATE_BITBUCKET_USER "" "$ENV_RUNTIME")"
-    fi
-
-    if [ "$provider" = "bitbucket" ] && [ -n "$token" ] && is_http_remote_url "$remote_url"; then
-        git_user="${git_user:-$(remote_username_from_url "$remote_url")}"
-        git_user="${git_user:-${USER:-git}}"
-        askpass="$(mktemp "${TMPDIR:-/tmp}/pm-git-askpass.XXXXXX")"
-        chmod 700 "$askpass"
-        cat > "$askpass" <<'ASKPASS'
-#!/usr/bin/env bash
-case "$1" in
-  *Username*) printf '%s\n' "$PM_GIT_USERNAME" ;;
-  *Password*) printf '%s\n' "$PM_GIT_PASSWORD" ;;
-  *) printf '%s\n' "$PM_GIT_PASSWORD" ;;
-esac
-ASKPASS
-        GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" PM_GIT_USERNAME="$git_user" PM_GIT_PASSWORD="$token" \
-            git fetch --quiet origin "$branch"
-        rc=$?
-        rm -f "$askpass"
-        return "$rc"
-    fi
-
-    GIT_TERMINAL_PROMPT=0 git fetch --quiet origin "$branch"
+    pm_git_fetch_origin_branch "$1"
 }
 
 current_package_version() {
@@ -383,6 +338,7 @@ dashboard_handoff_write() {
     updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     HANDOFF_PHASE="$phase"
     mkdir -p "$HANDOFF_STATE_DIR"
+    PM_PUBLIC_SOURCE_FILE="$SCRIPT_REPO_ROOT/layers/update-ops/update-flow/public-source.json" \
     HANDOFF_FILE="$HANDOFF_STATE_FILE" \
     HANDOFF_ID="$HANDOFF_RUN_ID" \
     HANDOFF_PHASE_VALUE="$phase" \
@@ -409,6 +365,7 @@ const version = process.env.HANDOFF_TARGET_VERSION || "";
 const state = {
   id: process.env.HANDOFF_ID,
   source: process.env.HANDOFF_SOURCE || "update-script",
+  releaseLine: JSON.parse(fs.readFileSync(process.env.PM_PUBLIC_SOURCE_FILE, "utf8")).releaseLine,
   phase,
   message: process.env.HANDOFF_MESSAGE,
   startedAt: process.env.HANDOFF_STARTED_AT,
@@ -640,14 +597,15 @@ reload_compose_from_env() {
 release_at_commit() {
     local commit
     commit="$1"
-    git show "$commit:package.json" 2>/dev/null | node -e '
+    git show "$commit:package.json" 2>/dev/null | PM_PUBLIC_SOURCE_FILE="$SCRIPT_REPO_ROOT/layers/update-ops/update-flow/public-source.json" node -e '
 let raw = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { raw += chunk; });
 process.stdin.on("end", () => {
   try {
-    const version = JSON.parse(raw).version;
-    if (typeof version === "string") process.stdout.write(version);
+    const pkg = JSON.parse(raw);
+    const source = JSON.parse(require("fs").readFileSync(process.env.PM_PUBLIC_SOURCE_FILE, "utf8"));
+    if (pkg.persistentMemoryReleaseLine === source.releaseLine && typeof pkg.version === "string" && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(pkg.version)) process.stdout.write(pkg.version);
   } catch {}
 });
 '
@@ -682,7 +640,7 @@ resolve_release_worktree() {
         exit 1
     fi
 
-    worktree_root="${PM_RELEASE_WORKTREE_ROOT:-$SOURCE_REPO_ROOT/.local/release-worktrees}"
+    worktree_root="$(pm_host_path "${PM_RELEASE_WORKTREE_ROOT:-$SOURCE_REPO_ROOT/.local/release-worktrees}")"
     worktree="$worktree_root/persistent-memory-${UPDATE_RELEASE_OVERRIDE}-${commit:0:12}"
     if [ -e "$worktree" ]; then
         if ! git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -849,6 +807,7 @@ mark_update_complete() {
     fi
     commit="$(git rev-parse HEAD 2>/dev/null || true)"
     mkdir -p "$state_dir"
+    PM_PUBLIC_SOURCE_FILE="$SCRIPT_REPO_ROOT/layers/update-ops/update-flow/public-source.json" \
     MARKER_FILE="$marker" \
     MARKER_ID="$marker_id" \
     MARKER_VERSION="$version" \
@@ -860,6 +819,7 @@ const fs = require("fs");
 const marker = {
   id: process.env.MARKER_ID,
   source: "update-script",
+  releaseLine: JSON.parse(fs.readFileSync(process.env.PM_PUBLIC_SOURCE_FILE, "utf8")).releaseLine,
   version: process.env.MARKER_VERSION,
   finishedAt: process.env.MARKER_FINISHED_AT,
 };
@@ -979,7 +939,7 @@ reserve_coordinator_before_source_resolution() {
     local coordinator_home
     coordinator_home="$(node "$SOURCE_REPO_ROOT/scripts/install-update-coordinator.mjs" --root "$SOURCE_REPO_ROOT" --print-home)" \
         || { fail "Could not install the update coordinator."; exit 1; }
-    COORDINATOR_INSTALLATION_HOME="$(cd "$coordinator_home/../.." && pwd)"
+    COORDINATOR_INSTALLATION_HOME="$(cd "$coordinator_home/../.." && pm_host_pwd)"
     COORDINATOR_RESERVATION_DIR="$COORDINATOR_INSTALLATION_HOME/update.lock"
     if ! mkdir "$COORDINATOR_RESERVATION_DIR" 2>/dev/null; then
         fail "Persistent Memory update is already running ($COORDINATOR_RESERVATION_DIR)."
@@ -1022,12 +982,15 @@ elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     remote_url="$(git remote get-url origin 2>/dev/null || echo "origin")"
     if ! git_fetch_origin_branch "$branch"; then
         fail "git fetch origin $branch failed for $(redacted_remote_url "$remote_url")."
-        echo "        Check VPN/network and Git access. For HTTPS Bitbucket remotes, configure"
-        echo "        dashboard update notifications with a personal Bitbucket token, or configure"
-        echo "        Git credentials/SSH for this checkout, then rerun npm run update-persistent-memory."
+        echo "        Check network access to the public repository and this checkout origin,"
+        echo "        then rerun npm run update-persistent-memory. No application update token is required."
         exit 1
     fi
     HANDOFF_TARGET_VERSION_OVERRIDE="$(release_at_commit "origin/$branch")"
+    if [ -z "$HANDOFF_TARGET_VERSION_OVERRIDE" ]; then
+        fail "The fetched branch is not a valid release on the current public release line. Refusing to update this checkout."
+        exit 1
+    fi
     dashboard_handoff_write "updating" "Pulling Persistent Memory updates from origin/$branch." "" "18"
     switch_to_update_branch_if_needed "$current_branch" "$branch"
     incoming=$(git log --oneline "HEAD..origin/$branch" 2>/dev/null || true)
@@ -1056,7 +1019,7 @@ PM_COORDINATOR_INSTALL_ROOT="$SOURCE_REPO_ROOT"
 export PM_COORDINATOR_INSTALL_ROOT
 COORDINATOR_HOME="$(node "$SOURCE_REPO_ROOT/scripts/install-update-coordinator.mjs" --root "$SOURCE_REPO_ROOT" --print-home)" \
     || { fail "Could not install the update coordinator."; exit 1; }
-COORDINATOR_INSTALLATION_HOME="$(cd "$COORDINATOR_HOME/../.." && pwd)"
+COORDINATOR_INSTALLATION_HOME="$(cd "$COORDINATOR_HOME/../.." && pm_host_pwd)"
 # The gateway receives this read-only install-scoped state mount. It will
 # consume the coordinator event protocol in the next compatibility phase.
 PM_COORDINATOR_STATE_DIR="$COORDINATOR_INSTALLATION_HOME/state"

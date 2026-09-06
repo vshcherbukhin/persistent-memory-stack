@@ -9,6 +9,7 @@
 
 # Per-package build output (tsc).
 /dist/
+layers/core/schema/dist/
 packages/shared/dist/
 packages/db/dist/
 api/dist/

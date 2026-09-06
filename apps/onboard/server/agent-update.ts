@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readPersistentMemoryTomlEntry } from './mcp-toml.js'
 import {
   buildMcpEntry,
   claudeDesktopConfigPath,
@@ -20,13 +21,16 @@ import {
   codexProjectConfigPath,
   registerClaudeWrite,
   registerCodexWrite,
+  readAgentJson,
   type McpServerEntry,
 } from './register.js'
 import {
   readDefaultRule,
   writeRuleTargets,
+  codexMemoryFile,
   type RuleTarget,
 } from './rule.js'
+import { agentProfiles, agentProfileEnvironment } from './agent-profiles.js'
 
 const SERVER_KEY = 'persistent-memory'
 const RULE_BASENAME = 'persistent-memory.md'
@@ -35,6 +39,7 @@ export interface RefreshAgentInstallInput {
   root: string
   home?: string
   env?: Record<string, string>
+  profileEnv?: NodeJS.ProcessEnv
 }
 
 export interface RefreshAgentInstallResult {
@@ -114,11 +119,12 @@ function deriveAgentEnv(root: string, env: Record<string, string>): DerivedAgent
   }
 }
 
-function readJson(path: string): Record<string, any> | null {
+function readJson(path: string, report?: (message: string) => void): Record<string, any> | null {
   if (!existsSync(path)) return null
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as Record<string, any>
+    return readAgentJson(path)
   } catch {
+    report?.(`skipped unreadable or malformed ${path}; existing configuration was not changed`)
     return null
   }
 }
@@ -147,50 +153,14 @@ function buildEntryFromExisting(existing: McpServerEntry | CodexEntry | undefine
   })
 }
 
-function isOurTomlHeader(trimmed: string): boolean {
-  return /^\[mcp_servers\.(persistent-memory|"persistent-memory")(\.|\])/.test(trimmed)
-}
-
-function unquoteToml(value: string): string {
-  const trimmed = value.trim()
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\')
-  }
-  return trimmed
-}
-
 export function readCodexPersistentMemoryEntry(text: string): CodexEntry | null {
-  const lines = text.split(/\r?\n/)
-  const start = lines.findIndex((line) => {
-    const t = line.trim()
-    return t === `[mcp_servers.${SERVER_KEY}]` || t === `[mcp_servers."${SERVER_KEY}"]`
-  })
-  if (start < 0) return null
-
-  const entry: CodexEntry = { env: {} }
-  let section: 'root' | 'env' = 'root'
-  for (let i = start + 1; i < lines.length; i++) {
-    const trimmed = lines[i]!.trim()
-    if (trimmed.startsWith('[')) {
-      if (!isOurTomlHeader(trimmed)) break
-      section = trimmed.includes('.env]') || trimmed.includes('".env"]') ? 'env' : 'root'
-      continue
-    }
-    const eq = trimmed.indexOf('=')
-    if (eq <= 0) continue
-    const key = trimmed.slice(0, eq).trim()
-    const value = unquoteToml(trimmed.slice(eq + 1))
-    if (section === 'env') entry.env![key] = value
-    else if (key === 'command') entry.command = value
-    else if (key === 'url') entry.url = value
-  }
-  return entry
+  return readPersistentMemoryTomlEntry(text)
 }
 
 function ruleTarget(kind: 'claude' | 'codex', baseDir: string, memoryDir: string, memoryName: string): RuleTarget {
   return {
     kind,
-    memoryFile: join(memoryDir, memoryName),
+    memoryFile: kind === 'codex' ? codexMemoryFile(memoryDir) : join(memoryDir, memoryName),
     ruleFile: join(baseDir, 'rules', RULE_BASENAME),
     ruleRef: memoryDir === baseDir ? `@rules/${RULE_BASENAME}` : `@.${kind}/rules/${RULE_BASENAME}`,
   }
@@ -207,9 +177,8 @@ function addRuleTarget(targets: Map<string, RuleTarget>, target: RuleTarget): vo
   targets.set(`${target.kind}:${target.ruleFile}:${target.memoryFile}`, target)
 }
 
-function addGlobalRuleTarget(targets: Map<string, RuleTarget>, kind: 'claude' | 'codex', home: string): void {
-  if (kind === 'claude') addRuleTarget(targets, ruleTarget('claude', join(home, '.claude'), join(home, '.claude'), 'CLAUDE.md'))
-  else addRuleTarget(targets, ruleTarget('codex', join(home, '.codex'), join(home, '.codex'), 'AGENTS.md'))
+function addGlobalRuleTarget(targets: Map<string, RuleTarget>, kind: 'claude' | 'codex', profileDir: string): void {
+  addRuleTarget(targets, ruleTarget(kind, profileDir, profileDir, kind === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'))
 }
 
 function addProjectRuleTarget(targets: Map<string, RuleTarget>, kind: 'claude' | 'codex', projectPath: string): void {
@@ -217,18 +186,18 @@ function addProjectRuleTarget(targets: Map<string, RuleTarget>, kind: 'claude' |
   else addRuleTarget(targets, ruleTarget('codex', join(projectPath, '.codex'), projectPath, 'AGENTS.md'))
 }
 
-function discoverPromptOnlyTargets(home: string, root: string, targets: Map<string, RuleTarget>): void {
-  if (existsSync(join(home, '.claude', 'rules', RULE_BASENAME)) || hasPersistentMemoryText(join(home, '.claude', 'CLAUDE.md'))) {
-    addGlobalRuleTarget(targets, 'claude', home)
+function discoverPromptOnlyTargets(profiles: ReturnType<typeof agentProfiles>, root: string, targets: Map<string, RuleTarget>): void {
+  if (existsSync(join(profiles.claudeDir, 'rules', RULE_BASENAME)) || hasPersistentMemoryText(join(profiles.claudeDir, 'CLAUDE.md'))) {
+    addGlobalRuleTarget(targets, 'claude', profiles.claudeDir)
   }
-  if (existsSync(join(home, '.codex', 'rules', RULE_BASENAME)) || hasPersistentMemoryText(join(home, '.codex', 'AGENTS.md'))) {
-    addGlobalRuleTarget(targets, 'codex', home)
+  if (existsSync(join(profiles.codexDir, 'rules', RULE_BASENAME)) || hasPersistentMemoryText(codexMemoryFile(profiles.codexDir)) || hasPersistentMemoryText(join(profiles.codexDir, 'AGENTS.md'))) {
+    addGlobalRuleTarget(targets, 'codex', profiles.codexDir)
   }
 
   if (existsSync(join(root, '.claude', 'rules', RULE_BASENAME)) || hasPersistentMemoryText(join(root, 'CLAUDE.md'), 'claude')) {
     addProjectRuleTarget(targets, 'claude', root)
   }
-  if (existsSync(join(root, '.codex', 'rules', RULE_BASENAME)) || hasPersistentMemoryText(join(root, 'AGENTS.md'), 'codex')) {
+  if (existsSync(join(root, '.codex', 'rules', RULE_BASENAME)) || hasPersistentMemoryText(codexMemoryFile(root), 'codex') || hasPersistentMemoryText(join(root, 'AGENTS.md'), 'codex')) {
     addProjectRuleTarget(targets, 'codex', root)
   }
 }
@@ -236,21 +205,23 @@ function discoverPromptOnlyTargets(home: string, root: string, targets: Map<stri
 export function refreshAgentInstall(input: RefreshAgentInstallInput): RefreshAgentInstallResult {
   const root = input.root
   const home = input.home ?? homedir()
+  const profileOptions = { env: input.profileEnv }
+  const profiles = agentProfiles(home, profileOptions)
   const env = input.env ?? parseEnvFile(join(root, '.env.persistent-memory'))
   const derived = deriveAgentEnv(root, env)
   const messages: string[] = []
   const ruleTargets = new Map<string, RuleTarget>()
   let registrationWrites = 0
 
-  const claudePath = claudeJsonPath(home)
-  const claudeJson = readJson(claudePath)
+  const claudePath = claudeJsonPath(home, profileOptions)
+  const claudeJson = readJson(claudePath, message => messages.push(message))
   const claudeProjectPaths = new Set<string>()
   if (claudeJson) {
     const globalEntry = claudeJson.mcpServers?.[SERVER_KEY] as McpServerEntry | undefined
     if (globalEntry) {
       registerClaudeWrite({ path: claudePath, level: 'global', entry: buildEntryFromExisting(globalEntry, 'claude-code', derived) })
       registrationWrites++
-      addGlobalRuleTarget(ruleTargets, 'claude', home)
+      addGlobalRuleTarget(ruleTargets, 'claude', profiles.claudeDir)
       messages.push(`refreshed ${claudePath}`)
     }
     const projects = claudeJson.projects && typeof claudeJson.projects === 'object' ? claudeJson.projects as Record<string, any> : {}
@@ -270,20 +241,20 @@ export function refreshAgentInstall(input: RefreshAgentInstallInput): RefreshAge
     }
   }
 
-  const desktopPath = claudeDesktopConfigPath(home)
-  const desktopJson = readJson(desktopPath)
+  const desktopPath = claudeDesktopConfigPath(home, profileOptions)
+  const desktopJson = readJson(desktopPath, message => messages.push(message))
   const desktopEntry = desktopJson?.mcpServers?.[SERVER_KEY] as McpServerEntry | undefined
   if (desktopEntry) {
     messages.push(`skipped ${desktopPath}; standalone Claude Desktop HTTP connectors are managed outside claude_desktop_config.json`)
   }
 
-  const codexPath = codexConfigPath(home)
+  const codexPath = codexConfigPath(home, profileOptions)
   if (existsSync(codexPath)) {
     const codexEntry = readCodexPersistentMemoryEntry(readFileSync(codexPath, 'utf8'))
     if (codexEntry) {
       registerCodexWrite(codexPath, buildEntryFromExisting(codexEntry, codexEntry.env?.PM_MCP_CLIENT_NAME ?? 'codex', derived))
       registrationWrites++
-      addGlobalRuleTarget(ruleTargets, 'codex', home)
+      addGlobalRuleTarget(ruleTargets, 'codex', profiles.codexDir)
       messages.push(`refreshed ${codexPath}`)
     }
   }
@@ -300,7 +271,7 @@ export function refreshAgentInstall(input: RefreshAgentInstallInput): RefreshAge
     messages.push(`refreshed ${projectCodexPath}`)
   }
 
-  discoverPromptOnlyTargets(home, root, ruleTargets)
+  discoverPromptOnlyTargets(profiles, root, ruleTargets)
 
   const targets = [...ruleTargets.values()]
   if (targets.length > 0) {
@@ -317,7 +288,7 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   const root = process.env.PM_ROOT ?? process.cwd()
-  const result = refreshAgentInstall({ root, home: homedir() })
+  const result = refreshAgentInstall({ root, home: homedir(), profileEnv: agentProfileEnvironment(process.env) })
   if (result.registrationWrites === 0 && result.ruleWrites === 0) {
     console.log('[agent-update] no existing persistent-memory Claude/Codex agent artifacts detected; skipped')
   } else {

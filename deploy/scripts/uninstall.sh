@@ -6,7 +6,9 @@ set -euo pipefail
 # before removing Compose containers, networks, volumes, images, and generated env.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
 cd "$REPO_ROOT"
 
 ENV_RUNTIME="$REPO_ROOT/.env.persistent-memory"
@@ -26,7 +28,8 @@ POSTGRES_DB="persistent_memory"
 POSTGRES_PASSWORD=""
 TMP_EXPORT=""
 POSTGRES_STATE_MISSING=0
-OWNERSHIP_MANIFEST="$HOME/.persistent-memory/installer-ownership.json"
+PM_HOST_HOME="$(pm_host_path "$HOME")"
+OWNERSHIP_MANIFEST="$PM_HOST_HOME/.persistent-memory/installer-ownership.json"
 
 section() { echo ""; echo "============================================"; echo "  $1"; echo "============================================"; echo ""; }
 ok()      { echo "  [OK]   $1"; }
@@ -205,7 +208,8 @@ NODE
     )" || return 1
     while IFS=$'\t' read -r artifact_path artifact_type artifact_scope expected; do
         [ -n "$artifact_path" ] || continue
-        if [[ "$artifact_path" != "$HOME/"* ]]; then
+        artifact_path="$(pm_host_path "$artifact_path")"
+        if ! node -e 'const p = require("node:path"); const rel = p.relative(process.argv[1], process.argv[2]); process.exit(rel && rel !== ".." && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel) ? 0 : 1)' "$PM_HOST_HOME" "$artifact_path"; then
             warn "Preserved manifest entry outside the selected home: $artifact_path"
             unresolved=1
             continue

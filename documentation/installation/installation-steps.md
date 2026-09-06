@@ -9,7 +9,14 @@ nav_order: 10
 
 The installer creates a local Personal Memories stack first: local embeddings,
 the local dashboard, and stream MCP. Shared Memories is optional and can be
-connected later from the dashboard.
+connected later from the dashboard. Public release checks are automatic after
+installation; no update-source account, token, or setup step is required.
+
+For Windows, complete [Windows preparation](windows-installation.md) first and
+launch with `npm.cmd run install-persistent-memory` from PowerShell. On macOS,
+run `npm run check:host` followed by `npm run install-persistent-memory` from the
+repository root. Both platforms run the wizard on the host and the services in
+Linux containers.
 
 These screenshots are a **sandbox simulation of the installer flow** using safe
 demonstration values. They did not create real user-home files, Docker
@@ -24,8 +31,11 @@ Choose **Get started** to begin a local Personal Memories installation.
 
 ## 2. Check your environment
 
-Confirm Node 20+, Docker, Docker Compose, and Ollama are ready. Resolve any
-failed prerequisite before continuing.
+Confirm Node 24 LTS or Node 22.12+ in the Node 22 line, Docker, Docker Compose,
+and Ollama are ready. Windows also requires Git for Windows. On Windows, prepare
+Node, Git, and Docker manually; use **Install** or **Start** in the Ollama card
+to prepare local embeddings. Resolve failed prerequisites before proceeding to
+the next wizard step. Missing Ollama does not prevent launching the wizard.
 
 ![Environment pre-check](../assets/lifecycle/onboarding/installer-prereqs.png)
 
@@ -51,20 +61,14 @@ and model.
 
 ![Extraction configuration](../assets/lifecycle/onboarding/installer-extraction.png)
 
-## 6. Choose update notifications
-
-Decide whether the local dashboard should report available releases.
-
-![Update notification choice](../assets/lifecycle/onboarding/installer-updates.png)
-
-## 7. Select AI tools
+## 6. Select AI tools
 
 Review the detected Claude and Codex tools. Only the tools you choose receive a
 Persistent Memory stream-MCP registration.
 
 ![Ecosystem detection](../assets/lifecycle/onboarding/installer-ecosystem.png)
 
-## 8. Choose registration level
+## 7. Choose registration level
 
 **Global Level** is recommended when the selected tool should use Persistent
 Memory across projects. Choose Project Level only for a repository-specific
@@ -72,35 +76,35 @@ registration.
 
 ![Registration level](../assets/lifecycle/onboarding/installer-registration.png)
 
-## 9. Review the memory rule
+## 8. Review the memory rule
 
 The rule tells selected AI tools how to recall project context and save durable
 corrections. Review it before continuing.
 
 ![Memory rule](../assets/lifecycle/onboarding/installer-rule.png)
 
-## 10. Review the generated environment
+## 9. Review the generated environment
 
 Confirm the local dashboard URL, stream runtime, local embeddings, and selected
 integrations. Secrets remain masked.
 
 ![Environment review](../assets/lifecycle/onboarding/installer-review.png)
 
-## 11. Shared Memories is optional
+## 10. Shared Memories is optional
 
 Skip this step to finish with Personal Memories only. You can connect a Shared
 Memories server later from your local dashboard.
 
 ![Shared Memories choice](../assets/lifecycle/onboarding/installer-shared.png)
 
-## 12. Install
+## 11. Install
 
 Choose **Generate & Install** and wait for the local services, registrations,
 and dashboard readiness checks to finish.
 
 ![Installation progress](../assets/lifecycle/onboarding/installer-install.png)
 
-## 13. Open your dashboard
+## 12. Open your dashboard
 
 Select **Go to dashboard**. Passwordless installs open Personal Overview
 directly; password-protected installs open the local login screen first.

@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-worker",
-  "version": "0.1.4",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory BullMQ ingest worker (Phase 6) — consumes the pm.ingest queue and runs the 7-step pipeline (fetch → extract → chunk → persist → embed (Mode A) → graphiti → status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",

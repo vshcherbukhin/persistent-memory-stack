@@ -1,9 +1,6 @@
 import { requireControlPlane, isSuperuser } from '@/lib/session'
 import { api, normalizeMemorySurface } from '@/lib/api'
-import type { UpdateNotificationSettings } from '@/lib/types'
 import { NotificationsClient, type NotificationTarget } from './NotificationsClient'
-import { UpdateNotificationsCard } from './UpdateNotificationsCard'
-import { saveUpdateNotificationsAction, testUpdateNotificationsAction } from './actions'
 import { SettingsLayout, SettingsPageFrame, SettingsSection, type SettingsNavItem } from '@/components/settings/SettingsShell'
 import { NotifyForm } from './NotifyForm'
 import { saveNotifyTargetAction } from './actions'
@@ -74,23 +71,7 @@ export default async function NotificationsPage({
           current: baseSettings.team,
         },
       ]
-  const showUpdateSettings = isSuperuser(who) && personalMode
-  let updateSettings: UpdateNotificationSettings | null = null
-  let updateSettingsError: string | null = null
-  if (showUpdateSettings) {
-    try {
-      updateSettings = await api.getUpdateSettings()
-    } catch (err) {
-      updateSettingsError = err instanceof Error ? err.message : 'Update settings unavailable'
-    }
-  }
   const personalSettings: SettingsNavItem[] = [
-    ...(showUpdateSettings ? [{
-      id: 'application-updates',
-      label: 'Application updates',
-      description: 'Release checks and update source',
-      href: notificationsSettingHref(surface, 'application-updates'),
-    }] : []),
     {
       id: 'system-notifications',
       label: 'System notifications',
@@ -106,20 +87,6 @@ export default async function NotificationsPage({
     return (
       <SettingsPageFrame>
         <SettingsLayout items={personalSettings} activeId={activeSetting}>
-          {showUpdateSettings ? (
-            <SettingsSection
-              id="application-updates"
-              title="Application updates"
-              description="Configure the Bitbucket/Stash source used for local dashboard release checks."
-            >
-              <UpdateNotificationsCard
-                action={saveUpdateNotificationsAction}
-                testAction={testUpdateNotificationsAction}
-                current={updateSettings}
-                error={updateSettingsError}
-              />
-            </SettingsSection>
-          ) : null}
           <SettingsSection
             id="system-notifications"
             title="System notifications"

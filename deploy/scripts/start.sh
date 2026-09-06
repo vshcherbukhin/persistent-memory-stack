@@ -66,7 +66,9 @@ fi
 
 # This script lives in deploy/scripts/; operate on the repo root.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
 cd "$REPO_ROOT"
 mkdir -p .local/update-state
 COMPOSE_FILE="$REPO_ROOT/deploy/compose/docker-compose.yml"

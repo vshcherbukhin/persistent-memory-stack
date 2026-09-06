@@ -1,8 +1,22 @@
 import Fastify from 'fastify'
 import { readdirSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod'
 import { dashboardRoutes } from '../src/routes/dashboard/index.ts'
+
+const queues = vi.hoisted(() => ({
+  scheduled: vi.fn(() => Object.freeze({})),
+  memoryGraphRebuild: vi.fn(() => Object.freeze({})),
+}))
+
+// Route imports construct producer queues outside Fastify's lifecycle. This
+// registration-only test keeps the real routes/schemas but must not open Redis
+// connections that can emit errors after app.close() and Vitest teardown.
+vi.mock('@pm/shared', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@pm/shared')>(),
+  makeScheduledQueue: queues.scheduled,
+  makeMemoryGraphRebuildQueue: queues.memoryGraphRebuild,
+}))
 
 const routesDir = new URL('../src/routes/dashboard/', import.meta.url)
 
@@ -30,10 +44,12 @@ describe('dashboard route aliases', () => {
     const app = Fastify()
     app.setValidatorCompiler(validatorCompiler)
     app.setSerializerCompiler(serializerCompiler)
-    await app.register(dashboardRoutes)
-    await app.ready()
-
     try {
+      await app.register(dashboardRoutes)
+      await app.ready()
+
+      expect(queues.scheduled).toHaveBeenCalledOnce()
+      expect(queues.memoryGraphRebuild).toHaveBeenCalledOnce()
       const expected = declaredDashboardRoutes()
       expect(expected.length).toBeGreaterThan(50)
 

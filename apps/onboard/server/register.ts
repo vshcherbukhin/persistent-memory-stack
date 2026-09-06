@@ -14,7 +14,10 @@
  * server's GET /config (see apps/mcp/CLAUDE_MCP_SETUP.md §4).
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
+import { agentProfiles, normalizedProjectPaths, type AgentProfileOptions } from './agent-profiles.js'
+import { mergeCodexToml } from './mcp-toml.js'
+export { mergeCodexToml } from './mcp-toml.js'
 
 const SERVER_KEY = 'persistent-memory'
 
@@ -56,20 +59,33 @@ export function buildMcpEntry(o: McpEntryOpts): McpServerEntry {
 
 type Json = Record<string, any>
 
+function jsonObject(value: unknown, label: string): Json {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object; existing configuration was not changed.`)
+  return value as Json
+}
+
 /** Top-level `mcpServers["persistent-memory"]` (Claude CLI global, Claude Desktop). */
 export function mergeClaudeJsonGlobal(json: Json, entry: McpServerEntry): Json {
-  return { ...json, mcpServers: { ...(json?.mcpServers ?? {}), [SERVER_KEY]: entry } }
+  jsonObject(json, 'Claude configuration')
+  return { ...json, mcpServers: { ...jsonObject(json.mcpServers === undefined ? {} : json.mcpServers, 'mcpServers'), [SERVER_KEY]: entry } }
 }
 
 /** `projects[projectPath].mcpServers["persistent-memory"]` (Claude CLI project scope). */
 export function mergeClaudeJsonProject(json: Json, projectPath: string, entry: McpServerEntry): Json {
-  const projects: Json = json?.projects ?? {}
-  const proj: Json = projects[projectPath] ?? {}
+  jsonObject(json, 'Claude configuration')
+  const projects = jsonObject(json.projects === undefined ? {} : json.projects, 'projects')
+  // Windows tools may save the same directory with different separators/case.
+  // Reuse an existing key to retain its trust state and unrelated MCP entries.
+  const comparable = (value: string) => win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase()
+  const key = process.platform === 'win32'
+    ? Object.keys(projects).find(key => comparable(key) === comparable(projectPath)) ?? projectPath
+    : projectPath
+  const proj = jsonObject(projects[key] === undefined ? {} : projects[key], `projects entry`)
   return {
     ...json,
     projects: {
       ...projects,
-      [projectPath]: { ...proj, mcpServers: { ...(proj.mcpServers ?? {}), [SERVER_KEY]: entry } },
+      [key]: { ...proj, mcpServers: { ...jsonObject(proj.mcpServers === undefined ? {} : proj.mcpServers, 'project mcpServers'), [SERVER_KEY]: entry } },
     },
   }
 }
@@ -99,48 +115,11 @@ export function buildCodexBlock(entry: McpServerEntry): string {
   return lines.join('\n') + '\n'
 }
 
-/** A header line belonging to OUR table or its subtables. */
-function isOurHeader(trimmed: string): boolean {
-  return /^\[mcp_servers\.(persistent-memory|"persistent-memory")(\.|\])/.test(trimmed)
-}
-
-/**
- * Idempotently splice our `[mcp_servers.persistent-memory]` table into an
- * existing config.toml. Only OUR table region is touched (from our header
- * through any `.env`/`.tools` subtables, up to the next foreign top-level
- * header or EOF) — comments, ordering, and neighbor tables are preserved.
- */
-export function mergeCodexToml(text: string, block: string): string {
-  const lines = text.split('\n')
-  const startIdx = lines.findIndex((l) => {
-    const t = l.trim()
-    return t === `[mcp_servers.${SERVER_KEY}]` || t === `[mcp_servers."${SERVER_KEY}"]`
-  })
-  const blockBody = block.replace(/\n+$/, '')
-
-  if (startIdx === -1) {
-    const base = text.replace(/\s+$/, '')
-    return (base === '' ? '' : base + '\n\n') + blockBody + '\n'
-  }
-
-  let endIdx = lines.length
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const t = lines[i]!.trim()
-    if (t.startsWith('[') && !isOurHeader(t)) { endIdx = i; break }
-  }
-  const before = lines.slice(0, startIdx).join('\n').replace(/\s+$/, '')
-  const after = lines.slice(endIdx).join('\n').replace(/^\s+/, '')
-  const head = before === '' ? '' : before + '\n\n'
-  const tail = after === '' ? '' : '\n\n' + after.replace(/\s+$/, '')
-  return head + blockBody + tail + '\n'
-}
-
 // ── Path helpers (pure given homedir) ──────────────────────────────────────────
 
-export const claudeJsonPath = (home: string): string => join(home, '.claude.json')
-export const claudeDesktopConfigPath = (home: string): string =>
-  join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
-export const codexConfigPath = (home: string): string => join(home, '.codex', 'config.toml')
+export const claudeJsonPath = (home: string, options?: AgentProfileOptions): string => agentProfiles(home, options).claudeJson
+export const claudeDesktopConfigPath = (home: string, options?: AgentProfileOptions): string => agentProfiles(home, options).claudeDesktopConfig
+export const codexConfigPath = (home: string, options?: AgentProfileOptions): string => agentProfiles(home, options).codexConfig
 export const codexProjectConfigPath = (projectDir: string): string => join(projectDir, '.codex', 'config.toml')
 
 // ── Registration PLAN (pure) — selected apps + scope → the exact writes ─────────
@@ -160,21 +139,22 @@ export interface RegWrite {
 export interface RegApps { claudeCli: boolean; claudeDesktop: boolean; codexCli: boolean; codexDesktop: boolean }
 export interface RegPlan { writes: RegWrite[] }
 
-export function planRegistration(o: { apps: RegApps; level: 'global' | 'project'; projectPaths: string[]; home: string; mcpRuntime?: 'stream' | 'node' }): RegPlan {
-  const folders = o.projectPaths.filter((p) => p.trim())
-  const project = o.level === 'project' && folders.length > 0
+export function planRegistration(o: { apps: RegApps; level: 'global' | 'project'; projectPaths: string[]; home: string; profileEnv?: NodeJS.ProcessEnv; mcpRuntime?: 'stream' | 'node' }): RegPlan {
+  const folders = o.level === 'project' ? normalizedProjectPaths(o.projectPaths) : []
+  const project = o.level === 'project'
+  if (project && folders.length === 0) throw new Error('Project registration requires at least one absolute folder path.')
   const writes: RegWrite[] = []
   // ~/.claude.json — Claude Code CLI + Claude Desktop folder/agent sessions (directory-aware).
   if (o.apps.claudeCli || o.apps.claudeDesktop) {
     writes.push({
       kind: 'claude',
-      path: claudeJsonPath(o.home),
+      path: claudeJsonPath(o.home, { env: o.profileEnv }),
       level: project ? 'project' : 'global',
       clientName: 'claude-code',
       projectPaths: folders,
       label: project
-        ? `~/.claude.json → projects: ${folders.join(', ')} (Claude Code + Desktop folder sessions)`
-        : '~/.claude.json (global — Claude Code + Desktop)',
+        ? `${claudeJsonPath(o.home, { env: o.profileEnv })} → projects: ${folders.join(', ')} (Claude Code + Desktop folder sessions)`
+        : `${claudeJsonPath(o.home, { env: o.profileEnv })} (global — Claude Code + Desktop)`,
     })
   }
   // claude_desktop_config.json is command/stdio-shaped. Streamable HTTP belongs
@@ -187,7 +167,8 @@ export function planRegistration(o: { apps: RegApps; level: 'global' | 'project'
     if (project) {
       for (const p of folders) writes.push({ kind: 'codex', path: codexProjectConfigPath(p), level: 'project', clientName: codexClientName, label: `${p}/.codex/config.toml (${codexSurface} project — trust the folder in Codex to load it)` })
     } else {
-      writes.push({ kind: 'codex', path: codexConfigPath(o.home), level: 'global', clientName: codexClientName, label: `~/.codex/config.toml (${codexSurface} global)` })
+      const path = codexConfigPath(o.home, { env: o.profileEnv })
+      writes.push({ kind: 'codex', path, level: 'global', clientName: codexClientName, label: `${path} (${codexSurface} global)` })
     }
   }
   return { writes }
@@ -195,12 +176,19 @@ export function planRegistration(o: { apps: RegApps; level: 'global' | 'project'
 
 // ── IO writers (thin; read → merge → write 0o600) ─────────────────────────────
 
-function readJson(path: string): Json {
-  if (!existsSync(path)) return {}
+export function readAgentJson(path: string): Json {
+  let text: string
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as Json
+    text = readFileSync(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw new Error(`Cannot read ${path}; existing configuration was not changed.`)
+  }
+  try {
+    return jsonObject(JSON.parse(text.replace(/^\uFEFF/, '')), 'Claude configuration')
   } catch {
-    return {}
+    // Do not include parser messages: they can quote private config contents.
+    throw new Error(`Cannot parse ${path} as a JSON object; existing configuration was not changed.`)
   }
 }
 
@@ -218,9 +206,11 @@ export interface ClaudeRegisterOpts {
 
 /** Register into a Claude JSON config (CLI global/project, or Desktop=global). */
 export function registerClaudeWrite(o: ClaudeRegisterOpts): void {
-  let json = readJson(o.path)
-  if (o.level === 'project' && o.projectPaths?.length) {
-    for (const p of o.projectPaths) json = mergeClaudeJsonProject(json, p, o.entry)
+  let json = readAgentJson(o.path)
+  if (o.level === 'project') {
+    const projects = normalizedProjectPaths(o.projectPaths ?? [])
+    if (projects.length === 0) throw new Error('Project registration requires at least one absolute folder path.')
+    for (const p of projects) json = mergeClaudeJsonProject(json, p, o.entry)
   } else {
     json = mergeClaudeJsonGlobal(json, o.entry)
   }

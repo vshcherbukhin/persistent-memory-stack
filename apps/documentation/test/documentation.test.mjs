@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile as readRawFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+
+async function readFile(path, encoding) {
+  const content = await readRawFile(path, encoding)
+  return typeof content === 'string' ? content.replace(/\r\n/g, '\n') : content
+}
 
 import { createDocumentationServer } from '../src/server.mjs'
 import {
@@ -260,7 +265,7 @@ test('Markdown frontmatter produces the approved documentation information archi
   const config = await readFile(new URL('../../../mkdocs.yml', import.meta.url), 'utf8')
   const expectedNavigation = [
     '- "Home": index.md',
-    '- "Installation":\n      - "Installation steps": installation/installation-steps.md\n      - "Uninstall memory stack": installation/uninstall-memory-stack.md',
+    '- "Installation":\n      - "Windows preparation": installation/windows-installation.md\n      - "Installation steps": installation/installation-steps.md\n      - "Uninstall memory stack": installation/uninstall-memory-stack.md',
     '- "Spaces":',
     '- "Stack Architecture":\n      - "Architecture": stack-architecture/architecture.md\n      - "Operations": stack-architecture/operations.md\n      - "Security": stack-architecture/security.md\n      - "Access Model": stack-architecture/access-model.md\n      - "Memory Protocol": stack-architecture/memory-protocol.md\n      - "Ingest": stack-architecture/ingest.md\n      - "Embedding": stack-architecture/embedding.md\n      - "Benchmarking": stack-architecture/benchmarking.md',
     '- "Stack Layers":',
@@ -294,7 +299,7 @@ test('the documentation home starts users with Persistent Memory Stack and the i
   assert.match(home, /\[Access Model\]\(stack-architecture\/access-model\.md\)/)
   assert.match(home, /\[Installation\]\(installation\/installation-steps\.md\)/)
   assert.doesNotMatch(home, /```mermaid/)
-  assert.match(config, /- "Installation":\n      - "Installation steps": installation\/installation-steps\.md\n      - "Uninstall memory stack": installation\/uninstall-memory-stack\.md/)
+  assert.match(config, /- "Installation":\n      - "Windows preparation": installation\/windows-installation\.md\n      - "Installation steps": installation\/installation-steps\.md\n      - "Uninstall memory stack": installation\/uninstall-memory-stack\.md/)
 })
 
 test('lifecycle guides keep every installer and uninstall screenshot distinct and in separate flows', async () => {
@@ -305,11 +310,11 @@ test('lifecycle guides keep every installer and uninstall screenshot distinct an
   const uninstall = (await readdir(new URL('uninstall/', root))).filter((name) => name.endsWith('.png')).sort()
   const digest = async (directory, name) => createHash('sha256').update(await readFile(new URL(name, directory))).digest('hex')
 
-  assert.equal(installer.length, 13)
+  assert.equal(installer.length, 12)
   assert.equal(uninstall.length, 5)
-  assert.equal(new Set(await Promise.all(installer.map((name) => digest(new URL('onboarding/', root), name)))).size, 13)
+  assert.equal(new Set(await Promise.all(installer.map((name) => digest(new URL('onboarding/', root), name)))).size, 12)
   assert.equal(new Set(await Promise.all(uninstall.map((name) => digest(new URL('uninstall/', root), name)))).size, 5)
-  assert.match(installGuide, /## 13\. Open your dashboard/)
+  assert.match(installGuide, /## 12\. Open your dashboard/)
   assert.match(installGuide, /sandbox simulation of the installer flow/i)
   assert.match(uninstallGuide, /separate terminal process/i)
   assert.match(uninstallGuide, /sandbox simulation of the script prompts/i)

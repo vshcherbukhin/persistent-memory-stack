@@ -155,8 +155,9 @@ This prompt evaluates graph expansion (Marketing → Widget → Supplier Z), te
 
 ### P0 token-economics regression suite
 
-The measured before/after results for the 4.0.34 release are published in the
-[4.0.34 Token Economics Report](../benchmark_reports/4.0.34-token-economics.md).
+The public release baseline starts at 1.0.0. Collect fresh evidence for this
+release before publishing performance or installation claims; measurements from
+earlier development versions are not results for the public release.
 
 The release harness also runs a before/after regression suite against clean,
 separately named disposable stacks. Its evidence is written under

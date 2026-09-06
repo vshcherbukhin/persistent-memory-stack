@@ -1,21 +1,21 @@
 /**
- * persistent-memory — bootstrap seed (Phase 2)
+ * persistent-memory — installation bootstrap
  *
- * Idempotent. Creates, on a fresh database:
- *   1. The first SUPERUSER — an INDEPENDENT, TEAM-LESS global super-admin
- *      (admin_level=superuser, team_id=NULL) + an opaque token, emitted to
- *      stdout EXACTLY ONCE. install.sh shows it with a "copy now" banner; it is
- *      NEVER written to the DB or logs (only tokenId + argon2id(tokenHash)
- *      persist). The admin then creates teams + team-bound users from the
- *      dashboard. (See docs/internal/users_roles.md.)
- *   2. Two demo teams — "Automation QA" and "Manual QA" — for convenience.
- *   3. One sample MOUNT (directional grant): Manual QA mounts Automation QA, so
- *      Manual QA's MCP reads Automation QA's memories (read-only; MCP-only).
+ * Idempotent. Initializes system settings from the installation environment
+ * without overwriting saved settings. Personal installs stop there: the API
+ * creates their local identity from the onboarding answers.
+ *
+ * Shared server installs also create the first SUPERUSER — an independent,
+ * team-less global super-admin (admin_level=superuser, team_id=NULL). Its
+ * credentials are shown once; the database stores only password/token hashes
+ * and the public tokenId. BOOTSTRAP_TOKEN_OUTPUT_PATH optionally captures the
+ * token for the server installer. The admin creates real teams and users from
+ * the dashboard. No demo teams, sample memories, or sharing grants are created.
  *
  * IDEMPOTENCY IS A SECURITY CONTROL: the run is gated on
  * `count(admin_level='superuser') >= 1`. Without the gate, every install.sh run
  * would mint a fresh live token (credential leak). Re-running after bootstrap is
- * a no-op for the superuser; teams/mount are upserted.
+ * a no-op for the superuser. Existing teams and grants are never changed here.
  *
  * CONNECTION: run as the OWNER (DATABASE_MIGRATE_URL → pmuser) so it can write
  * the control tables. The runtime role pm_app is NOT used here.
@@ -113,42 +113,12 @@ async function main(): Promise<void> {
     },
   })
 
-  // ── LOCAL mode: single-user, no auth → NO demo teams, NO sample mount, NO
-  // bootstrap token. The lone local team + super-user are created by the api
-  // (ensureLocalIdentity) from the onboarding answers. Demo teams would show up as
-  // confusing extra teams (the dashboard would read "Teams: 3"), so skip them here.
+  // Personal mode needs settings only. The API's ensureLocalIdentity creates
+  // the local team + user from onboarding answers, independently of Shared Memories.
   if (process.env.DEPLOYMENT_MODE === 'local') {
-    console.log('[seed] DEPLOYMENT_MODE=local — single-user install: skipping demo teams + bootstrap token (the local team + super-user come from the api).')
+    console.log('[seed] Local system settings initialized; existing settings preserved. The API manages the personal identity.')
     return
   }
-
-  // ── Demo teams (upsert by unique name — safe to re-run). ───────────────────
-  // Convenience only; the bootstrap super-admin is team-less and creates real
-  // teams + members from the dashboard.
-  const automationQa = await prisma.team.upsert({
-    where: { name: 'Automation QA' },
-    update: {},
-    create: { name: 'Automation QA' },
-  })
-  const manualQa = await prisma.team.upsert({
-    where: { name: 'Manual QA' },
-    update: {},
-    create: { name: 'Manual QA' },
-  })
-
-  // ── Sample MOUNT: Manual QA mounts Automation QA (grantor=Automation,
-  // grantee=Manual) → Manual QA's MCP reads Automation QA's memories (additional).
-  // Cross-team is READ-only and gates the MCP only (docs/internal/users_roles.md).
-  await prisma.teamGrant.upsert({
-    where: {
-      grantorTeamId_granteeTeamId: {
-        grantorTeamId: automationQa.id,
-        granteeTeamId: manualQa.id,
-      },
-    },
-    update: {},
-    create: { grantorTeamId: automationQa.id, granteeTeamId: manualQa.id },
-  })
 
   // ── Bootstrap superuser — gated: skip if one already exists. ───────────────
   const existingSuperusers = await prisma.appUser.count({
@@ -157,7 +127,7 @@ async function main(): Promise<void> {
   if (existingSuperusers > 0) {
     console.log(
       `[seed] Superuser already present (${existingSuperusers}). ` +
-        'Skipping bootstrap token mint. Teams/grant ensured.',
+        'Skipping bootstrap token mint; existing settings preserved.',
     )
     return
   }

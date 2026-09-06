@@ -19,9 +19,9 @@
 - Every first-party Node service must compile TypeScript with `tsc` and execute
   emitted JavaScript. Do not use `node --experimental-strip-types`, `tsx`, or
   `ts-node` in production images, updater paths, or host-only installer paths.
-- Dashboard update cards follow the configured Bitbucket branch. Use `dev` only
-  for local testing; use `master` for teammate release checks. Non-`master`
-  update cards may appear for newer commits even when semver is unchanged.
+- Dashboard update cards automatically check the built-in public GitHub source
+  on `master`, without user credentials or notification settings. Explicit
+  terminal `--dev` and `--branch` options remain available for operator testing.
 - Any direct Compose command that builds, recreates, or starts services must include
   `--env-file .env.persistent-memory`.
 - Before running a redeploy helper or Compose start/rebuild, inspect the configured

@@ -31,9 +31,42 @@ afterEach(async () => {
 })
 
 describe('dashboard handoff state', () => {
+  it.each(['updating', 'failed', 'complete'])('ignores pre-public %s state without deleting the saved file', async (phase) => {
+    const statePath = await tempStatePath()
+    for (const releaseLine of [undefined, 'internal']) {
+      const saved = JSON.stringify({ releaseLine, id: 'before-public-release', source: 'update-script', phase,
+        message: 'Old development state.', targetVersion: '4.0.37',
+        startedAt: '2026-09-04T10:00:00Z', updatedAt: '2026-09-04T10:01:00Z' })
+      await writeFile(statePath, saved)
+      await expect(readHandoffState(statePath)).resolves.toEqual({ active: false, phase: 'idle' })
+      const result = await route({ method: 'GET', url: '/', headers: { accept: 'text/html' } }, {
+        statePath, dashboardBaseUrl: 'http://dashboard:3000',
+        proxy: async () => ({ status: 200, headers: {}, body: 'Public dashboard' }),
+      })
+      expect(result.body).toBe('Public dashboard')
+      expect(await readFile(statePath, 'utf8')).toBe(saved)
+    }
+  })
+
+  it('passes public release identity through the handoff API and uses matching browser keys', async () => {
+    const statePath = await tempStatePath()
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1', id: 'public-update', source: 'update-script', phase: 'complete',
+      message: 'Update complete.', targetVersion: '1.0.0', releaseNotesVersion: '1.0.0',
+      startedAt: '2026-09-06T10:00:00Z', updatedAt: '2026-09-06T10:01:00Z' }))
+    const result = await route({ method: 'GET', url: '/api/update/handoff', headers: {} }, {
+      statePath, dashboardBaseUrl: 'http://dashboard:3000', proxy: vi.fn(),
+    })
+    expect(JSON.parse(result.body as string)).toMatchObject({ releaseLine: 'public-v1', active: true, targetVersion: '1.0.0' })
+    const html = createUpdateHtml(await readHandoffState(statePath))
+    const client = await import('../../../layers/dashboard/src/lib/clientUpdate.ts')
+    for (const key of [client.POST_UPDATE_RELEASE_NOTES_KEY, client.POST_UPDATE_HANDOFF_SEEN_KEY]) {
+      expect(html).toContain(key)
+    }
+  })
+
   it('retains a valid read-only progress probe and drops malformed probe payloads', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'probe-run', source: 'update-script', phase: 'verifying', message: 'Graph migration running.',
       startedAt: '2026-07-16T00:00:00Z', updatedAt: '2026-07-16T00:01:00Z',
       probe: { message: 'Graph migration: 295 / 329 complete — 34 remaining.', completed: 295, total: 329, remaining: 34, checkedAt: '2026-07-16T00:01:00Z' },
@@ -43,7 +76,7 @@ describe('dashboard handoff state', () => {
       probe: { completed: 295, total: 329, remaining: 34 },
     })
 
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'bad-probe', source: 'update-script', phase: 'verifying', message: 'Graph migration running.',
       startedAt: '2026-07-16T00:00:00Z', updatedAt: '2026-07-16T00:01:00Z',
       probe: { message: 'bad', completed: 2, total: 3, remaining: 0, checkedAt: '2026-07-16T00:01:00Z' },
@@ -61,14 +94,14 @@ describe('dashboard handoff state', () => {
   it('uses the coordinator state as canonical while retaining one legacy-state read fallback', async () => {
     const coordinatorStatePath = await tempStateFile('coordinator-handoff.json')
     const legacyStatePath = await tempStateFile('legacy-handoff.json')
-    await writeFile(legacyStatePath, JSON.stringify({
+    await writeFile(legacyStatePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'legacy-run', source: 'update-script', phase: 'updating', message: 'Legacy update.',
       startedAt: '2026-07-06T10:00:00Z', updatedAt: '2026-07-06T10:00:01Z',
     }))
 
     await expect(readHandoffState(coordinatorStatePath, legacyStatePath)).resolves.toMatchObject({ id: 'legacy-run' })
 
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'coordinator-run', source: 'update-coordinator', phase: 'verifying', message: 'Coordinator update.',
       startedAt: '2026-07-06T10:00:00Z', updatedAt: '2026-07-06T10:00:02Z',
     }))
@@ -78,23 +111,23 @@ describe('dashboard handoff state', () => {
   it('prefers a newer legacy start event over a completed coordinator event, then returns to coordinator state', async () => {
     const coordinatorStatePath = await tempStateFile('coordinator-handoff.json')
     const legacyStatePath = await tempStateFile('legacy-handoff.json')
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'previous-run', source: 'update-coordinator', phase: 'complete', message: 'Previous update finished.',
       startedAt: '2026-07-06T10:00:00Z', updatedAt: '2026-07-06T10:10:00Z', finishedAt: '2026-07-06T10:10:00Z',
     }))
-    await writeFile(legacyStatePath, JSON.stringify({
+    await writeFile(legacyStatePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'new-run', source: 'update-script', phase: 'updating', message: 'New update is starting.',
       startedAt: '2026-07-06T11:00:00Z', updatedAt: '2026-07-06T11:00:01Z',
     }))
     await expect(readHandoffState(coordinatorStatePath, legacyStatePath)).resolves.toMatchObject({ id: 'new-run' })
 
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'new-run', source: 'update-coordinator', phase: 'verifying', message: 'Coordinator is verifying.',
       startedAt: '2026-07-06T11:00:00Z', updatedAt: '2026-07-06T11:00:02Z',
     }))
     await expect(readHandoffState(coordinatorStatePath, legacyStatePath)).resolves.toMatchObject({ id: 'new-run', source: 'update-coordinator' })
 
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'new-run', source: 'update-coordinator', phase: 'complete', message: 'Coordinator finished.',
       startedAt: '2026-07-06T11:00:00Z', updatedAt: '2026-07-06T11:10:00Z', finishedAt: '2026-07-06T11:10:00Z',
     }))
@@ -104,11 +137,11 @@ describe('dashboard handoff state', () => {
   it('keeps the coordinator state canonical for one active run even if the launcher file is written later', async () => {
     const coordinatorStatePath = await tempStateFile('coordinator-handoff.json')
     const legacyStatePath = await tempStateFile('legacy-handoff.json')
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'same-run', source: 'update-coordinator', phase: 'rebuilding-dashboard', message: 'Building images.',
       startedAt: '2026-07-14T08:31:24Z', updatedAt: '2026-07-14T08:32:10Z', progress: 55,
     }))
-    await writeFile(legacyStatePath, JSON.stringify({
+    await writeFile(legacyStatePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'same-run', source: 'update-script', phase: 'updating', message: 'Pulling updates.',
       startedAt: '2026-07-14T08:31:24Z', updatedAt: '2026-07-14T08:32:11Z', progress: 18,
     }))
@@ -119,7 +152,7 @@ describe('dashboard handoff state', () => {
   })
 
   it('keeps browser progress monotonic for a run across gateway reloads', () => {
-    const html = createUpdateHtml({
+    const html = createUpdateHtml({ releaseLine: 'public-v1',
       active: true,
       id: 'same-run',
       source: 'update-coordinator',
@@ -130,7 +163,7 @@ describe('dashboard handoff state', () => {
       progress: 55,
     })
 
-    expect(html).toContain("const progressStorageKey = 'pm:update-handoff-progress'")
+    expect(html).toContain("const progressStorageKey = 'pm:public-v1:update-handoff-progress'")
     expect(html).toContain('displayedProgress = Math.max(displayedProgress, candidate)')
     expect(html).toContain('sessionStorage.setItem(progressStorageKey')
   })
@@ -138,11 +171,11 @@ describe('dashboard handoff state', () => {
   it('chooses the newest active event when a stale coordinator run conflicts with a fresh legacy launcher', async () => {
     const coordinatorStatePath = await tempStateFile('coordinator-handoff.json')
     const legacyStatePath = await tempStateFile('legacy-handoff.json')
-    await writeFile(coordinatorStatePath, JSON.stringify({
+    await writeFile(coordinatorStatePath, JSON.stringify({ releaseLine: 'public-v1',
       protocolVersion: 1, id: 'stale-run', source: 'update-coordinator', phase: 'failed', message: 'Old update failed.',
       startedAt: '2026-07-06T10:00:00Z', updatedAt: '2026-07-06T10:10:00Z',
     }))
-    await writeFile(legacyStatePath, JSON.stringify({
+    await writeFile(legacyStatePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'fresh-run', source: 'update-script', phase: 'updating', message: 'New update is starting.',
       startedAt: '2026-07-06T11:00:00Z', updatedAt: '2026-07-06T11:00:01Z',
     }))
@@ -152,7 +185,7 @@ describe('dashboard handoff state', () => {
 
   it('serves a non-blocking compatibility page for an unknown future handoff protocol', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({ protocolVersion: 2, id: 'future', phase: 'updating' }))
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1', protocolVersion: 2, id: 'future', phase: 'updating' }))
 
     const result = await route({
       method: 'GET',
@@ -170,7 +203,7 @@ describe('dashboard handoff state', () => {
 
   it('treats every explicit non-v1 protocol value as an advisory compatibility event', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({ protocolVersion: '1', id: 'invalid-version', phase: 'updating' }))
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1', protocolVersion: '1', id: 'invalid-version', phase: 'updating' }))
 
     await expect(readHandoffState(statePath)).resolves.toMatchObject({
       active: true,
@@ -189,7 +222,7 @@ describe('dashboard handoff state', () => {
 
   it('parses active and complete states without exposing unknown fields', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-1',
       source: 'update-script',
       phase: 'rebuilding-dashboard',
@@ -204,6 +237,7 @@ describe('dashboard handoff state', () => {
 
     await expect(readHandoffState(statePath)).resolves.toEqual({
       active: true,
+      releaseLine: 'public-v1',
       id: 'run-1',
       source: 'update-script',
       phase: 'rebuilding-dashboard',
@@ -218,7 +252,7 @@ describe('dashboard handoff state', () => {
 
   it('accepts bounded build activity while ignoring malformed activity data', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'build-run',
       source: 'update-coordinator',
       phase: 'rebuilding-dashboard',
@@ -236,7 +270,7 @@ describe('dashboard handoff state', () => {
       activity: { phase: 'build', status: 'running', service: 'application images', sequence: 4 },
     })
 
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'bad-build-run', source: 'update-coordinator', phase: 'rebuilding-dashboard', message: 'Building.',
       startedAt: '2026-07-06T10:00:00Z', updatedAt: '2026-07-06T10:01:00Z',
       activity: { phase: 'build', status: 'running', detail: 'x'.repeat(900), sequence: -1 },
@@ -248,7 +282,7 @@ describe('dashboard handoff state', () => {
 describe('gateway routing', () => {
   it('serves handoff JSON from the stable API path', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-2',
       source: 'update-script',
       phase: 'verifying',
@@ -277,7 +311,7 @@ describe('gateway routing', () => {
 
   it('serves the update shell for browser navigations while active and proxies assets/API', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-3',
       source: 'update-script',
       phase: 'updating',
@@ -332,7 +366,7 @@ describe('gateway routing', () => {
 
   it('keeps complete state active only for the handoff API, not page navigations', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-4',
       source: 'update-script',
       phase: 'complete',
@@ -350,7 +384,7 @@ describe('gateway routing', () => {
 
   it('keeps the update shell on complete navigations until the dashboard is ready', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-5',
       source: 'update-script',
       phase: 'complete',
@@ -380,7 +414,7 @@ describe('gateway routing', () => {
 
   it('proxies complete navigations once the dashboard readiness check passes', async () => {
     const statePath = await tempStatePath()
-    await writeFile(statePath, JSON.stringify({
+    await writeFile(statePath, JSON.stringify({ releaseLine: 'public-v1',
       id: 'run-6',
       source: 'update-script',
       phase: 'complete',
@@ -429,7 +463,7 @@ describe('gateway routing', () => {
   })
 
   it('renders visible progress and spinner in the update shell', () => {
-    const html = createUpdateHtml({
+    const html = createUpdateHtml({ releaseLine: 'public-v1',
       active: true,
       id: 'run-7',
       source: 'update-script',
@@ -450,14 +484,14 @@ describe('gateway routing', () => {
     expect(html).toContain('box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18)')
     expect(html).toContain('min-width: 4px')
     expect(html).toContain('/api/update/dashboard-ready')
-    expect(html).toContain("const handoffSeenKey = 'pm:update-handoff-seen-id'")
+    expect(html).toContain("const handoffSeenKey = 'pm:public-v1:update-handoff-seen-id'")
     expect(html).toContain('localStorage.setItem(handoffSeenKey, state.id)')
     expect(html).toContain('Updating Persistent Memory to the latest release')
     expect(html).not.toContain('class="status"')
   })
 
   it('renders optional probe progress separately from the overall percentage', () => {
-    const html = createUpdateHtml({
+    const html = createUpdateHtml({ releaseLine: 'public-v1',
       active: true,
       id: 'probe-render',
       source: 'update-script',
@@ -475,7 +509,7 @@ describe('gateway routing', () => {
   })
 
   it('keeps the last overall percentage visible while a build is active', () => {
-    const html = createUpdateHtml({
+    const html = createUpdateHtml({ releaseLine: 'public-v1',
       active: true,
       id: 'build-run',
       source: 'update-coordinator',
@@ -500,7 +534,7 @@ describe('gateway routing', () => {
   })
 
   it('replaces progress with the safe failure detail when an update fails', () => {
-    const html = createUpdateHtml({
+    const html = createUpdateHtml({ releaseLine: 'public-v1',
       active: true,
       id: 'failed-run',
       source: 'update-script',

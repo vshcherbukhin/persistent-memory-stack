@@ -4,7 +4,7 @@
  * and the install step list + host-URL rewrite + token capture.
  */
 import { describe, it, expect } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync as nodeExecFileSync, type ExecFileSyncOptions } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,13 @@ import { buildSteps, hostRewriteUrl, extractToken, parseVerifySummary } from '..
 import { prereqsBlocked, modelPresence, extractionNextBlocked } from '../web/src/flow.ts'
 import { planRegistration } from '../server/register.ts'
 import { testExtractionConnection } from '../server/extraction-test.ts'
+import { hostCommand } from '../server/host.ts'
+import { parseEnvFile } from '../server/install.ts'
+
+function execFileSync(command: string, args: string[], options: Omit<ExecFileSyncOptions, 'encoding'> & { encoding?: 'utf8' } = {}): string {
+  const resolved = hostCommand(command, command === 'bash' ? args.map((arg) => /^[a-z]:[\\/]/i.test(arg) ? arg.replaceAll('\\', '/') : arg) : args, { env: options.env ?? process.env })
+  return nodeExecFileSync(resolved.command, resolved.args, { ...options, env: resolved.env, encoding: 'utf8', windowsHide: true })
+}
 
 const answers: Answers = {
   embeddingMode: 'server',
@@ -48,7 +55,7 @@ const testSecrets = {
 }
 
 describe('genSecrets', () => {
-  it('generates all four secrets, non-empty and distinct each call', () => {
+  it('generates secrets for a fresh install, non-empty and distinct each call', () => {
     const a = genSecrets()
     expect(a.tokenPepper.length).toBeGreaterThan(20)
     expect(a.postgresPassword.length).toBeGreaterThan(20)
@@ -140,26 +147,38 @@ describe('renderEnv', () => {
     expect(missingPin).not.toContain('EMBED_MODEL=undefined')
     expect(missingPin).not.toContain('EMBED_DIM=undefined')
   })
-  it('renders optional Bitbucket update detection settings and no SSH mount knob', () => {
-    const bitbucketEnv = renderEnv({
-      ...answers,
-      updateCheckProvider: 'bitbucket',
-      updateBitbucketUrl: 'https://stash.example.test',
-      updateBitbucketToken: 'bb-token',
-      updateBitbucketScope: 'project',
-      updateBitbucketProject: 'PM',
-      updateBitbucketRepo: 'persistent-memory',
-      updateBitbucketBranch: 'master',
-    }, testSecrets)
-    expect(bitbucketEnv).toContain('UPDATE_CHECK_PROVIDER=bitbucket')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_URL=https://stash.example.test')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_TOKEN=bb-token')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_SCOPE=project')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_PROJECT=PM')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_USER=')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_REPO=persistent-memory')
-    expect(bitbucketEnv).toContain('UPDATE_BITBUCKET_BRANCH=master')
-    expect(bitbucketEnv).not.toContain('PM_SSH_DIR=')
+  it('needs no update credentials or source configuration for a fresh installation', () => {
+    const env = renderEnv(answers, testSecrets)
+    expect(env).not.toContain('UPDATE_CHECK_PROVIDER=')
+    expect(env).not.toContain('UPDATE_GITHUB_')
+    expect(env).not.toContain('PM_SSH_DIR=')
+    expect(validateEnvForDeploy(parseEnvFile(env))).toEqual([])
+  })
+  it('enables Memory Graph in fresh wizard environments', () => {
+    expect(parseEnvFile(env).PM_MEMORY_GRAPH_UI_ENABLED).toBe('true')
+  })
+  it.each([
+    ['true', 'true'],
+    ['false', 'false'],
+    ['"false"', 'false'],
+    ["'false'", 'false'],
+    ['false # disabled by operator', 'false'],
+    ['"false" # disabled by operator', 'false'],
+    ["'false' # disabled by operator", 'false'],
+  ])('preserves the saved Memory Graph flag across environment regeneration (%s)', (stored, enabled) => {
+    const saved = parseEnvFile(`PM_MEMORY_GRAPH_UI_ENABLED=${stored}\n`)
+    const regenerated = parseEnvFile(renderEnv(answers, testSecrets, saved))
+    const roundTrip = parseEnvFile(renderEnv(answers, testSecrets, regenerated))
+
+    expect(regenerated.PM_MEMORY_GRAPH_UI_ENABLED).toBe(enabled)
+    expect(roundTrip.PM_MEMORY_GRAPH_UI_ENABLED).toBe(enabled)
+    expect(validateEnvForDeploy(roundTrip)).toEqual([])
+  })
+  it('passes saved server environment flags into regeneration without adding wizard settings', () => {
+    const server = readFileSync(new URL('../server/index.ts', import.meta.url), 'utf8')
+    const envRoute = readFileSync(new URL('../server/env-route.ts', import.meta.url), 'utf8')
+    expect(server).toContain('registerEnvWriteRoute(app, ENV_PATH)')
+    expect(envRoute).toContain('const env = renderEnv(a, secrets, oldEnv)')
   })
   it('renders personal-memory isolation settings for full-local installs', () => {
     const isolatedEnv = renderEnv({
@@ -264,47 +283,19 @@ describe('validateEnvForDeploy', () => {
     ]))
   })
 
-  it('requires Bitbucket fields only when Bitbucket update detection is enabled', () => {
-    const broken = parse(validEnv)
-    broken.UPDATE_CHECK_PROVIDER = 'bitbucket'
-    broken.UPDATE_BITBUCKET_URL = 'https://stash.example.test'
-    broken.UPDATE_BITBUCKET_TOKEN = ''
-    broken.UPDATE_BITBUCKET_SCOPE = 'project'
-    broken.UPDATE_BITBUCKET_PROJECT = 'PM'
-    broken.UPDATE_BITBUCKET_REPO = ''
-    broken.UPDATE_BITBUCKET_BRANCH = 'master'
-    expect(validateEnvForDeploy(broken).map((i) => i.key)).toContain('UPDATE_BITBUCKET_TOKEN')
-    expect(validateEnvForDeploy(broken).map((i) => i.key)).toContain('UPDATE_BITBUCKET_REPO')
-  })
 
-  it('requires Bitbucket user slug instead of project key for personal repositories', () => {
-    const personal = parse(validEnv)
-    personal.UPDATE_CHECK_PROVIDER = 'bitbucket'
-    personal.UPDATE_BITBUCKET_URL = 'https://stash.example.test'
-    personal.UPDATE_BITBUCKET_TOKEN = 'bb-token'
-    personal.UPDATE_BITBUCKET_SCOPE = 'user'
-    personal.UPDATE_BITBUCKET_PROJECT = ''
-    personal.UPDATE_BITBUCKET_USER = 'example.user'
-    personal.UPDATE_BITBUCKET_REPO = 'persistent-memory'
-    personal.UPDATE_BITBUCKET_BRANCH = 'master'
-    expect(validateEnvForDeploy(personal)).toEqual([])
-
-    personal.UPDATE_BITBUCKET_USER = ''
-    expect(validateEnvForDeploy(personal).map((i) => i.key)).toContain('UPDATE_BITBUCKET_USER')
-    expect(validateEnvForDeploy(personal).map((i) => i.key)).not.toContain('UPDATE_BITBUCKET_PROJECT')
-  })
 })
 
 describe('prereq parsers', () => {
   it('parseDockerInfo: running vs not', () => {
-    expect(parseDockerInfo('Server Version: 27', 0).ok).toBe(true)
+    expect(parseDockerInfo('linux', 0).ok).toBe(true)
     expect(parseDockerInfo('Cannot connect to the Docker daemon', 1).ok).toBe(false)
   })
   it('parseComposeVersion: v2 ok, v1 rejected', () => {
     expect(parseComposeVersion('Docker Compose version v2.32.1', 0).ok).toBe(true)
     expect(parseComposeVersion('docker-compose version 1.29.2', 0).ok).toBe(false)
   })
-  it('parseNodeVersion: 20+ ok', () => {
+  it('parseNodeVersion: 22.12+ ok', () => {
     expect(parseNodeVersion('v25.6.1').ok).toBe(true)
     expect(parseNodeVersion('v18.0.0').ok).toBe(false)
   })
@@ -412,7 +403,7 @@ describe('prereq parsers', () => {
     })
     expect(plan.map((s) => s.id)).toEqual(['install-docker', 'start-docker'])
   })
-  it('node repair installs and links Node 20 through Homebrew', () => {
+  it('node repair installs and links Node 24 through Homebrew', () => {
     const plan = buildPrereqInstallPlan('node', {
       platform: 'darwin',
       brewPath: '/opt/homebrew/bin/brew',
@@ -421,8 +412,8 @@ describe('prereq parsers', () => {
       hasOllama: true,
     })
     expect(plan.map((s) => s.id)).toEqual(['install-node', 'link-node'])
-    expect(plan[0]?.cmd).toEqual(['/opt/homebrew/bin/brew', 'install', 'node@20'])
-    expect(plan[1]?.cmd).toEqual(['/opt/homebrew/bin/brew', 'link', '--overwrite', '--force', 'node@20'])
+    expect(plan[0]?.cmd).toEqual(['/opt/homebrew/bin/brew', 'install', 'node@24'])
+    expect(plan[1]?.cmd).toEqual(['/opt/homebrew/bin/brew', 'link', '--overwrite', '--force', 'node@24'])
   })
 })
 
@@ -498,6 +489,8 @@ describe('install steps', () => {
     const dist = join(root, 'apps/onboard/dist')
     const sourceTemplate = join(root, 'apps/onboard/templates/persistent-memory-rule.md')
     const compiledTemplate = join(dist, 'apps/onboard/templates/persistent-memory-rule.md')
+    const sourcePrompt = join(root, 'prompts/fact-extraction.md')
+    const compiledPrompt = join(dist, 'prompts/fact-extraction.md')
     const compiledServer = join(dist, 'apps/onboard/server')
     const agentUpdate = join(compiledServer, 'agent-update.js')
     const register = join(compiledServer, 'register.js')
@@ -507,6 +500,7 @@ describe('install steps', () => {
     execFileSync('npm', ['run', 'build:server', '--prefix', 'apps/onboard'], { cwd: root })
 
     expect(readFileSync(compiledTemplate, 'utf8')).toBe(readFileSync(sourceTemplate, 'utf8'))
+    expect(readFileSync(compiledPrompt, 'utf8')).toBe(readFileSync(sourcePrompt, 'utf8'))
     expect(readFileSync(agentUpdate, 'utf8')).toContain("from './register.js'")
     expect(readFileSync(register, 'utf8')).toContain('export')
     expect(readFileSync(rule, 'utf8')).toContain('export')
@@ -517,12 +511,32 @@ describe('install steps', () => {
     execFileSync('npm', ['run', 'build:server', '--prefix', 'apps/onboard'], { cwd: root })
     expect(readFileSync(register, 'utf8')).toContain('export')
     await expect(import(`${pathToFileURL(agentUpdate).href}?rebuilt=${Date.now()}`)).resolves.toBeDefined()
+
+    const compiledExtraction = await import(`${pathToFileURL(join(compiledServer, 'extraction-test.js')).href}?rebuilt=${Date.now()}`) as {
+      testExtractionConnection: typeof testExtractionConnection
+    }
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fakeFetch = (async (url, init) => {
+      calls.push({ url: String(url), init: init ?? {} })
+      const verdict = { outcome: 'accept', facts: ['The compiled extraction probe works.'], restructured_content: '', reason: '', missing: [] }
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(verdict) }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    const result = await compiledExtraction.testExtractionConnection({
+      provider: 'anthropic', model: 'mock-extraction-model', apiKey: 'placeholder-test-key',
+    }, fakeFetch)
+    expect(result).toMatchObject({ ok: true, outcome: 'accept' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toBe('https://api.anthropic.com/v1/messages')
+    expect(JSON.parse(String(calls[0]!.init.body)).system).toBe(readFileSync(sourcePrompt, 'utf8'))
   }, 15_000)
 
   it('root setup refreshes agent artifacts so older update scripts carry prompt/rule migrations after pull', () => {
     const root = fileURLToPath(new URL('../../..', import.meta.url))
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-    expect(pkg.scripts.setup).toContain('apps/onboard/dist/apps/onboard/server/agent-update.js')
+    expect(pkg.scripts.setup).toBe('node scripts/setup.mjs')
+    expect(readFileSync(join(root, 'scripts/setup.mjs'), 'utf8')).toContain('apps/onboard/dist/apps/onboard/server/agent-update.js')
   })
 
   it('update-persistent-memory refreshes installed agent artifacts after pulling the new rule template', () => {
@@ -544,7 +558,7 @@ describe('install steps', () => {
     const scriptPath = join(root, 'deploy/scripts/uninstall.sh')
     const script = readFileSync(scriptPath, 'utf8')
 
-    expect(pkg.scripts['uninstall-persistent-memory']).toBe('bash deploy/scripts/uninstall.sh')
+    expect(pkg.scripts['uninstall-persistent-memory']).toBe('node scripts/host-lifecycle.mjs uninstall')
     expect(execFileSync('bash', ['-n', scriptPath], { encoding: 'utf8' })).toBe('')
     expect(script).toContain('pm.memory-export/1')
     expect(script).toContain('pm.secure-memory-export/1')
@@ -662,11 +676,11 @@ describe('install steps', () => {
     expect(steps.find((s) => s.id === 'compose-up')!.envOverride?.COMPOSE_PARALLEL_LIMIT).toBe('1')
     expect(steps.slice(-2).map((s) => s.id)).toEqual(['register', 'write-rule'])
   })
-  it('local mode: the seed step mints NO bootstrap token (captureToken false, name has no "token")', () => {
+  it('local mode initializes settings without minting a bootstrap token', () => {
     const steps = buildSteps({ flow: 'full', env: { DATABASE_MIGRATE_URL: 'postgresql://pmuser:x@persistent-memory-postgres:5432/persistent_memory', PM_APP_PASSWORD: 'APPPW', DEPLOYMENT_MODE: 'local' } })
     const seed = steps.find((s) => s.id === 'seed')!
     expect(seed.captureToken).toBeFalsy()
-    expect(seed.name.toLowerCase()).not.toContain('token')
+    expect(seed.name).toBe('Initialize local system settings')
   })
   it('legacy client flow installs the local personal stack before MCP registration', () => {
     const steps = buildSteps({
@@ -755,11 +769,30 @@ describe('install steps', () => {
     expect(extractToken('[seed] Superuser already present (1). Skipping.')).toEqual({ already: true })
     expect(extractToken('some unrelated banner line')).toBeNull()
   })
-  it('parseVerifySummary tallies PASS/FAIL/WARN', () => {
-    const r = parseVerifySummary('PASS docker\nPASS qdrant\nWARN ollama model\nFAIL nothing')
-    expect(r.pass).toBeGreaterThanOrEqual(2)
-    expect(r.warn).toBeGreaterThanOrEqual(1)
-    expect(r.fail).toBeGreaterThanOrEqual(1)
+  it.each(['\n', '\r\n'])('parseVerifySummary reads the final numeric totals with %j newlines', (newline) => {
+    const output = [
+      ...Array.from({ length: 38 }, (_, i) => `  PASS  Check ${i + 1}`),
+      '  PASS  Qdrant /readyz OK',
+      '',
+      '  Verification Results',
+      '  PASS: 39',
+      '  FAIL: 0',
+      '  WARN: 0',
+      '  All checks passed!',
+    ].join(newline)
+    expect(parseVerifySummary(output)).toEqual({ pass: 39, fail: 0, warn: 0 })
+    expect(parseVerifySummary(output.slice(output.indexOf('  Verification Results'))))
+      .toEqual({ pass: 39, fail: 0, warn: 0 })
+  })
+  it('parseVerifySummary counts only check prefixes when numeric totals are absent', () => {
+    const output = [
+      '  PASS  Docker running',
+      '  PASS  Qdrant /readyz OK',
+      '  WARN  Ollama model missing',
+      '  FAIL  API unreachable',
+      'Diagnostic mentions PASS, FAIL, ERROR and WARN without being a check.',
+    ].join('\n')
+    expect(parseVerifySummary(output)).toEqual({ pass: 2, fail: 1, warn: 1 })
   })
 })
 
@@ -767,29 +800,26 @@ describe('planRegistration (apps + scope → exact config writes)', () => {
   const home = '/home/u'
   it('global stream: Claude → ~/.claude.json only; Codex CLI/Desktop → shared ~/.codex', () => {
     const plan = planRegistration({ apps: { claudeCli: true, claudeDesktop: true, codexCli: true, codexDesktop: true }, level: 'global', projectPaths: [], home, mcpRuntime: 'stream' })
-    expect(plan.writes.find((w) => w.kind === 'claude' && w.path === '/home/u/.claude.json')).toMatchObject({ level: 'global', clientName: 'claude-code' })
+    expect(plan.writes.find((w) => w.kind === 'claude' && w.path === join(home, '.claude.json'))).toMatchObject({ level: 'global', clientName: 'claude-code' })
     expect(plan.writes.some((w) => w.path.endsWith('claude_desktop_config.json'))).toBe(false)
-    expect(plan.writes.find((w) => w.kind === 'codex' && w.path === '/home/u/.codex/config.toml')).toMatchObject({ clientName: 'codex' })
+    expect(plan.writes.find((w) => w.kind === 'codex' && w.path === join(home, '.codex', 'config.toml'))).toMatchObject({ clientName: 'codex' })
   })
   it('global legacy node input does not write Claude Desktop standalone stdio config', () => {
     const plan = planRegistration({ apps: { claudeCli: true, claudeDesktop: true, codexCli: false, codexDesktop: false }, level: 'global', projectPaths: [], home, mcpRuntime: 'node' })
-    expect(plan.writes.find((w) => w.kind === 'claude' && w.path === '/home/u/.claude.json')).toMatchObject({ level: 'global', clientName: 'claude-code' })
+    expect(plan.writes.find((w) => w.kind === 'claude' && w.path === join(home, '.claude.json'))).toMatchObject({ level: 'global', clientName: 'claude-code' })
     expect(plan.writes.some((w) => w.path.endsWith('claude_desktop_config.json'))).toBe(false)
   })
   it('project: Desktop folder sessions use ~/.claude.json projects.<path>; Codex writes per-folder; standalone chat is SKIPPED', () => {
     const plan = planRegistration({ apps: { claudeCli: false, claudeDesktop: true, codexCli: false, codexDesktop: true }, level: 'project', projectPaths: ['/a', '/b'], home, mcpRuntime: 'stream' })
-    const cj = plan.writes.find((w) => w.kind === 'claude' && w.path === '/home/u/.claude.json')
+    const cj = plan.writes.find((w) => w.kind === 'claude' && w.path === join(home, '.claude.json'))
     expect(cj?.level).toBe('project')
     expect(cj?.projectPaths).toEqual(['/a', '/b'])
     expect(plan.writes.some((w) => w.path.endsWith('claude_desktop_config.json'))).toBe(false) // global-only surface, skipped under project scope
-    expect(plan.writes.filter((w) => w.kind === 'codex').map((w) => w.path)).toEqual(['/a/.codex/config.toml', '/b/.codex/config.toml'])
+    expect(plan.writes.filter((w) => w.kind === 'codex').map((w) => w.path)).toEqual([join('/a', '.codex', 'config.toml'), join('/b', '.codex', 'config.toml')])
     expect(plan.writes.filter((w) => w.kind === 'codex').map((w) => w.clientName)).toEqual(['codex-desktop', 'codex-desktop'])
   })
-  it('project with no usable folders falls back to global writes', () => {
-    const plan = planRegistration({ apps: { claudeCli: true, claudeDesktop: false, codexCli: true, codexDesktop: false }, level: 'project', projectPaths: ['  '], home, mcpRuntime: 'stream' })
-    expect(plan.writes.find((w) => w.kind === 'claude')?.level).toBe('global')
-    expect(plan.writes.some((w) => w.kind === 'codex' && w.path === '/home/u/.codex/config.toml')).toBe(true)
-    expect(plan.writes.find((w) => w.kind === 'codex')?.clientName).toBe('codex-cli')
+  it('project with no usable folders fails instead of writing global configuration', () => {
+    expect(() => planRegistration({ apps: { claudeCli: true, claudeDesktop: false, codexCli: true, codexDesktop: false }, level: 'project', projectPaths: ['  '], home, mcpRuntime: 'stream' })).toThrow(/folder/i)
   })
   it('no selected agent apps → no writes', () => {
     const plan = planRegistration({ apps: { claudeCli: false, claudeDesktop: false, codexCli: false, codexDesktop: false }, level: 'global', projectPaths: [], home, mcpRuntime: 'stream' })

@@ -25,7 +25,9 @@ vi.mock('../src/protocol/llm/client.ts', async (importOriginal) => ({
 }))
 
 import { LlmProviderError } from '../src/protocol/llm/client.ts'
-import { testFactExtractionSettings } from '../src/services/fact-extraction.ts'
+import { FACT_EXTRACTION_TEST_PAYLOAD, testFactExtractionSettings } from '../src/services/fact-extraction.ts'
+import { FACT_EXTRACTION_PROMPT } from '../src/protocol/prompt.ts'
+import { testExtractionConnection } from '../../onboard/server/extraction-test.ts'
 
 const RUNTIME_ROW = {
   factExtractionProvider: 'anthropic',
@@ -68,6 +70,35 @@ describe('fact extraction capability health', () => {
       model: 'claude-haiku-4-5-20251001',
       observedAt: expect.any(Date),
     }))
+  })
+
+  it.each([
+    ['anthropic', 'claude-haiku-4-5-20251001'],
+    ['openai', 'gpt-4o'],
+  ] as const)('sends the same canonical serialized sample from API and onboarding for %s', async (provider, model) => {
+    const verdict = { outcome: 'accept', facts: [FACT_EXTRACTION_TEST_PAYLOAD.content], restructured_content: '', reason: '', missing: [] }
+    llm.classify.mockResolvedValue(verdict)
+    const apiResult = await testFactExtractionSettings({ model, apiKey: 'placeholder-test-key' }, {})
+    expect(apiResult).toMatchObject({ ok: true, provider, model })
+    expect(llm.classify).toHaveBeenCalledOnce()
+    expect(llm.classify.mock.calls[0]?.[0]).toBe(FACT_EXTRACTION_PROMPT)
+    const apiUserJson = llm.classify.mock.calls[0]?.[1]
+    expect(apiUserJson).toBe(JSON.stringify(FACT_EXTRACTION_TEST_PAYLOAD))
+
+    const calls: RequestInit[] = []
+    const fakeFetch = (async (_url, init) => {
+      calls.push(init ?? {})
+      const body = provider === 'anthropic'
+        ? { content: [{ type: 'text', text: JSON.stringify(verdict) }] }
+        : { choices: [{ message: { content: JSON.stringify(verdict) } }] }
+      return new Response(JSON.stringify(body), { status: 200 })
+    }) as typeof fetch
+    await expect(testExtractionConnection({ provider, model, apiKey: 'placeholder-test-key' }, fakeFetch))
+      .resolves.toMatchObject({ ok: true, provider, model })
+    expect(calls).toHaveLength(1)
+    const request = JSON.parse(String(calls[0]!.body)) as { system?: string; messages: Array<{ role: string; content: string }> }
+    expect(request.messages.find((message) => message.role === 'user')?.content).toBe(apiUserJson)
+    expect(provider === 'anthropic' ? request.system : request.messages.find((message) => message.role === 'system')?.content).toBe(FACT_EXTRACTION_PROMPT)
   })
 
   it('records the canonical quota failure without returning a provider payload', async () => {
@@ -176,7 +207,27 @@ describe('fact extraction capability health', () => {
 
     const result = await testFactExtractionSettings({ model: 'claude-haiku-4-5-20251001' })
 
-    expect(result).toMatchObject({ ok: false, outcome: 'reject' })
+    expect(result).toMatchObject({
+      ok: false,
+      outcome: 'reject',
+      message: 'Connection succeeded, but the model rejected the built-in extraction sample. Retry the test.',
+      reason: 'probe rejected',
+      details: 'probe rejected\nMissing: entity_quality',
+    })
+    expect(health.recordSuccess).not.toHaveBeenCalled()
+    expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failure: { code: 'fact_extraction_probe_rejected', state: 'unhealthy' },
+    }))
+  })
+
+  it.each([
+    { reason: 'graph entity was not recognized', missing: [], details: 'graph entity was not recognized' },
+    { reason: '', missing: ['graph_entity_in_content'], details: 'Missing: graph_entity_in_content' },
+    { reason: '', missing: [], details: undefined },
+  ])('retains rejection diagnostics without inventing missing fields: $details', async ({ reason, missing, details }) => {
+    llm.classify.mockResolvedValue({ outcome: 'reject', facts: [], restructured_content: '', reason, missing })
+    const result = await testFactExtractionSettings({ model: 'gpt-4o', apiKey: 'placeholder-test-key' }, {})
+    expect(result).toMatchObject({ ok: false, outcome: 'reject', reason, details })
     expect(health.recordSuccess).not.toHaveBeenCalled()
     expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
       failure: { code: 'fact_extraction_probe_rejected', state: 'unhealthy' },

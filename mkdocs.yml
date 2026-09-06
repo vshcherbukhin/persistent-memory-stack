@@ -47,10 +47,11 @@ extra_css:
   - stylesheets/material-icons-outlined.css
   - stylesheets/pm-management.css
 extra:
-  docs_version: 0.2.9
+  docs_version: 1.0.0
 nav:
   - "Home": index.md
   - "Installation":
+      - "Windows preparation": installation/windows-installation.md
       - "Installation steps": installation/installation-steps.md
       - "Uninstall memory stack": installation/uninstall-memory-stack.md
   - "Spaces":
@@ -103,6 +104,3 @@ nav:
       - "Docker Control": components/docker-control.md
       - "Graphiti Service": components/graphiti-service.md
       - "DLP Service": components/dlp-service.md
-  - "Benchmark Reports":
-      - "4.0.30 system health": benchmark_reports/4.0.30-system-health.md
-      - "4.0.34 token economics": benchmark_reports/4.0.34-token-economics.md

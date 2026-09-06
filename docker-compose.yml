@@ -1,4 +1,4 @@
-# Compatibility entry point for the 4.0.24 terminal updater.
+# Root entry point for the canonical deployment configuration.
 #
 # Compose resolves paths in an included file from that file's own directory, so
 # the canonical deployment file remains the only place that defines services.

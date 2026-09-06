@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
-const source = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
+const source = (path: string) => readFile(new URL(path, import.meta.url), 'utf8').then((text) => text.replace(/\r\n/g, '\n'))
 
 describe('compile-first runtime policy', () => {
   it('runs every first-party Node service from emitted JavaScript', async () => {
