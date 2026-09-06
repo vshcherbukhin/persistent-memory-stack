@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
-import { compareSemver, detectMcpRestartRequired, parseReleaseHistory, type ParsedRelease } from '../release-versioning/release.js'
+import { compareSemver, parseReleaseHistory, type ParsedRelease } from '../release-versioning/release.js'
+import { publicUpdateSource, publicUpdateMetadataCache, isPublicUpdateRepository, type PublicUpdateMetadataCache } from './github.js'
 
 export interface UpdateStatus {
+  releaseLine: string
   currentVersion: string
   latestVersion: string | null
   updateAvailable: boolean
@@ -36,73 +37,13 @@ export interface UpdateLogState {
 }
 
 export interface PostUpdateSignal {
+  releaseLine: string
   id: string
   source: 'update-script' | 'update-runner'
   version: string
   finishedAt: string
   branch?: string
   commit?: string
-}
-
-export type UpdateSettingsProvider = 'none' | 'bitbucket' | 'git'
-export type UpdateBitbucketScope = 'project' | 'user'
-
-export interface UpdateNotificationSettings {
-  enabled: boolean
-  provider: UpdateSettingsProvider
-  bitbucket: {
-    url: string
-    tokenConfigured: boolean
-    scope: UpdateBitbucketScope
-    project: string
-    user: string
-    repo: string
-    branch: string
-  }
-}
-
-export interface UpdateNotificationSettingsInput {
-  enabled: boolean
-  provider?: 'none' | 'bitbucket'
-  bitbucket?: {
-    url?: string
-    token?: string
-    scope?: UpdateBitbucketScope
-    project?: string
-    user?: string
-    repo?: string
-    branch?: string
-  }
-}
-
-export interface UpdateConnectionTestResult {
-  ok: true
-  provider: 'bitbucket'
-  repository: string
-  branch: string
-  latestCommit: string
-  latestVersion: string | null
-}
-
-export type UpdateRunnerErrorCode = 'update_settings_invalid' | 'bitbucket_connection_failed' | 'runtime_env_unavailable'
-
-export class UpdateRunnerError extends Error {
-  readonly code: UpdateRunnerErrorCode
-  readonly details: string
-  readonly statusCode: number
-
-  constructor(
-    code: UpdateRunnerErrorCode,
-    message: string,
-    details: string,
-    statusCode = 422,
-  ) {
-    super(message)
-    this.name = 'UpdateRunnerError'
-    this.code = code
-    this.details = details
-    this.statusCode = statusCode
-  }
 }
 
 export interface RunnerConfig {
@@ -113,14 +54,6 @@ export interface RunnerConfig {
 
 type ExecResult = { code: number; stdout: string; stderr: string }
 type RuntimeEnv = Record<string, string>
-type RemoteMetadata = {
-  latestVersion: string | null
-  latestCommit?: string
-  releaseNotes?: ParsedRelease | null
-  changedPaths?: string[]
-  autoUpdateReady: boolean
-}
-
 function nowStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-')
 }
@@ -135,6 +68,7 @@ function runCommand(
       cwd: options.cwd,
       env: { ...process.env, ...(options.env ?? {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     })
     let stdout = ''
     let stderr = ''
@@ -169,58 +103,12 @@ function gitArgs(repoDir: string, args: string[]): string[] {
   return ['-c', `safe.directory=${repoDir}`, ...args]
 }
 
-function isHttpRemoteUrl(remoteUrl: string): boolean {
-  return /^https?:\/\//iu.test(remoteUrl)
-}
-
-function remoteUsernameFromUrl(remoteUrl: string): string {
-  try {
-    return new URL(remoteUrl).username
-  } catch {
-    return ''
+async function requirePublicUpdateOrigin(repoDir: string): Promise<void> {
+  const remote = await readGitRef(repoDir, ['remote', 'get-url', 'origin'])
+  if (!remote || !isPublicUpdateRepository(remote)) {
+    throw new Error('The checkout origin does not match the public Persistent Memory repository. Check the trusted checkout origin before running an update.')
   }
 }
-
-async function gitFetchAuthEnv(repoDir: string, runtimeEnv: RuntimeEnv): Promise<{ env: NodeJS.ProcessEnv; cleanup: () => Promise<void> }> {
-  const baseEnv: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0' }
-  let remoteUrl = ''
-  try {
-    remoteUrl = (await execChecked('git', gitArgs(repoDir, ['remote', 'get-url', 'origin']), { cwd: repoDir, env: baseEnv })).trim()
-  } catch {
-    return { env: baseEnv, cleanup: async () => {} }
-  }
-
-  const token = envValue(runtimeEnv, 'UPDATE_BITBUCKET_TOKEN')
-  if (envValue(runtimeEnv, 'UPDATE_CHECK_PROVIDER') !== 'bitbucket' || !token || !isHttpRemoteUrl(remoteUrl)) {
-    return { env: baseEnv, cleanup: async () => {} }
-  }
-
-  const username = envValue(runtimeEnv, 'UPDATE_BITBUCKET_USER') || remoteUsernameFromUrl(remoteUrl) || process.env.USER || 'git'
-  const dir = await mkdtemp(join(tmpdir(), 'pm-git-askpass-'))
-  const askpass = join(dir, 'askpass.sh')
-  await writeFile(askpass, [
-    '#!/usr/bin/env bash',
-    'case "$1" in',
-    '  *Username*) printf \'%s\\n\' "$PM_GIT_USERNAME" ;;',
-    '  *Password*) printf \'%s\\n\' "$PM_GIT_PASSWORD" ;;',
-    '  *) printf \'%s\\n\' "$PM_GIT_PASSWORD" ;;',
-    'esac',
-    '',
-  ].join('\n'), { mode: 0o700 })
-
-  return {
-    env: {
-      ...baseEnv,
-      GIT_ASKPASS: askpass,
-      PM_GIT_USERNAME: username,
-      PM_GIT_PASSWORD: token,
-    },
-    cleanup: async () => {
-      await rm(dir, { recursive: true, force: true })
-    },
-  }
-}
-
 async function readPackageVersion(repoDir: string): Promise<string> {
   const raw = JSON.parse(await readFile(join(repoDir, 'package.json'), 'utf8')) as { version?: string }
   return raw.version ?? '0.0.0'
@@ -230,9 +118,11 @@ async function readCurrentVersion(repoDir: string): Promise<string> {
   const packageVersion = await readPackageVersion(repoDir)
   const deployedHistoryUrl = process.env.UPDATE_DEPLOYED_RELEASE_HISTORY_URL ?? 'http://dashboard:3000/release-history.md'
   try {
-    const res = await fetch(deployedHistoryUrl)
+    const res = await fetch(deployedHistoryUrl, { signal: AbortSignal.timeout(2_000) })
     if (!res.ok) throw new Error(`deployed release history returned ${res.status}`)
-    return parseReleaseHistory(await res.text())[0]?.version ?? packageVersion
+    const history = await res.text()
+    if (!history.includes(`<!-- persistent-memory-release-line: ${publicUpdateSource.releaseLine} -->`)) return packageVersion
+    return parseReleaseHistory(history)[0]?.version ?? packageVersion
   } catch {
     return packageVersion
   }
@@ -244,6 +134,7 @@ function isPostUpdateSignal(value: unknown): value is PostUpdateSignal {
   const input = value as Partial<PostUpdateSignal> | null
   return Boolean(
     input
+      && input.releaseLine === publicUpdateSource.releaseLine
       && typeof input.id === 'string'
       && (input.source === 'update-script' || input.source === 'update-runner')
       && typeof input.version === 'string'
@@ -270,11 +161,6 @@ async function readGitRef(repoDir: string, args: string[]): Promise<string | und
   }
 }
 
-function sameGitCommit(a: string | undefined, b: string | undefined): boolean {
-  if (!a || !b) return false
-  return a === b || a.startsWith(b) || b.startsWith(a)
-}
-
 async function writePostUpdateSignal(
   repoDir: string,
   version: string,
@@ -285,6 +171,7 @@ async function writePostUpdateSignal(
   const commit = await readGitRef(repoDir, ['rev-parse', 'HEAD'])
   const resolvedBranch = branch || await readGitRef(repoDir, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const signal: PostUpdateSignal = {
+    releaseLine: publicUpdateSource.releaseLine,
     id: `${finishedAt}-${version}`,
     source,
     version,
@@ -315,209 +202,17 @@ function parseEnv(raw: string): RuntimeEnv {
   return out
 }
 
-const UPDATE_ENV_KEYS = [
-  'UPDATE_CHECK_PROVIDER',
-  'UPDATE_BITBUCKET_URL',
-  'UPDATE_BITBUCKET_TOKEN',
-  'UPDATE_BITBUCKET_SCOPE',
-  'UPDATE_BITBUCKET_PROJECT',
-  'UPDATE_BITBUCKET_USER',
-  'UPDATE_BITBUCKET_REPO',
-  'UPDATE_BITBUCKET_BRANCH',
-] as const
-
 async function readRuntimeEnv(repoDir: string): Promise<RuntimeEnv> {
   const envPath = join(repoDir, '.env.persistent-memory')
   if (!existsSync(envPath)) return {}
   return parseEnv(await readFile(envPath, 'utf8'))
 }
 
-function cleanEnvValue(value: string | undefined): string {
-  return (value ?? '').replace(/\r?\n/gu, '').trim()
-}
-
-async function writeRuntimeEnv(repoDir: string, updates: Partial<Record<(typeof UPDATE_ENV_KEYS)[number], string>>): Promise<void> {
-  const envPath = join(repoDir, '.env.persistent-memory')
-  const raw = existsSync(envPath) ? await readFile(envPath, 'utf8') : ''
-  const seen = new Set<string>()
-  const lines = raw ? raw.split(/\r?\n/u) : []
-  const nextLines = lines.map((line) => {
-    const match = line.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=/u)
-    if (!match) return line
-    const key = match[2] as (typeof UPDATE_ENV_KEYS)[number]
-    if (!Object.prototype.hasOwnProperty.call(updates, key)) return line
-    seen.add(key)
-    return `${match[1]}${key}=${cleanEnvValue(updates[key])}`
-  })
-
-  const missing = UPDATE_ENV_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(updates, key) && !seen.has(key))
-  let next = nextLines.join('\n')
-  if (next && !next.endsWith('\n')) next += '\n'
-  if (missing.length > 0) {
-    if (next.trim()) next += '\n'
-    next += '# Application update notifications\n'
-    next += `${missing.map((key) => `${key}=${cleanEnvValue(updates[key])}`).join('\n')}\n`
-  }
-  await writeFile(envPath, next, { mode: 0o600 })
-}
-
-function envValue(env: RuntimeEnv, key: string): string {
-  return (env[key] ?? process.env[key] ?? '').trim()
-}
-
-function providerFromEnv(value: string): UpdateSettingsProvider {
-  if (value === 'bitbucket' || value === 'git') return value
-  return 'none'
-}
-
-function scopeFromEnv(value: string): UpdateBitbucketScope {
-  return value === 'user' ? 'user' : 'project'
-}
-
-function settingsFromEnv(env: RuntimeEnv, branchFallback: string): UpdateNotificationSettings {
-  const provider = providerFromEnv(envValue(env, 'UPDATE_CHECK_PROVIDER'))
-  return {
-    enabled: provider !== 'none',
-    provider,
-    bitbucket: {
-      url: envValue(env, 'UPDATE_BITBUCKET_URL'),
-      tokenConfigured: Boolean(envValue(env, 'UPDATE_BITBUCKET_TOKEN')),
-      scope: scopeFromEnv(envValue(env, 'UPDATE_BITBUCKET_SCOPE')),
-      project: envValue(env, 'UPDATE_BITBUCKET_PROJECT'),
-      user: envValue(env, 'UPDATE_BITBUCKET_USER'),
-      repo: envValue(env, 'UPDATE_BITBUCKET_REPO'),
-      branch: envValue(env, 'UPDATE_BITBUCKET_BRANCH') || branchFallback,
-    },
-  }
-}
-
-export function updateNotificationSettingsBackup(env: RuntimeEnv, branchFallback: string): UpdateNotificationSettings & { note: string } {
-  return {
-    ...settingsFromEnv(env, branchFallback),
-    note: 'Bitbucket token is redacted here; the raw value is preserved in the .env.persistent-memory snapshot.',
-  }
-}
-
-function requireEnabledBitbucketSettings(values: Record<string, string>): void {
-  if (values.UPDATE_CHECK_PROVIDER !== 'bitbucket') return
-  const scope = scopeFromEnv(values.UPDATE_BITBUCKET_SCOPE ?? '')
-  const missing: string[] = []
-  if (!values.UPDATE_BITBUCKET_URL) missing.push('Bitbucket URL')
-  if (!values.UPDATE_BITBUCKET_TOKEN) missing.push('Bitbucket token')
-  if (scope === 'user' && !values.UPDATE_BITBUCKET_USER) missing.push('Bitbucket user')
-  if (scope === 'project' && !values.UPDATE_BITBUCKET_PROJECT) missing.push('Bitbucket project')
-  if (!values.UPDATE_BITBUCKET_REPO) missing.push('Bitbucket repo')
-  if (!values.UPDATE_BITBUCKET_BRANCH) missing.push('Bitbucket branch')
-  if (missing.length > 0) {
-    throw new UpdateRunnerError(
-      'update_settings_invalid',
-      `Missing required update notification setting${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.`,
-      'Complete the highlighted Bitbucket fields before saving or testing the connection.',
-    )
-  }
-}
-
-function encodePath(path: string): string {
-  return path.split('/').map((part) => encodeURIComponent(part)).join('/')
-}
-
-async function fetchText(url: string, token: string): Promise<string> {
-  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } })
-  if (!res.ok) {
-    const hint = res.status === 401 || res.status === 403
-      ? 'Check that the personal access token can read this repository.'
-      : res.status === 404
-        ? 'Check the repository owner, repository name, and branch.'
-        : 'Check the Bitbucket URL, VPN connection, and server availability.'
-    throw new UpdateRunnerError(
-      'bitbucket_connection_failed',
-      `Bitbucket returned HTTP ${res.status} while checking the update source.`,
-      hint,
-    )
-  }
-  return res.text()
-}
-
-async function fetchJson<T>(url: string, token: string): Promise<T> {
-  const raw = await fetchText(url, token)
-  return JSON.parse(raw) as T
-}
-
-async function readBitbucketMetadata(env: RuntimeEnv, branchFallback: string): Promise<RemoteMetadata | null> {
-  const baseUrl = envValue(env, 'UPDATE_BITBUCKET_URL').replace(/\/+$/u, '')
-  const token = envValue(env, 'UPDATE_BITBUCKET_TOKEN')
-  const scope = envValue(env, 'UPDATE_BITBUCKET_SCOPE') || 'project'
-  const project = envValue(env, 'UPDATE_BITBUCKET_PROJECT')
-  const user = envValue(env, 'UPDATE_BITBUCKET_USER')
-  const repo = envValue(env, 'UPDATE_BITBUCKET_REPO')
-  const branch = envValue(env, 'UPDATE_BITBUCKET_BRANCH') || branchFallback
-  const owner = scope === 'user' ? user : project
-  if (!baseUrl || !token || !owner || !repo || !branch) return null
-
-  const ownerPath = scope === 'user'
-    ? `users/${encodeURIComponent(user)}`
-    : `projects/${encodeURIComponent(project)}`
-  const repoBase = `${baseUrl}/rest/api/1.0/${ownerPath}/repos/${encodeURIComponent(repo)}`
-  const at = `refs/heads/${branch}`
-  const commitsUrl = `${repoBase}/commits?${new URLSearchParams({ until: at, limit: '1' }).toString()}`
-  const commits = await fetchJson<{ values?: { id?: string }[] }>(commitsUrl, token)
-  const latestCommit = commits.values?.[0]?.id
-
-  const rawUrl = (path: string): string => `${repoBase}/raw/${encodePath(path)}?${new URLSearchParams({ at }).toString()}`
-  const remotePackage = JSON.parse(await fetchText(rawUrl('package.json'), token)) as { version?: string }
-  const remoteHistory = await fetchText(rawUrl('release-history.md'), token)
-  return {
-    latestVersion: remotePackage.version ?? null,
-    latestCommit,
-    releaseNotes: parseReleaseHistory(remoteHistory)[0] ?? null,
-    changedPaths: [],
-    autoUpdateReady: false,
-  }
-}
-
-function updateSettingsValues(
-  input: UpdateNotificationSettingsInput,
-  currentEnv: RuntimeEnv,
-  current: UpdateNotificationSettings,
-  branchFallback: string,
-): Record<string, string> {
-  const bitbucket = input.bitbucket ?? {}
-  const scope = scopeFromEnv(bitbucket.scope ?? current.bitbucket.scope)
-  const token = cleanEnvValue(bitbucket.token)
-  return {
-    UPDATE_CHECK_PROVIDER: input.enabled ? 'bitbucket' : 'none',
-    UPDATE_BITBUCKET_URL: cleanEnvValue(bitbucket.url ?? current.bitbucket.url),
-    UPDATE_BITBUCKET_TOKEN: token || envValue(currentEnv, 'UPDATE_BITBUCKET_TOKEN'),
-    UPDATE_BITBUCKET_SCOPE: scope,
-    UPDATE_BITBUCKET_PROJECT: cleanEnvValue(bitbucket.project ?? current.bitbucket.project),
-    UPDATE_BITBUCKET_USER: cleanEnvValue(bitbucket.user ?? current.bitbucket.user),
-    UPDATE_BITBUCKET_REPO: cleanEnvValue(bitbucket.repo ?? current.bitbucket.repo),
-    UPDATE_BITBUCKET_BRANCH: cleanEnvValue(bitbucket.branch ?? current.bitbucket.branch) || branchFallback,
-  }
-}
-
-async function readGitMetadata(repoDir: string, branch: string, runtimeEnv: RuntimeEnv = {}): Promise<RemoteMetadata> {
-  const auth = await gitFetchAuthEnv(repoDir, runtimeEnv)
-  try {
-    await execChecked('git', gitArgs(repoDir, ['fetch', '--quiet', 'origin', branch]), { cwd: repoDir, env: auth.env })
-    const latestCommit = (await execChecked('git', gitArgs(repoDir, ['rev-parse', `origin/${branch}`]), { cwd: repoDir })).trim()
-    const remotePackage = JSON.parse(
-      await execChecked('git', gitArgs(repoDir, ['show', `origin/${branch}:package.json`]), { cwd: repoDir }),
-    ) as { version?: string }
-    const remoteHistory = await execChecked('git', gitArgs(repoDir, ['show', `origin/${branch}:release-history.md`]), { cwd: repoDir })
-    const changedPaths = (await execChecked('git', gitArgs(repoDir, ['diff', '--name-only', `HEAD..origin/${branch}`]), { cwd: repoDir }))
-      .split(/\r?\n/u)
-      .filter(Boolean)
-    return {
-      latestVersion: remotePackage.version ?? null,
-      latestCommit,
-      releaseNotes: parseReleaseHistory(remoteHistory)[0] ?? null,
-      changedPaths,
-      autoUpdateReady: true,
-    }
-  } finally {
-    await auth.cleanup()
-  }
+async function fetchOrigin(repoDir: string, branch: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const result = await runCommand('git', gitArgs(repoDir, ['fetch', '--quiet', 'origin', branch]), { cwd: repoDir, env })
+  // Git tracing, credential helpers, proxies, and remote errors can echo secrets.
+  // Never stream or surface fetch output when credentials may be in use.
+  if (result.code !== 0) throw new Error('Git fetch failed for the configured update source.')
 }
 
 function composeArgs(runtimeEnv: RuntimeEnv, args: string[]): string[] {
@@ -554,7 +249,6 @@ async function createSnapshot(cfg: RunnerConfig, onLog: (line: string) => void):
     branch: cfg.branch,
     includes: [
       '.env.persistent-memory',
-      'redacted update notification settings',
       'postgres pg_dump when available',
       'read-only mounted volume archives for qdrant, falkordb, redis, minio, postgres, neo4j when mounted',
       'compose service inventory',
@@ -563,11 +257,6 @@ async function createSnapshot(cfg: RunnerConfig, onLog: (line: string) => void):
   await writeFile(join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
   if (existsSync(join(cfg.repoDir, '.env.persistent-memory'))) {
     await execChecked('cp', ['.env.persistent-memory', join(backupPath, '.env.persistent-memory')], { cwd: cfg.repoDir, onLog })
-    await writeFile(
-      join(backupPath, 'update-notification-settings.json'),
-      `${JSON.stringify(updateNotificationSettingsBackup(await readRuntimeEnv(cfg.repoDir), cfg.branch), null, 2)}\n`,
-      { mode: 0o600 },
-    )
   }
   const ps = await runCommand('docker', ['compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory', 'ps'], {
     cwd: cfg.repoDir,
@@ -612,7 +301,7 @@ async function createSnapshot(cfg: RunnerConfig, onLog: (line: string) => void):
   return backupPath
 }
 
-export function createUpdateRunner(cfg: RunnerConfig) {
+export function createUpdateRunner(cfg: RunnerConfig, dependencies: { metadataCache?: PublicUpdateMetadataCache } = {}) {
   let running = false
   let logs: string[] = []
   let lastRun: UpdateRunSummary | undefined
@@ -624,64 +313,25 @@ export function createUpdateRunner(cfg: RunnerConfig) {
     }
   }
 
+  const metadataCache = dependencies.metadataCache ?? publicUpdateMetadataCache
   const status = async (): Promise<UpdateStatus> => {
-    const currentVersion = await readCurrentVersion(cfg.repoDir)
-    let latestVersion: string | null = null
-    let releaseNotes: ParsedRelease | null = null
-    let currentCommit: string | undefined
-    let latestCommit: string | undefined
-    let changedPaths: string[] = []
-    let autoUpdateReady = false
-    const runtimeEnv = await readRuntimeEnv(cfg.repoDir)
-    const updateSettings = settingsFromEnv(runtimeEnv, cfg.branch)
-    const updateBranch = updateSettings.bitbucket.branch || cfg.branch
-    const lastSuccessfulUpdate = await readPostUpdateSignal(cfg.repoDir)
-    try {
-      currentCommit = (await execChecked('git', gitArgs(cfg.repoDir, ['rev-parse', 'HEAD']), { cwd: cfg.repoDir })).trim()
-    } catch (err) {
-      // currentCommit is best-effort only.
-    }
-    try {
-      const provider = envValue(runtimeEnv, 'UPDATE_CHECK_PROVIDER') || 'none'
-      const metadata = provider === 'bitbucket'
-        ? await readBitbucketMetadata(runtimeEnv, cfg.branch)
-        : provider === 'git'
-          ? await readGitMetadata(cfg.repoDir, updateBranch, runtimeEnv)
-          : null
-      if (metadata) {
-        latestVersion = metadata.latestVersion
-        latestCommit = metadata.latestCommit
-        releaseNotes = metadata.releaseNotes ?? null
-        changedPaths = metadata.changedPaths ?? []
-        autoUpdateReady = metadata.autoUpdateReady
-      }
-    } catch (err) {
-      // Status polling is intentionally quiet: if Git/VPN/auth metadata is not
-      // available, the dashboard simply behaves as if no newer version is known.
-    }
-    const releaseUpdateAvailable = Boolean(latestVersion && compareSemver(latestVersion, currentVersion) > 0)
-    const deployedCommit = lastSuccessfulUpdate?.branch === updateBranch ? lastSuccessfulUpdate.commit : undefined
-    const branchCommitUpdateAvailable = updateBranch !== 'master'
-      && Boolean(latestCommit)
-      && (!deployedCommit || !sameGitCommit(deployedCommit, latestCommit))
-
+    const [currentVersion, metadata, currentCommit, lastSuccessfulUpdate] = await Promise.all([
+      readCurrentVersion(cfg.repoDir), metadataCache.read(),
+      readGitRef(cfg.repoDir, ['rev-parse', 'HEAD']), readPostUpdateSignal(cfg.repoDir),
+    ])
+    const latestVersion = metadata?.latestVersion ?? null
+    const releaseNotes = metadata ? parseReleaseHistory(metadata.releaseHistory)[0] ?? null : null
     return {
-      currentVersion,
-      latestVersion,
-      updateAvailable: releaseUpdateAvailable || branchCommitUpdateAvailable,
-      updateBranch,
-      autoUpdateReady,
-      currentCommit,
-      latestCommit,
-      releaseNotes,
-      mcpRestartRequired: releaseNotes?.mcpRestartRequired || detectMcpRestartRequired(changedPaths),
-      running,
-      lastRun,
-      lastSuccessfulUpdate,
-      logs,
+      releaseLine: publicUpdateSource.releaseLine,
+      currentVersion, latestVersion,
+      updateAvailable: Boolean(latestVersion && compareSemver(latestVersion, currentVersion) > 0),
+      updateBranch: publicUpdateSource.branch,
+      autoUpdateReady: false,
+      currentCommit, latestCommit: metadata?.latestCommit,
+      releaseNotes, mcpRestartRequired: releaseNotes?.mcpRestartRequired ?? false,
+      running, lastRun, lastSuccessfulUpdate, logs,
     }
   }
-
   const start = async (): Promise<{ ok: boolean }> => {
     if (running) return { ok: false }
     running = true
@@ -689,24 +339,30 @@ export function createUpdateRunner(cfg: RunnerConfig) {
     lastRun = { ok: false, startedAt: new Date().toISOString() }
     void (async () => {
       try {
+        const runtimeEnv = await readRuntimeEnv(cfg.repoDir)
+        await requirePublicUpdateOrigin(cfg.repoDir)
         push('Starting snapshot-safe update')
         const backupPath = await createSnapshot(cfg, push)
-        const runtimeEnv = await readRuntimeEnv(cfg.repoDir)
         const databaseMigrateUrl = runtimeEnv.DATABASE_MIGRATE_URL ?? process.env.DATABASE_MIGRATE_URL ?? ''
         if (!databaseMigrateUrl) {
           throw new Error('DATABASE_MIGRATE_URL is missing in .env.persistent-memory; cannot run migrations safely')
         }
         lastRun = { ...lastRun!, backupPath }
-        const auth = await gitFetchAuthEnv(cfg.repoDir, runtimeEnv)
-        const updateSettings = settingsFromEnv(runtimeEnv, cfg.branch)
-        const updateBranch = updateSettings.bitbucket.branch || cfg.branch
+        const updateBranch = cfg.branch || publicUpdateSource.branch
         try {
-          await execChecked('git', gitArgs(cfg.repoDir, ['fetch', '--quiet', 'origin', updateBranch]), { cwd: cfg.repoDir, env: auth.env, onLog: push })
+          await fetchOrigin(cfg.repoDir, updateBranch, { GIT_TERMINAL_PROMPT: '0' })
         } catch (err) {
-          push(`git fetch failed; using cached origin/${updateBranch} if available: ${err instanceof Error ? err.message : String(err)}`)
+          push(`git fetch failed; using cached origin/${updateBranch} if available.`)
           await execChecked('git', gitArgs(cfg.repoDir, ['rev-parse', `origin/${updateBranch}`]), { cwd: cfg.repoDir, onLog: push })
-        } finally {
-          await auth.cleanup()
+        }
+        let targetPackage: { persistentMemoryReleaseLine?: unknown }
+        try {
+          targetPackage = JSON.parse(await execChecked('git', gitArgs(cfg.repoDir, ['show', `origin/${updateBranch}:package.json`]), { cwd: cfg.repoDir })) as typeof targetPackage
+        } catch {
+          throw new Error('Cannot verify the target public release line. The checkout has not been changed.')
+        }
+        if (targetPackage?.persistentMemoryReleaseLine !== publicUpdateSource.releaseLine) {
+          throw new Error('The selected branch does not contain the public release line yet. The checkout has not been changed.')
         }
         await execChecked('git', gitArgs(cfg.repoDir, ['merge', '--ff-only', `origin/${updateBranch}`]), { cwd: cfg.repoDir, onLog: push })
         const services = runtimeServices(runtimeEnv)
@@ -740,61 +396,5 @@ export function createUpdateRunner(cfg: RunnerConfig) {
 
   const logState = async (): Promise<UpdateLogState> => ({ running, logs, lastRun })
 
-  const settings = async (): Promise<UpdateNotificationSettings> => settingsFromEnv(await readRuntimeEnv(cfg.repoDir), cfg.branch)
-
-  const saveSettings = async (input: UpdateNotificationSettingsInput): Promise<UpdateNotificationSettings> => {
-    const currentEnv = await readRuntimeEnv(cfg.repoDir)
-    const current = settingsFromEnv(currentEnv, cfg.branch)
-    const values = updateSettingsValues(input, currentEnv, current, cfg.branch)
-    requireEnabledBitbucketSettings(values)
-    try {
-      await writeRuntimeEnv(cfg.repoDir, values)
-    } catch {
-      throw new UpdateRunnerError(
-        'runtime_env_unavailable',
-        'Application update settings could not be saved because the runtime environment file is not writable.',
-        'Ensure the local installation has a writable .env.persistent-memory file, then try again.',
-        500,
-      )
-    }
-    return settingsFromEnv(await readRuntimeEnv(cfg.repoDir), cfg.branch)
-  }
-
-  const testSettings = async (input: UpdateNotificationSettingsInput): Promise<UpdateConnectionTestResult> => {
-    const currentEnv = await readRuntimeEnv(cfg.repoDir)
-    const current = settingsFromEnv(currentEnv, cfg.branch)
-    const values = updateSettingsValues({ ...input, enabled: true, provider: 'bitbucket' }, currentEnv, current, cfg.branch)
-    requireEnabledBitbucketSettings(values)
-    let metadata: RemoteMetadata | null
-    try {
-      metadata = await readBitbucketMetadata(values, cfg.branch)
-    } catch (err) {
-      if (err instanceof UpdateRunnerError) throw err
-      throw new UpdateRunnerError(
-        'bitbucket_connection_failed',
-        'Could not reach Bitbucket while checking the update source.',
-        'Check the Bitbucket URL, VPN connection, and server availability.',
-      )
-    }
-    const latestCommit = metadata?.latestCommit
-    if (!metadata || !latestCommit) {
-      throw new UpdateRunnerError(
-        'bitbucket_connection_failed',
-        'Bitbucket did not return a commit for the configured branch.',
-        'Check the repository owner, repository name, and branch.',
-      )
-    }
-    const scope = values.UPDATE_BITBUCKET_SCOPE
-    const owner = scope === 'user' ? values.UPDATE_BITBUCKET_USER : values.UPDATE_BITBUCKET_PROJECT
-    return {
-      ok: true,
-      provider: 'bitbucket',
-      repository: `${owner}/${values.UPDATE_BITBUCKET_REPO}`,
-      branch: values.UPDATE_BITBUCKET_BRANCH ?? cfg.branch,
-      latestCommit,
-      latestVersion: metadata.latestVersion,
-    }
-  }
-
-  return { status, start, logs: logState, settings, saveSettings, testSettings }
+  return { status, start, logs: logState }
 }

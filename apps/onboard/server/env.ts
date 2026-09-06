@@ -5,10 +5,11 @@
  * load-bearing invariant: the password in DATABASE_URL MUST equal PM_APP_PASSWORD
  * (rls.sql injects PM_APP_PASSWORD into the pm_app role), and DATABASE_MIGRATE_URL's
  * password MUST equal POSTGRES_PASSWORD — so we build the connection strings FROM
- * the generated secrets, never letting the user (or drift) set them apart.
+ * the retained or generated secrets, never letting the user (or drift) set them apart.
  *
  * Secrets the user should NOT invent are auto-generated (TOKEN_PEPPER, DB/MinIO,
- * FalkorDB, Qdrant, and sidecar tokens). Cloud API keys come from the wizard.
+ * FalkorDB, Qdrant, and sidecar tokens) only when absent from the saved env.
+ * Existing values are retained; cloud API keys come from the wizard.
  */
 import { randomBytes } from 'node:crypto'
 
@@ -39,14 +40,6 @@ export interface Answers {
   userPasswordConfiguredAt?: string
   /** @deprecated Node is accepted from older wizard state, but stream is the only runtime. */
   mcpRuntime?: 'stream' | 'node'
-  updateCheckProvider?: 'none' | 'git' | 'bitbucket'
-  updateBitbucketUrl?: string
-  updateBitbucketToken?: string
-  updateBitbucketScope?: 'project' | 'user'
-  updateBitbucketProject?: string
-  updateBitbucketUser?: string
-  updateBitbucketRepo?: string
-  updateBitbucketBranch?: string
   personalMemoryEnabled?: boolean
   memoryInstallMode?: 'shared-only' | 'personal-only' | 'personal-and-shared'
   defaultMemorySurface?: 'personal' | 'shared'
@@ -70,18 +63,24 @@ export interface Secrets {
   usageIngestToken: string
 }
 
-/** Auto-generate the secrets the user must never invent. URL-safe, high entropy. */
-export function genSecrets(): Secrets {
+/** Preserve saved secret expressions verbatim; generate URL-safe values only when absent. */
+export function genSecrets(existingEnv: Readonly<Record<string, string>> = {}): Secrets {
+  const retainedOrGenerated = (key: string, bytes: number, encoding: 'hex' | 'base64url'): string => {
+    const saved = existingEnv[key]
+    // parseEnvFile retains dotenv quotes/comments. Copying the same expression
+    // back without adding quotes preserves its effective value for Compose.
+    return saved?.trim() ? saved : randomBytes(bytes).toString(encoding)
+  }
   return {
-    tokenPepper: randomBytes(32).toString('base64url'),
-    postgresPassword: randomBytes(18).toString('hex'),
-    pmAppPassword: randomBytes(18).toString('hex'),
-    minioRootPassword: randomBytes(18).toString('hex'),
-    falkordbPassword: randomBytes(18).toString('hex'),
-    qdrantApiKey: randomBytes(24).toString('base64url'),
-    dockerControlToken: randomBytes(24).toString('base64url'),
-    updateRunnerToken: randomBytes(24).toString('base64url'),
-    usageIngestToken: randomBytes(24).toString('base64url'),
+    tokenPepper: retainedOrGenerated('TOKEN_PEPPER', 32, 'base64url'),
+    postgresPassword: retainedOrGenerated('POSTGRES_PASSWORD', 18, 'hex'),
+    pmAppPassword: retainedOrGenerated('PM_APP_PASSWORD', 18, 'hex'),
+    minioRootPassword: retainedOrGenerated('MINIO_ROOT_PASSWORD', 18, 'hex'),
+    falkordbPassword: retainedOrGenerated('FALKORDB_PASSWORD', 18, 'hex'),
+    qdrantApiKey: retainedOrGenerated('QDRANT_API_KEY', 24, 'base64url'),
+    dockerControlToken: retainedOrGenerated('DOCKER_CONTROL_TOKEN', 24, 'base64url'),
+    updateRunnerToken: retainedOrGenerated('UPDATE_RUNNER_TOKEN', 24, 'base64url'),
+    usageIngestToken: retainedOrGenerated('USAGE_INGEST_TOKEN', 24, 'base64url'),
   }
 }
 
@@ -186,28 +185,20 @@ export function validateEnvForDeploy(env: Record<string, string>): EnvValidation
   if (embed === 'voyage') addRequired(out, env, 'VOYAGE_API_KEY')
   if (embed === 'openai') addRequired(out, env, 'OPENAI_API_KEY')
 
-  if ((env.UPDATE_CHECK_PROVIDER ?? 'none') === 'bitbucket') {
-    for (const key of ['UPDATE_BITBUCKET_URL', 'UPDATE_BITBUCKET_TOKEN', 'UPDATE_BITBUCKET_REPO', 'UPDATE_BITBUCKET_BRANCH']) {
-      addRequired(out, env, key)
-    }
-    const scope = (env.UPDATE_BITBUCKET_SCOPE ?? 'project').trim()
-    if (scope === 'user') {
-      addRequired(out, env, 'UPDATE_BITBUCKET_USER')
-    } else {
-      addRequired(out, env, 'UPDATE_BITBUCKET_PROJECT')
-    }
-  }
-
   return out
 }
 
-/** Render the full .env.persistent-memory contents (deterministic given inputs). */
-export function renderEnv(a: Answers, s: Secrets): string {
+/** Render the full .env.persistent-memory contents (deterministic given inputs).
+ * Existing runtime flags come from the server's saved env, never wizard answers. */
+export function renderEnv(a: Answers, s: Secrets, existingEnv: Readonly<Record<string, string>> = {}): string {
   const databaseUrl = `postgresql://pm_app:${s.pmAppPassword}@persistent-memory-postgres:5432/${POSTGRES_DB}`
   const migrateUrl = `postgresql://${POSTGRES_USER}:${s.postgresPassword}@persistent-memory-postgres:5432/${POSTGRES_DB}`
   const memoryInstallMode = a.memoryInstallMode ?? (a.deploymentMode === 'local' ? 'personal-only' : 'shared-only')
   const personalMemoryEnabled = a.personalMemoryEnabled ?? memoryInstallMode !== 'shared-only'
   const defaultMemorySurface = a.defaultMemorySurface ?? (personalMemoryEnabled ? 'personal' : 'shared')
+  // parseEnvFile retains dotenv quotes/comments; Compose removes them before the
+  // dashboard reads this flag. Recognize only the literal false opt-out here.
+  const graphUiDisabled = /^(?:false|(['"])false\1)(?:[ \t]+#.*)?$/.test(existingEnv.PM_MEMORY_GRAPH_UI_ENABLED?.trim() ?? '')
   const sharedApiUrl = streamContainerUrl(a.sharedApiUrl, a.mcpRuntime)
   return [
     '# persistent-memory — generated by the onboarding installer. Gitignored.',
@@ -296,6 +287,7 @@ export function renderEnv(a: Answers, s: Secrets): string {
     `PM_PERSONAL_MEMORY_ENABLED=${personalMemoryEnabled ? 'true' : 'false'}`,
     `PM_MEMORY_INSTALL_MODE=${memoryInstallMode}`,
     `PM_DEFAULT_MEMORY_SURFACE=${defaultMemorySurface}`,
+    `PM_MEMORY_GRAPH_UI_ENABLED=${graphUiDisabled ? 'false' : 'true'}`,
     `PM_PERSONAL_API_URL=${a.personalApiUrl ?? 'http://localhost:8090'}`,
     `PM_SHARED_API_URL=${sharedApiUrl}`,
     `PM_SHARED_USER_TOKEN=${a.sharedUserToken ?? ''}`,
@@ -310,17 +302,6 @@ export function renderEnv(a: Answers, s: Secrets): string {
     `USAGE_INGEST_TOKEN=${s.usageIngestToken}`,
     '# Docker socket group override for native Linux only; Docker Desktop usually uses 0.',
     'DOCKER_GID=0',
-    '',
-    '# ── Dashboard update notifications ──',
-    '# none = no dashboard update checks. bitbucket = read-only Bitbucket/Stash REST checks.',
-    `UPDATE_CHECK_PROVIDER=${a.updateCheckProvider ?? 'none'}`,
-    `UPDATE_BITBUCKET_URL=${a.updateBitbucketUrl ?? ''}`,
-    `UPDATE_BITBUCKET_TOKEN=${a.updateBitbucketToken ?? ''}`,
-    `UPDATE_BITBUCKET_SCOPE=${a.updateBitbucketScope ?? 'project'}`,
-    `UPDATE_BITBUCKET_PROJECT=${a.updateBitbucketProject ?? ''}`,
-    `UPDATE_BITBUCKET_USER=${a.updateBitbucketUser ?? ''}`,
-    `UPDATE_BITBUCKET_REPO=${a.updateBitbucketRepo ?? ''}`,
-    `UPDATE_BITBUCKET_BRANCH=${a.updateBitbucketBranch ?? 'master'}`,
     '',
     '# ── DLP / PII gate ──',
     'PII_GATE_ENABLED=true',
@@ -348,7 +329,7 @@ export function renderEnv(a: Answers, s: Secrets): string {
 
 /** Mask secret values for the UI review (keep the first/last few chars). */
 export function maskEnv(env: string): string {
-  const SECRET_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|VOYAGE_API_KEY|TOKEN_PEPPER|POSTGRES_PASSWORD|PM_APP_PASSWORD|MINIO_ROOT_PASSWORD|FALKORDB_PASSWORD|QDRANT_API_KEY|DOCKER_CONTROL_TOKEN|UPDATE_RUNNER_TOKEN|USAGE_INGEST_TOKEN|LOCAL_USER_PASSWORD|UPDATE_BITBUCKET_TOKEN|PM_SHARED_USER_TOKEN|SMTP_PASS)=(.+)$/
+  const SECRET_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|VOYAGE_API_KEY|TOKEN_PEPPER|POSTGRES_PASSWORD|PM_APP_PASSWORD|MINIO_ROOT_PASSWORD|FALKORDB_PASSWORD|QDRANT_API_KEY|DOCKER_CONTROL_TOKEN|UPDATE_RUNNER_TOKEN|USAGE_INGEST_TOKEN|LOCAL_USER_PASSWORD|PM_SHARED_USER_TOKEN|SMTP_PASS)=(.+)$/
   return env
     .split('\n')
     .map((line) => {

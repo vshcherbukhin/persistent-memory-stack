@@ -1,7 +1,7 @@
 {
   "name": "persistent-memory",
   "private": true,
-  "version": "4.0.37",
+  "version": "1.0.0",
   "type": "module",
   "description": "persistent-memory monorepo root — personal-first memory stack with stream MCP, optional Shared Memories connection, dashboard, API, worker, and reusable shared/db packages.",
   "workspaces": [
@@ -81,18 +81,18 @@
     "test:layers": "vitest run test/layers --exclude '.local/**'",
     "test:spaces": "vitest run test/spaces --exclude '.local/**'",
     "verify:architecture": "npm run test:layers && npm run test:spaces",
-    "docs:install": "python3 -m pip install --disable-pip-version-check --target .local/mkdocs-python -r documentation/requirements.txt && npm ci --prefix apps/documentation",
+    "docs:install": "node scripts/docs-tool.mjs install",
     "docs:check-diagrams": "npm run diagrams:check --prefix apps/documentation",
     "docs:diagrams": "npm run diagrams:render --prefix apps/documentation",
     "docs:generate": "node apps/documentation/scripts/generate-mkdocs-config.mjs",
     "docs:check-navigation": "node apps/documentation/scripts/generate-mkdocs-config.mjs --check",
-    "docs:build": "npm run docs:generate && npm run docs:check-navigation && npm run docs:check-diagrams && PYTHONPATH=.local/mkdocs-python python3 -m mkdocs build --site-dir .local/generated-docs/site && mkdir -p .local/generated-docs/site/assets/javascripts && cp apps/documentation/node_modules/mermaid/dist/mermaid.min.js .local/generated-docs/site/assets/javascripts/mermaid.min.js",
+    "docs:build": "node scripts/docs-tool.mjs build",
     "docs:serve": "node apps/documentation/src/launcher.mjs",
     "test:documentation": "npm run test --prefix apps/documentation",
-    "test:graphiti-usage": "cd apps/graphiti-service && python3 -m unittest discover -s tests -p test_usage_telemetry.py && test -f tests/test_anthropic_compat.py && python3 -m unittest discover -s tests -p test_anthropic_compat.py && test -f tests/test_dependency_pins.py && python3 -m unittest discover -s tests -p test_dependency_pins.py",
+    "test:graphiti-usage": "node scripts/graphiti-unit-tests.mjs",
     "test:graphiti-cascade": "bash apps/graphiti-service/tests/run-episode-removal-integration.sh",
     "test:graphiti-timeline": "bash apps/graphiti-service/tests/run-timeline-pagination.sh",
-    "test": "npm run test:deployment-agnosticism && npm run test:shared && npm run test:api && npm run test:worker && npm run test:mcp && npm run test:docker-control && npm run test:update-runner && npm run test:dashboard-gateway && npm run test:dashboard && npm run test:documentation && npm run test:graphiti-usage && npm run test:release-benchmark-harness && npm run test:release-benchmark-report && npm run test:system-health-report && npm run test:system-health-evidence && npm run test:recall-agent-sample && npm run test:p0-token-quality-comparison && npm run test:complete-system-health-evidence",
+    "test": "npm run test:host && npm run test:deployment-agnosticism && npm run test:shared && npm run test:api && npm run test:worker && npm run test:mcp && npm run test:docker-control && npm run test:update-runner && npm run test:dashboard-gateway && npm run test:dashboard && npm run test:documentation && npm run test:graphiti-usage && npm run test:release-benchmark-harness && npm run test:release-benchmark-report && npm run test:system-health-report && npm run test:system-health-evidence && npm run test:recall-agent-sample && npm run test:p0-token-quality-comparison && npm run test:complete-system-health-evidence",
     "test:integration": "vitest run --config test/integration/vitest.config.ts",
     "dev-test:up": "bash deploy/scripts/dev-test-stack.sh up",
     "dev-test:run": "bash deploy/scripts/dev-test-stack.sh run",
@@ -103,9 +103,15 @@
     "rls:check": "node layers/core/tools/rls-check.mjs",
     "eval:seed": "node scripts/eval-seed.mjs",
     "eval:mcp": "python3 scripts/evaluation.py -t http -u ${PM_MCP_URL:-http://127.0.0.1:8091/mcp} -o apps/mcp/eval_report.md apps/mcp/evals.xml",
-    "setup": "node scripts/pre-update-snapshot.mjs --from-setup && npm install && npm run prisma:generate && npm run build:update-coordinator && node scripts/install-update-coordinator.mjs --root \"${PM_COORDINATOR_INSTALL_ROOT:-$PWD}\" && npm ci --prefix apps/onboard && npm run build:server --prefix apps/onboard && node apps/onboard/dist/apps/onboard/server/agent-update.js",
-    "install-persistent-memory": "bash deploy/scripts/onboard.sh",
-    "update-persistent-memory": "bash deploy/scripts/update.sh",
-    "uninstall-persistent-memory": "bash deploy/scripts/uninstall.sh"
-  }
+    "setup": "node scripts/setup.mjs",
+    "check:host": "node scripts/host-lifecycle.mjs check",
+    "test:host": "node --test scripts/host-runtime.test.mjs scripts/github-lifecycle.test.mjs scripts/public-release-manifests.test.mjs",
+    "install-persistent-memory": "node scripts/host-lifecycle.mjs install",
+    "update-persistent-memory": "node scripts/host-lifecycle.mjs update",
+    "uninstall-persistent-memory": "node scripts/host-lifecycle.mjs uninstall",
+    "start-persistent-memory": "node scripts/host-lifecycle.mjs start",
+    "stop-persistent-memory": "node scripts/host-lifecycle.mjs stop",
+    "verify-persistent-memory": "node scripts/host-lifecycle.mjs verify"
+  },
+  "persistentMemoryReleaseLine": "public-v1"
 }

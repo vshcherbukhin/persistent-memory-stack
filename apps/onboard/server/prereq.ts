@@ -3,6 +3,7 @@
  * index.ts). Each takes raw command output and returns a structured result the
  * wizard renders with a fix hint.
  */
+import { win32 } from 'node:path'
 
 export interface ProbeResult {
   ok: boolean
@@ -23,6 +24,7 @@ export interface PrereqInstallHostState {
   hasDocker: boolean
   hasCompose?: boolean
   hasOllama: boolean
+  root?: string
 }
 
 export interface PrereqInstallStep {
@@ -57,8 +59,17 @@ export function buildPrereqInstallPlan(
   component: PrereqComponent,
   host: PrereqInstallHostState,
 ): PrereqInstallStep[] {
+  if (host.platform === 'win32' && component === 'ollama') {
+    return [{
+      id: host.hasOllama ? 'start-ollama' : 'install-ollama',
+      name: host.hasOllama ? 'Start Ollama' : 'Download, verify, and install Ollama',
+      cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', win32.join(host.root ?? process.cwd(), 'deploy', 'scripts', 'install-ollama-windows.ps1'),
+        '-Action', host.hasOllama ? 'Start' : 'Install'],
+    }]
+  }
   if (host.platform !== 'darwin') {
-    throw new Error(`Automatic ${component} installation is not supported on ${host.platform}.`)
+    throw new Error(manualPrereqHint(component, host.platform))
   }
 
   const steps: PrereqInstallStep[] = []
@@ -79,13 +90,13 @@ export function buildPrereqInstallPlan(
   if (component === 'node') {
     steps.push({
       id: 'install-node',
-      name: 'Install Node 20',
-      cmd: [brew, 'install', 'node@20'],
+      name: 'Install Node 24',
+      cmd: [brew, 'install', 'node@24'],
     })
     steps.push({
       id: 'link-node',
-      name: 'Link Node 20',
-      cmd: [brew, 'link', '--overwrite', '--force', 'node@20'],
+      name: 'Link Node 24',
+      cmd: [brew, 'link', '--overwrite', '--force', 'node@24'],
     })
     return steps
   }
@@ -132,12 +143,43 @@ export function buildPrereqInstallPlan(
   return steps
 }
 
-/** `docker info` succeeds + reports a server only when the daemon is running. */
+/** Per-component capabilities: Windows Ollama does not require Homebrew/WinGet. */
+export function prereqInstallCapabilities(platform: string): Record<PrereqComponent, boolean> {
+  return {
+    homebrew: false,
+    node: platform === 'darwin',
+    docker: platform === 'darwin',
+    compose: platform === 'darwin',
+    ollama: platform === 'darwin' || platform === 'win32',
+  }
+}
+
+/** Actionable manual setup for hosts without Homebrew-managed installs. */
+export function manualPrereqHint(component: PrereqComponent, platform: string): string {
+  const restart = platform === 'win32' ? ' Reopen PowerShell and restart the installer after installing.' : ' Restart the installer after installing.'
+  if (component === 'homebrew') return 'Homebrew is only used for automatic prerequisite installation on macOS.'
+  if (component === 'node') return `Install Node.js 22.12+ (Node 24 LTS recommended) with npm from https://nodejs.org/.${restart}`
+  if (component === 'docker' || component === 'compose') return platform === 'win32'
+    ? 'Install Docker Desktop for Windows from https://docs.docker.com/desktop/setup/install/windows-install/, enable its WSL 2 backend, start Docker Desktop and select Linux containers. Docker Compose v2 is included.'
+    : 'Install and start Docker Engine or Docker Desktop with Linux containers and Docker Compose v2.'
+  return platform === 'win32'
+    ? `Install and open Ollama for Windows from https://ollama.com/download/windows. Keep Ollama running for host embeddings.${restart}`
+    : 'Install and start Ollama from https://ollama.com/download.'
+}
+
+/** `docker info --format {{.OSType}}` must report a running Linux engine. */
 export function parseDockerInfo(stdout: string, exitCode: number): ProbeResult {
   if (exitCode !== 0 || /Cannot connect to the Docker daemon|ERROR/i.test(stdout)) {
     return { ok: false, detail: 'Docker daemon is not running — start Docker Desktop / the docker service.' }
   }
-  return { ok: true, detail: 'Docker daemon is running.' }
+  const type = stdout.trim().toLowerCase()
+  if (type === 'windows' || /ostype:\s*windows/i.test(stdout)) {
+    return { ok: false, detail: 'Docker is using Windows containers. Switch Docker Desktop to Linux containers, then check again.' }
+  }
+  if (type !== 'linux' && !/ostype:\s*linux/i.test(stdout)) {
+    return { ok: false, detail: 'Could not confirm a Linux Docker engine. Start Docker Desktop with Linux containers, then check again.' }
+  }
+  return { ok: true, detail: 'Docker Linux engine is running.' }
 }
 
 /** `docker compose version` → require Compose v2 (the "docker compose" subcommand). */
@@ -152,20 +194,20 @@ export function parseComposeVersion(stdout: string, exitCode: number): ProbeResu
     : { ok: false, detail: `Docker Compose v${m[1]} is too old; v2+ required.` }
 }
 
-/** `node -v` → require Node 20+. */
+/** `node -v` → require Node 22.12+ (toolchain minimum). */
 export function parseNodeVersion(stdout: string): ProbeResult {
   const m = /v(\d+)\.(\d+)\.(\d+)/.exec(stdout.trim())
   if (!m) return { ok: false, detail: 'Node not found.' }
   const major = Number(m[1])
-  return major >= 20
+  return (major >= 24 || (major === 22 && Number(m[2]) >= 12))
     ? { ok: true, detail: `Node v${m[1]}.${m[2]}.${m[3]}.` }
-    : { ok: false, detail: `Node v${m[1]} is too old; v20+ required.` }
+    : { ok: false, detail: `Node v${m[1]}.${m[2]} is unsupported; use v22.12+ on Node 22 or Node 24+.` }
 }
 
 export function parseCommandPresence(label: string, stdout: string, exitCode: number): ToolProbeResult {
   const found = exitCode === 0 && stdout.trim().length > 0
   return found
-    ? { ok: true, installed: true, running: true, path: stdout.trim(), detail: `${label} found at ${stdout.trim()}.` }
+    ? { ok: true, installed: true, running: true, path: stdout.trim().split(/\r?\n/)[0]!, detail: `${label} found at ${stdout.trim().split(/\r?\n/)[0]}.` }
     : { ok: false, installed: false, running: false, path: null, detail: `${label} not found.` }
 }
 

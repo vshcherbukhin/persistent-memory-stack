@@ -102,7 +102,7 @@ function fullStackSteps(env: Record<string, string>): InstallStep[] {
       // rls.sql reads PM_APP_PASSWORD via PGOPTIONS inside deploy/scripts/apply-rls.sh.
       envOverride: { ...dbEnv, PM_APP_PASSWORD: env.PM_APP_PASSWORD ?? 'pmapp' }, kind: 'run',
     },
-    { id: 'seed', name: local ? 'Seed system settings + demo teams' : 'Seed the bootstrap super-admin (shows the token once)', cmd: ['npm', 'run', '--silent', 'seed'], cwd: 'layers/core/schema', envOverride: dbEnv, kind: 'run', captureToken: !local },
+    { id: 'seed', name: local ? 'Initialize local system settings' : 'Initialize system settings + bootstrap administrator', cmd: ['npm', 'run', '--silent', 'seed'], cwd: 'layers/core/schema', envOverride: dbEnv, kind: 'run', captureToken: !local },
     // --force-recreate so the api/worker RE-BOOT now the schema + pm_app role exist: this is when
     // local mode's ensureLocalIdentity actually creates the local super-user (plain `up -d` would be
     // a no-op if the container is already running, and the user would never be created).
@@ -155,12 +155,17 @@ export interface VerifySummary {
   warn: number
 }
 
-/** Parse the verify-install.sh tail into PASS/FAIL/WARN counts (best-effort). */
+/** Prefer the verifier's numeric totals; support older output containing only check lines. */
 export function parseVerifySummary(stdout: string): VerifySummary {
-  const count = (re: RegExp) => (stdout.match(re) ?? []).length
+  const output = stdout.replace(/\u001b\[[0-9;]*m/g, '')
+  const summary = /^[ \t]*PASS:[ \t]*(\d+)[ \t]*\r?\n[ \t]*FAIL:[ \t]*(\d+)[ \t]*\r?\n[ \t]*WARN:[ \t]*(\d+)[ \t]*\r?$/m.exec(output)
+  if (summary) {
+    return { pass: Number(summary[1]), fail: Number(summary[2]), warn: Number(summary[3]) }
+  }
+  const count = (re: RegExp) => (output.match(re) ?? []).length
   return {
-    pass: count(/\b(PASS|OK|✓)\b/g),
-    fail: count(/\b(FAIL|ERROR|✗)\b/g),
-    warn: count(/\b(WARN|WARNING)\b/g),
+    pass: count(/^[ \t]*(?:PASS|OK|✓)(?=[ \t]|\r?$)/gm),
+    fail: count(/^[ \t]*(?:FAIL|ERROR|✗)(?=[ \t]|\r?$)/gm),
+    warn: count(/^[ \t]*(?:WARN|WARNING)(?=[ \t]|\r?$)/gm),
   }
 }

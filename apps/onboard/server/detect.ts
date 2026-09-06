@@ -8,9 +8,10 @@
  * limited to the agent apps actually installed.
  */
 import os from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
+import { agentProfiles } from './agent-profiles.js'
 
 export interface SysSpecs {
   totalMemGB: number
@@ -64,14 +65,24 @@ export function detectApps(p: AppProbes): AppDetection {
 
 // ── IO wrappers (not unit-tested; thin) ───────────────────────────────────────
 
-/** The absolute paths probed for ecosystem detection (pure given a homedir). */
-export function appProbePaths(home: string): Record<keyof AppProbes, string> {
+export interface AppPathOptions {
+  platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
+}
+
+/** Explicit platform paths make detection portable and deterministic in tests. */
+export function appProbePaths(home: string, options: AppPathOptions = {}): Record<keyof AppProbes, string> {
+  const platform = options.platform ?? process.platform
+  const env = options.env ?? process.env
+  const path = platform === 'win32' ? win32 : posix
+  const local = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+  const profiles = agentProfiles(home, { platform, env })
   return {
-    claudeJson: join(home, '.claude.json'),
-    claudeDesktopCfg: join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
-    claudeApp: '/Applications/Claude.app',
-    codexToml: join(home, '.codex', 'config.toml'),
-    codexApp: '/Applications/Codex.app',
+    claudeJson: profiles.claudeJson,
+    claudeDesktopCfg: profiles.claudeDesktopConfig,
+    claudeApp: platform === 'win32' ? path.join(local, 'AnthropicClaude', 'claude.exe') : platform === 'darwin' ? '/Applications/Claude.app' : '',
+    codexToml: profiles.codexConfig,
+    codexApp: platform === 'win32' ? path.join(local, 'Programs', 'Codex', 'Codex.exe') : platform === 'darwin' ? '/Applications/Codex.app' : '',
   }
 }
 
@@ -80,10 +91,28 @@ export function readSpecs(): SysSpecs & { cpus: number; recommended: ModelRec } 
   return { totalMemGB, cpus: os.cpus().length, recommended: recommendModel({ totalMemGB }) }
 }
 
-export function readApps(home = homedir()): AppDetection & { paths: Record<keyof AppProbes, string> } {
-  const paths = appProbePaths(home)
+function subdirectories(path: string): string[] {
+  try { return readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name) } catch { return [] }
+}
+
+export function readApps(home = homedir(), options: AppPathOptions = {}, exists: (path: string) => boolean = existsSync, directories: (path: string) => string[] = subdirectories): AppDetection & { paths: Record<keyof AppProbes, string> } {
+  const paths = appProbePaths(home, options)
   const probes = Object.fromEntries(
-    Object.entries(paths).map(([k, v]) => [k, existsSync(v)]),
+    Object.entries(paths).map(([k, v]) => [k, !!v && exists(v)]),
   ) as unknown as AppProbes
+  if ((options.platform ?? process.platform) === 'win32') {
+    const env = options.env ?? process.env
+    const local = env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')
+    probes.claudeApp ||= exists(win32.join(local, 'Programs', 'Claude', 'Claude.exe'))
+    probes.codexApp ||= exists(win32.join(local, 'Microsoft', 'WindowsApps', 'Codex.exe'))
+    if (!probes.codexApp) {
+      const bin = win32.join(local, 'OpenAI', 'Codex', 'bin')
+      const executable = directories(bin).map((build) => win32.join(bin, build, 'codex.exe')).find(exists)
+      if (executable) {
+        paths.codexApp = executable
+        probes.codexApp = true
+      }
+    }
+  }
   return { ...detectApps(probes), paths }
 }

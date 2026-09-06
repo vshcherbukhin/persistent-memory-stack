@@ -22,7 +22,7 @@ export default defineConfig({
   schema: 'schema.prisma',
   migrations: {
     path: 'migrations',
-    seed: 'tsx seed.ts',
+    seed: 'npm run seed',
   },
   ...(migrateUrl ? { datasource: { url: migrateUrl } } : {}),
 })

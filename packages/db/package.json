@@ -1,6 +1,6 @@
 {
   "name": "@pm/db",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory data layer — the two Prisma 7 clients (prisma=pm_app data / ownerPrisma=pmuser owner), the runInTenant() RLS tx wrapper, the audit guard (guardedPrisma), and the AsyncLocalStorage tenant context. Consumed by api AND worker. Owns the generated-client import; callers never touch generated/prisma directly. The two connection strings are INJECTED via initDb() so @pm/db depends on no app-specific config module.",
@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "prisma:generate": "npm run generate -w persistent-memory-prisma && printf '{\"type\":\"module\"}' > ../../generated/package.json",
+    "prisma:generate": "npm run generate -w persistent-memory-prisma && node ../../scripts/prisma-module.mjs",
     "build": "tsc -b tsconfig.json",
     "typecheck": "tsc -b tsconfig.json",
     "test": "vitest run"

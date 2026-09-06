@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-docker-control",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Tiny security-gated sidecar: the ONLY process with the Docker socket. Exposes bounded list/logs/start/stop/restart for this compose project behind a shared-secret token.",

@@ -1,3 +1,19 @@
+/** Historical version numbers may have been reused before the public release
+ * line began. Only explicitly marked packages contribute compatible releases. */
+export function validateReleaseLineContracts(records, releaseLine) {
+    const selected = new Map();
+    for (const { contract, packageJson } of records) {
+        if (!isRecord(packageJson) || packageJson.persistentMemoryReleaseLine !== releaseLine)
+            continue;
+        const version = requireVersion(packageJson.version, 'package version');
+        if (!selected.has(version))
+            selected.set(version, contract);
+    }
+    const availableReleases = new Set(selected.keys());
+    return new Map([...selected].map(([packageVersion, contract]) => [
+        packageVersion, validateUpgradeContract(contract, { packageVersion, availableReleases }),
+    ]));
+}
 function parseVersion(value) {
     const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(value);
     if (!match)

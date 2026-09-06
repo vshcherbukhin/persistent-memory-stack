@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url'
 /**
  * persistent-memory-dashboard — vitest config.
  *
- * Scoped to the pure, dependency-free unit tests (src/lib/*.test.ts). These
- * never import Next.js server-only modules (cookies / redirect / fetch), so no
- * jsdom or Next test harness is needed — a plain node environment suffices.
+ * Unit and static React markup tests run in Node. Server-only integrations
+ * are mocked in action tests; no browser or running Next server is needed.
  *
  * The `@/` alias mirrors tsconfig.json paths so test imports match app imports.
  */
 export default defineConfig({
+  // Next preserves JSX for its compiler; component markup tests need it transformed here.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

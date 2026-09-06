@@ -76,13 +76,15 @@ export interface FactExtractionTestResult {
   reason?: string
 }
 
+// Use the known positive input from fact-extraction.md §8; a probe should not
+// ask the classifier to accept instructions about the connectivity test itself.
 export const FACT_EXTRACTION_TEST_PAYLOAD = {
   content:
-    '[component_fact_extraction_probe] gotcha: the dashboard fact extraction test must validate the selected model and API key without saving a memory. Root cause: System Settings probes call the Shape-gate LLM only. Fix: accept this seeded backend probe as the connectivity check.',
+    "[component_floating_overlay] Clicks are intercepted after opening a dropdown. Root cause: overlay not dismissed after selection. Fix: dismiss via page.getByTestId('FloatingOverlay').click(). Prevention: all DS Dropdown callers must dismiss overlay after selectOption.",
   metadata: {
     category: 'gotcha',
-    source: 'gotcha-discovered',
-    entities: ['component_fact_extraction_probe'],
+    entities: ['component_floating_overlay'],
+    source: 'heal-cycle',
   },
 } as const
 
@@ -321,10 +323,10 @@ export async function testFactExtractionSettings(
         ok: false,
         provider: runtime.provider,
         model: runtime.model,
-        message: 'Fact extraction responded, but rejected the seeded probe.',
+        message: 'Connection succeeded, but the model rejected the built-in extraction sample. Retry the test.',
         outcome: verdict.outcome,
         reason: verdict.reason,
-        details: verdict.missing?.length ? `Missing: ${verdict.missing.join(', ')}` : undefined,
+        details: [verdict.reason, verdict.missing?.length ? `Missing: ${verdict.missing.join(', ')}` : ''].filter(Boolean).join('\n') || undefined,
       }
     }
     await recordFactExtractionSuccess(runtime)

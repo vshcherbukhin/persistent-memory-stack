@@ -10,6 +10,12 @@ nav_order: 20
 `npm run uninstall-persistent-memory` removes the local Personal Memories
 stack. It is a separate terminal process from onboarding.
 
+On Windows, run `npm.cmd run uninstall-persistent-memory` from PowerShell in the
+same checkout used for installation. The launcher uses Git for Windows Bash.
+For a temporary shutdown that preserves data, use
+`npm.cmd run stop-persistent-memory` instead (`npm run stop-persistent-memory`
+on macOS).
+
 The terminal captures below are a **sandbox simulation of the script prompts**
 using safe demonstration values. They never change a Shared Memories server,
 external account, real user-home configuration, Docker container, or data.

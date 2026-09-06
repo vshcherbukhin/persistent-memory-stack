@@ -181,7 +181,7 @@ describe('defaultMemoryBlock + injectMemoryBlock', () => {
   it('places the memory block as the first section after an existing document title', () => {
     const md = '# Global Claude Code Instructions\n\n## Git Safety\n\nKeep changes safe.\n'
     const out = injectMemoryBlock(md, defaultMemoryBlock('@rules/persistent-memory.md'))
-    expect(out.startsWith('# Global Claude Code Instructions\n\n## Persistent Memory Usage (MANDATORY)')).toBe(true)
+    expect(out.replace(/<!--[^]*?-->\s*/g, '').startsWith('# Global Claude Code Instructions\n\n## Persistent Memory Usage (MANDATORY)')).toBe(true)
     expect(out).toContain('## Git Safety')
   })
   it('replaces old generated memory snippets instead of duplicating them', () => {
@@ -192,7 +192,7 @@ describe('defaultMemoryBlock + injectMemoryBlock', () => {
       '',
       '## Persistent Memory Usage (MANDATORY)',
       '',
-      '- old block',
+      '- Detailed protocol: @rules/persistent-memory.md (auto-loaded when this file is read). Treat that rule as the source of truth for tool order, memory shapes, and save/update/delete rules.',
       '',
       '## Git Safety',
       '',
@@ -203,7 +203,7 @@ describe('defaultMemoryBlock + injectMemoryBlock', () => {
     const twice = injectMemoryBlock(once, defaultMemoryBlock('@rules/persistent-memory.md'))
     expect((once.match(/Persistent Memory Usage \(MANDATORY\)/g) ?? []).length).toBe(1)
     expect(once).not.toContain('old line')
-    expect(once).not.toContain('old block')
+    expect(once).not.toContain('auto-loaded')
     expect(twice).toBe(once)
   })
   it('removes the legacy Memory Save Triggers block before inserting the current block', () => {
@@ -234,7 +234,7 @@ describe('defaultMemoryBlock + injectMemoryBlock', () => {
       '',
       '## Persistent Memory Usage (MANDATORY)',
       '',
-      '- old block',
+      '- Detailed protocol: @rules/persistent-memory.md (auto-loaded when this file is read). Treat that rule as the source of truth for tool order, memory shapes, and save/update/delete rules.',
       '',
       '## Mem0 Issues (MANDATORY)',
       '',
@@ -259,21 +259,21 @@ describe('targetMemoryFiles', () => {
   it('claude→CLAUDE.md, codex→AGENTS.md; global under home', () => {
     const t = targetMemoryFiles({ claude: true, codex: true, level: 'global', projectPaths: [], home: '/h' })
     expect(t.find((x) => x.kind === 'claude')).toMatchObject({
-      memoryFile: '/h/.claude/CLAUDE.md',
-      ruleFile: '/h/.claude/rules/persistent-memory.md',
+      memoryFile: pjoin('/h', '.claude', 'CLAUDE.md'),
+      ruleFile: pjoin('/h', '.claude', 'rules', 'persistent-memory.md'),
       ruleRef: '@rules/persistent-memory.md',
     })
     expect(t.find((x) => x.kind === 'codex')).toMatchObject({
-      memoryFile: '/h/.codex/AGENTS.md',
-      ruleFile: '/h/.codex/rules/persistent-memory.md',
+      memoryFile: pjoin('/h', '.codex', 'AGENTS.md'),
+      ruleFile: pjoin('/h', '.codex', 'rules', 'persistent-memory.md'),
       ruleRef: '@rules/persistent-memory.md',
     })
   })
   it('project scope → one target per project path', () => {
     const t = targetMemoryFiles({ claude: true, codex: true, level: 'project', projectPaths: ['/a', '/b'], home: '/h' })
-    expect(t.map((x) => x.memoryFile).sort()).toEqual(['/a/AGENTS.md', '/a/CLAUDE.md', '/b/AGENTS.md', '/b/CLAUDE.md'])
-    expect(t.find((x) => x.kind === 'codex' && x.memoryFile === '/a/AGENTS.md')).toMatchObject({
-      ruleFile: '/a/.codex/rules/persistent-memory.md',
+    expect(t.map((x) => x.memoryFile).sort()).toEqual([pjoin('/a', 'AGENTS.md'), pjoin('/a', 'CLAUDE.md'), pjoin('/b', 'AGENTS.md'), pjoin('/b', 'CLAUDE.md')])
+    expect(t.find((x) => x.kind === 'codex' && x.memoryFile === pjoin('/a', 'AGENTS.md'))).toMatchObject({
+      ruleFile: pjoin('/a', '.codex', 'rules', 'persistent-memory.md'),
       ruleRef: '@.codex/rules/persistent-memory.md',
     })
   })
@@ -459,7 +459,7 @@ describe('IO writers (integration, real tmp files)', () => {
     wf(pjoin(dir, 'CLAUDE.md'), '# Existing title\n\n- @.claude/rules/persistent-memory.md — old generated line.\n\n## Git Safety\n\nKeep changes safe.\n')
     writeRuleTargets(targets, '# RULE BODY\ncontent\n', defaultMemoryBlock('@rules/persistent-memory.md'))
     const claudeMd = rf(pjoin(dir, 'CLAUDE.md'), 'utf8')
-    expect(claudeMd.startsWith('# Existing title\n\n## Persistent Memory Usage (MANDATORY)')).toBe(true)
+    expect(claudeMd.replace(/<!--[^]*?-->\s*/g, '').startsWith('# Existing title\n\n## Persistent Memory Usage (MANDATORY)')).toBe(true)
     expect(claudeMd).toContain('@.claude/rules/persistent-memory.md')
     expect(claudeMd).not.toContain('old generated line')
     expect(rf(pjoin(dir, '.claude/rules/persistent-memory.md'), 'utf8')).toContain('RULE BODY')
@@ -497,7 +497,7 @@ describe('refreshAgentInstall (update-script agent config migration)', () => {
         '',
         '## Persistent Memory Usage (MANDATORY)',
         '',
-        '- old generated block',
+        '- Detailed protocol: @rules/persistent-memory.md (auto-loaded when this file is read). Treat that rule as the source of truth for tool order, memory shapes, and save/update/delete rules.',
         '',
         '## Git Safety',
         '',
@@ -689,13 +689,13 @@ describe('refreshAgentInstall (update-script agent config migration)', () => {
 import { nextPhase, prevPhase } from '../web/src/flow.ts'
 
 describe('nextPhase / prevPhase (per flow)', () => {
-  it('personal-first: get started → prereqs → account → embedding → extraction → updates → … → review → shared → install', () => {
+  it('personal-first: get started → prereqs → account → embedding → extraction → ecosystem → … → review → shared → install', () => {
     expect(nextPhase('flow', 'full')).toBe('prereqs')
     expect(nextPhase('prereqs', 'full')).toBe('account')
     expect(nextPhase('account', 'full')).toBe('embedding')
     expect(nextPhase('embedding', 'full')).toBe('extraction')
-    expect(nextPhase('extraction', 'full')).toBe('updates')
-    expect(nextPhase('updates', 'full')).toBe('ecosystem')
+    expect(nextPhase('extraction', 'full')).toBe('ecosystem')
+    expect(prevPhase('ecosystem', 'full')).toBe('extraction')
     expect(nextPhase('rule', 'full')).toBe('review')
     expect(nextPhase('review', 'full')).toBe('shared')
     expect(nextPhase('shared', 'full')).toBe('install')
@@ -774,14 +774,14 @@ describe('nextPhase / prevPhase (per flow)', () => {
 
     expect(app).toContain("prereqs: 'Environment pre-check'")
     expect(app).toContain('const PREREQ_ITEMS')
-    expect(app).toContain("key: 'node', label: 'Node 20+'")
+    expect(app).toContain("key: 'node', label: 'Node 22.12+'")
     expect(app).toContain("key: 'docker', label: 'Docker daemon'")
     expect(app).toContain("key: 'compose', label: 'Docker Compose v2'")
     expect(app).toContain("key: 'ollama', label: 'Ollama (host)'")
     expect(app).toContain("type PrecheckStatus = 'pending' | 'verifying' | 'installing' | 'ok' | 'warn'")
     expect(app).not.toContain('Re-check')
   })
-  it('account, extraction, updates, registration, review, and shared steps carry the corrected UI cues', () => {
+  it('account, extraction, registration, review, and shared steps carry the corrected UI cues', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
 
     expect(app).toContain('<h2>Your account</h2>')
@@ -792,9 +792,8 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).toContain('Test fact extraction')
     expect(app).toContain('/api/extraction/test')
     expect(app).toContain('extractionTestPassed')
-    expect(app).toContain('Enable dashboard notifications about the available release update')
-    expect(app).toContain('Test Bitbucket connection')
-    expect(app).toContain('VPN connection is UP')
+    expect(app).not.toContain('Test GitHub connection')
+    expect(app).not.toContain('updateGithubToken')
     expect(app).toContain('Global Level <span className="seg-badge">recommended</span>')
     expect(app).toContain('review-env-terminal')
     expect(app).toContain('shared-connect-body')

@@ -27,6 +27,10 @@ The search field fills the available row width while the project, badge, confide
 
 ### Memory Graph
 
+The tab is enabled by default, including on a new installation with no memories.
+An operator can explicitly hide it with `PM_MEMORY_GRAPH_UI_ENABLED=false` in
+the dashboard runtime environment. An omitted setting keeps the tab available.
+
 Open **Memory Graph** to see memories on the outer shell of a rotatable sphere and their entity subnodes inside it. The initial camera fits the full loaded bubble. Drag to rotate and scroll or pinch to zoom. Right-drag moves the bubble up, down, left, or right on screen; rotation keeps pivoting around the center of the sphere rather than the point you dragged to. Rotation keeps automatic framing active; when the corpus grows, automatic framing changes only camera distance and preserves the angle you chose. Zooming in changes to **Manual view**, so newly arriving memories cannot take the camera away. Zoom-out stops as soon as the complete visible graph fits. Fully zoom out or choose **Reset view** to restore **Auto overview** without resetting rotation.
 
 ![Memory Graph 3D overview with private values blurred](../../assets/spaces/personal/memory-graph-overview.png)

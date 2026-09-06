@@ -1,6 +1,6 @@
 {
   "name": "@pm/mcp-runtime",
-  "version": "0.1.3",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory MCP runtime layer: tool registrars, recall-context orchestration, stream-session helpers, API client, and client-managed embedding bridge.",

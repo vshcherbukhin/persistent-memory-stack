@@ -1,14 +1,18 @@
-export const POST_UPDATE_RELEASE_NOTES_KEY = 'pm:post-update-release-notes-version'
-export const POST_UPDATE_RELEASE_NOTES_SEEN_KEY = 'pm:post-update-release-notes-seen-id'
-export const POST_UPDATE_RELEASE_NOTES_SHOWN_VERSION_KEY = 'pm:post-update-release-notes-shown-version'
-export const POST_UPDATE_HANDOFF_SEEN_KEY = 'pm:update-handoff-seen-id'
+export const PUBLIC_RELEASE_LINE = 'public-v1'
+// Keep pre-public browser state intact, but never compare its version numbers with public releases.
+export const POST_UPDATE_RELEASE_NOTES_KEY = `pm:${PUBLIC_RELEASE_LINE}:post-update-release-notes-version`
+export const POST_UPDATE_RELEASE_NOTES_SEEN_KEY = `pm:${PUBLIC_RELEASE_LINE}:post-update-release-notes-seen-id`
+export const POST_UPDATE_RELEASE_NOTES_SHOWN_VERSION_KEY = `pm:${PUBLIC_RELEASE_LINE}:post-update-release-notes-shown-version`
+export const POST_UPDATE_HANDOFF_SEEN_KEY = `pm:${PUBLIC_RELEASE_LINE}:update-handoff-seen-id`
 
 type DeployedUpdateStatus = {
+  releaseLine?: string | null
   currentVersion?: string | null
   lastSuccessfulUpdate?: PostUpdateMarker | null
 }
 
 type PostUpdateMarker = {
+  releaseLine?: string | null
   id?: string | null
   version?: string | null
 }
@@ -24,6 +28,7 @@ export type UpdateHandoffState =
   | { active: false; phase: 'idle' }
   | {
     active: true
+    releaseLine?: string | null
     phase: Exclude<UpdateHandoffPhase, 'idle'>
     id?: string | null
     message?: string | null
@@ -62,7 +67,10 @@ export function shouldReloadForDeployedVersion(loadedVersion: string, deployedVe
 }
 
 export function postUpdateReloadVersion(loadedVersion: string, status: DeployedUpdateStatus): string | null {
-  const candidates = [status.currentVersion, status.lastSuccessfulUpdate?.version]
+  const candidates = [
+    status.releaseLine === PUBLIC_RELEASE_LINE ? status.currentVersion : null,
+    status.lastSuccessfulUpdate?.releaseLine === PUBLIC_RELEASE_LINE ? status.lastSuccessfulUpdate.version : null,
+  ]
     .filter((version): version is string => Boolean(version))
     .sort(compareSemver)
     .reverse()
@@ -84,8 +92,9 @@ function quoteShellArg(value: string): string {
 }
 
 export function updateCommandForBranch(branch: string | null | undefined): string {
-  const cleanBranch = branch?.trim()
-  if (!cleanBranch || cleanBranch === 'master') return 'npm run update-persistent-memory'
+  // The shell's omitted-branch default follows the checkout, which may be a
+  // development branch. Public release commands must select master explicitly.
+  const cleanBranch = branch?.trim() || 'master'
   if (cleanBranch === 'dev') return 'npm run update-persistent-memory -- --dev'
   return `npm run update-persistent-memory -- --branch ${quoteShellArg(cleanBranch)}`
 }
@@ -93,6 +102,7 @@ export function updateCommandForBranch(branch: string | null | undefined): strin
 export function isUpdateHandoffBlocking(state: UpdateHandoffState | null | undefined): boolean {
   return Boolean(
     state?.active
+      && state.releaseLine === PUBLIC_RELEASE_LINE
       && ['updating', 'rebuilding-dashboard', 'verifying', 'failed'].includes(state.phase),
   )
 }
@@ -131,7 +141,7 @@ export function handoffReloadVersion(
   state: UpdateHandoffState | null | undefined,
   seenHandoffId?: string | null,
 ): string | null {
-  if (!state?.active || state.phase !== 'complete') return null
+  if (!state?.active || state.phase !== 'complete' || state.releaseLine !== PUBLIC_RELEASE_LINE) return null
   const version = state.releaseNotesVersion || state.targetVersion
   if (version && compareSemver(version, loadedVersion) > 0) return version
   if (state.id && state.id !== seenHandoffId) return version || loadedVersion
@@ -180,6 +190,7 @@ export function shouldOpenPostUpdateMarkerReleaseNotes(
 ): boolean {
   return Boolean(
     marker?.id
+      && marker.releaseLine === PUBLIC_RELEASE_LINE
       && marker.version
       && marker.id !== seenMarkerId
       && compareSemver(loadedVersion, marker.version) >= 0,
@@ -192,6 +203,7 @@ export function shouldSkipPostUpdateMarkerAfterShownVersion(
 ): boolean {
   return Boolean(
     shownVersion
+      && marker?.releaseLine === PUBLIC_RELEASE_LINE
       && marker?.version
       && compareSemver(shownVersion, marker.version) >= 0,
   )

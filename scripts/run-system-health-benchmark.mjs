@@ -7,10 +7,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { aggregateUsageWindow, isCanonicalUuid, summarizeOperation } from './system-health-evidence.mjs'
 
-const root = resolve(new URL('..', import.meta.url).pathname)
+const root = fileURLToPath(new URL('..', import.meta.url))
 const runPrefix = 'pm-benchmark-'
 const now = () => new Date().toISOString()
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
@@ -168,7 +169,7 @@ function baseGates(expectations) {
     id: gate.id,
     proofType: gate.proofType,
     status: gate.required === false ? 'not-measured' : 'not-run',
-    evidence: gate.required === false ? 'explicitly deferred for 4.0.30' : 'not run in this isolated execution',
+    evidence: gate.required === false ? 'explicitly deferred for this release' : 'not run in this isolated execution',
     durationMs: 0,
     retries: 0,
   }))
@@ -246,7 +247,7 @@ function finalizeBenchmarkCleanup(run) {
   if (existsSync(resolve(runDir, 'benchmark.env')) || existsSync(resolve(runDir, 'bootstrap-token'))) {
     throw new Error('Benchmark runtime secrets remain; refusing to certify cleanup.')
   }
-  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/4.0.30.json'))
+  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/1.0.0.json'))
   const output = resolve(root, '.local', 'benchmark-results', `${expectations.release}-system-health.json`)
   const evidence = readJson(output)
   markGates(evidence.gates, ['benchmark.cleanup'], 'pass', 'isolated cleanup.json proves no benchmark containers, volumes, networks, images, or runtime credentials remain')
@@ -265,7 +266,7 @@ async function main() {
   const manifest = readJson(resolve(runDir, 'manifest.json'))
   if (manifest.runId !== run || manifest.composeProject !== run) throw new Error('Benchmark manifest identity mismatch; refusing execution.')
   const harness = { runDir, composeProject: run, envFile: resolve(runDir, 'benchmark.env') }
-  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/4.0.30.json'))
+  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/1.0.0.json'))
   const adminToken = readFileSync(resolve(runDir, 'bootstrap-token'), 'utf8').trim()
   if (!adminToken) throw new Error('Disposable benchmark bootstrap token is unavailable.')
   const base = `http://127.0.0.1:${manifest.apiPort}`
@@ -424,7 +425,7 @@ async function main() {
 
 function writeFailureArtifact(run) {
   if (!run?.startsWith(runPrefix)) return
-  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/4.0.30.json'))
+  const expectations = readJson(resolve(root, 'scripts/release-benchmark/specs/1.0.0.json'))
   const outputDir = resolve(root, '.local', 'benchmark-results')
   mkdirSync(outputDir, { recursive: true })
   // A failed rerun supersedes prior success evidence for this release. Keeping

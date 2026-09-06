@@ -12,7 +12,9 @@ set -uo pipefail
 
 # This script lives in deploy/scripts/; REPO_ROOT is two levels up.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
 HELPER_DIR="$REPO_ROOT/deploy/scripts"
 COMPOSE_FILE="$REPO_ROOT/deploy/compose/docker-compose.yml"
 
@@ -147,19 +149,7 @@ if [ -f "$ENV_FILE" ]; then
         v=$(pm_env_get OPENAI_API_KEY "" "$ENV_FILE")
         [ -n "${v:-}" ] && green "OPENAI_API_KEY populated" || red "OPENAI_API_KEY blank (required for OpenAI extraction)"
     fi
-    if [ "$(pm_env_get UPDATE_CHECK_PROVIDER none "$ENV_FILE")" = "bitbucket" ]; then
-        for sk in UPDATE_BITBUCKET_URL UPDATE_BITBUCKET_TOKEN UPDATE_BITBUCKET_REPO UPDATE_BITBUCKET_BRANCH; do
-            v=$(pm_env_get "$sk" "" "$ENV_FILE")
-            [ -n "${v:-}" ] && green "${sk} populated" || red "${sk} blank (required for Bitbucket update checks)"
-        done
-        if [ "$(pm_env_get UPDATE_BITBUCKET_SCOPE project "$ENV_FILE")" = "user" ]; then
-            v=$(pm_env_get UPDATE_BITBUCKET_USER "" "$ENV_FILE")
-            [ -n "${v:-}" ] && green "UPDATE_BITBUCKET_USER populated" || red "UPDATE_BITBUCKET_USER blank (required for Bitbucket personal repo update checks)"
-        else
-            v=$(pm_env_get UPDATE_BITBUCKET_PROJECT "" "$ENV_FILE")
-            [ -n "${v:-}" ] && green "UPDATE_BITBUCKET_PROJECT populated" || red "UPDATE_BITBUCKET_PROJECT blank (required for Bitbucket project repo update checks)"
-        fi
-    fi
+
 else
     red ".env.persistent-memory MISSING"
 fi
@@ -296,12 +286,12 @@ tcp_open() {
     return 1
 }
 # HTTP probe where a real endpoint exists.
-http_ok() { curl -sf -o /dev/null --max-time 5 "$1" 2>/dev/null; }
+http_ok() { curl -sf --max-time 5 "$1" >/dev/null 2>&1; }
 qdrant_http_ok() {
     if [ -n "$QDRANT_API_KEY" ]; then
-        curl -sf -o /dev/null --max-time 5 -H "api-key: $QDRANT_API_KEY" "$1" 2>/dev/null
+        curl -sf --max-time 5 -H "api-key: $QDRANT_API_KEY" "$1" >/dev/null 2>&1
     else
-        curl -sf -o /dev/null --max-time 5 "$1" 2>/dev/null
+        curl -sf --max-time 5 "$1" >/dev/null 2>&1
     fi
 }
 

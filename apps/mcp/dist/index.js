@@ -33,7 +33,7 @@ const SERVER_INSTRUCTIONS = [
 function createMcpServer(api, runtime) {
     const server = new McpServer({
         name: 'persistent-memory-mcp-server',
-        version: '0.4.4',
+        version: '1.0.0',
     }, {
         instructions: SERVER_INSTRUCTIONS,
     });

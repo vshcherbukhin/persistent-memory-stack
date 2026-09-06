@@ -67,6 +67,10 @@ flowchart TB
 
 ## Map of the docs
 
+Start with [Windows preparation](installation/windows-installation.md) for a
+manual Windows setup, or [Installation steps](installation/installation-steps.md)
+for the shared Windows/macOS wizard.
+
 ### Cross-cutting
 | Doc | What it covers |
 |---|---|
@@ -79,7 +83,6 @@ flowchart TB
 | [stack-architecture/benchmarking.md](stack-architecture/benchmarking.md) | Memory benchmark research, taxonomy, seed truth table, prompts, scoring, and test techniques for graph-first recall. |
 | [stack-architecture/operations.md](stack-architecture/operations.md) | Install/update, safe dev redeploys, day-2 ops from the dashboard, migrations, `rls:check`. Owner / on-call. |
 | [release-history.md](release-history.md) | Documentation service/source release history and current docs version. |
-| [benchmark_reports/4.0.30-system-health.md](benchmark_reports/4.0.30-system-health.md) | The release System Health Report: expected behavior, measured graph/recall lifecycle, tokens, evidence gates, and limitations. |
 
 ### Components
 | Component | Doc |
@@ -129,8 +132,7 @@ before committing. Every data-derived value on a Memories capture must be
 blurred, including memory text, project/tag/badge values and counts, graph and
 tab counts, node labels, active-focus chips, accessible-node rows, details,
 timestamps, metadata, and author values. A project filter is not a privacy
-boundary. Also blur Application updates user and Bitbucket URL fields and the
-profile email. Do not retain session IDs, credential fingerprints, private URLs,
+boundary. Also blur the profile email. Do not retain session IDs, credential fingerprints, private URLs,
 UUIDs or absolute home paths in committed assets. Never retain unredacted raw captures
 in the repository. Shared Space and the separate hosted
 superuser dashboard remain explicitly marked in development.

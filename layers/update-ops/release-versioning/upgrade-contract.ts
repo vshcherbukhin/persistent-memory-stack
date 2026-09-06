@@ -30,6 +30,24 @@ export interface UpgradeContractValidationOptions {
   availableReleases: ReadonlySet<string>
 }
 
+/** Historical version numbers may have been reused before the public release
+ * line began. Only explicitly marked packages contribute compatible releases. */
+export function validateReleaseLineContracts(
+  records: readonly { contract: unknown; packageJson: unknown }[],
+  releaseLine: string,
+): Map<string, ReleaseUpgradeContract> {
+  const selected = new Map<string, unknown>()
+  for (const { contract, packageJson } of records) {
+    if (!isRecord(packageJson) || packageJson.persistentMemoryReleaseLine !== releaseLine) continue
+    const version = requireVersion(packageJson.version, 'package version')
+    if (!selected.has(version)) selected.set(version, contract)
+  }
+  const availableReleases = new Set(selected.keys())
+  return new Map([...selected].map(([packageVersion, contract]) => [
+    packageVersion, validateUpgradeContract(contract, { packageVersion, availableReleases }),
+  ]))
+}
+
 interface Version {
   major: number
   minor: number

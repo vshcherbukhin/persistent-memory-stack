@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enableBrowserNotifications } from './browserNotifications'
+import { BROWSER_NOTIFICATION_KEY, BROWSER_NOTIFICATION_TYPES_KEY, PERSONAL_NOTIFICATION_TYPES, canSendBrowserNotification, enableBrowserNotifications } from './browserNotifications'
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>()
@@ -64,5 +64,25 @@ describe('enableBrowserNotifications', () => {
     expect(inactiveSubscribe).not.toHaveBeenCalled()
     expect(activeSubscribe).toHaveBeenCalledOnce()
     expect(serviceWorker.register).toHaveBeenCalledWith('/pm-sw.js')
+  })
+})
+
+describe('automatic release browser notifications', () => {
+  it('has no release preference and ignores old per-event choices while retaining browser consent', () => {
+    const localStorage = memoryStorage()
+    localStorage.setItem(BROWSER_NOTIFICATION_KEY, 'on')
+    localStorage.setItem(BROWSER_NOTIFICATION_TYPES_KEY, '[]')
+    const notification = { permission: 'granted' }
+    vi.stubGlobal('window', { localStorage, Notification: notification, PushManager: class {} })
+    vi.stubGlobal('navigator', { serviceWorker: {} })
+    vi.stubGlobal('Notification', notification)
+    expect(PERSONAL_NOTIFICATION_TYPES.map(({ id }) => String(id))).not.toContain('newReleases')
+    expect(canSendBrowserNotification('newReleases')).toBe(true)
+    expect(canSendBrowserNotification('securityAlerts')).toBe(false)
+    localStorage.setItem(BROWSER_NOTIFICATION_KEY, 'off')
+    expect(canSendBrowserNotification('newReleases')).toBe(false)
+    localStorage.setItem(BROWSER_NOTIFICATION_KEY, 'on')
+    notification.permission = 'denied'
+    expect(canSendBrowserNotification('newReleases')).toBe(false)
   })
 })

@@ -16,9 +16,9 @@ if (rootConfig !== canonicalConfig) {
   throw new Error('The legacy root Compose bridge does not resolve to the canonical deployment configuration.')
 }
 
-const bridge = readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8')
+const bridge = readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 if (!bridge.includes('include:\n  - path: deploy/compose/docker-compose.yml\n')) {
   throw new Error('The legacy root Compose bridge must include the canonical deployment file.')
 }
 
-process.stdout.write('[OK] Validated the 4.0.24 Compose compatibility bridge.\n')
+process.stdout.write('[OK] Validated the root Compose compatibility entry point.\n')

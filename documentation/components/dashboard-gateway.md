@@ -37,9 +37,8 @@ file and retains one read-only fallback to
 This keeps the public dashboard URL stable even while the dashboard container is
 rebuilt or restarted.
 
-This handoff is a safety event, not an Application updates notification. An
-already-open Personal Space dashboard checks it every second even when release
-notifications are disabled. The updater confirms that the gateway has received
+An already-open Personal Space dashboard checks the update handoff every second,
+independently of automatic release checks. The updater confirms that the gateway has received
 the event, gives open tabs a short moment to switch to the blocking screen, and
 then starts its snapshot and rebuild work. If no browser is open, the update
 continues; the final `complete` event remains in the gateway state so the next

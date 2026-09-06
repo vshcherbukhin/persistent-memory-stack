@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 
 const contractUrl = new URL('../release/upgrade.json', import.meta.url)
 const packageUrl = new URL('../package.json', import.meta.url)
@@ -8,34 +10,29 @@ const validatorUrl = new URL(
   import.meta.url,
 )
 
-const { validateUpgradeContract } = await import(validatorUrl.href)
+const { validateReleaseLineContracts } = await import(validatorUrl.href)
+const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
+const releaseSource = JSON.parse(readFileSync(new URL('../layers/update-ops/update-flow/public-source.json', import.meta.url), 'utf8'))
+const git = (args) => execFileSync('git', ['-c', `safe.directory=${repoRoot.replace(/\\/g, '/')}`, ...args], { cwd: repoRoot, encoding: 'utf8', windowsHide: true })
 
 function readJsonAtRevision(revision, path) {
-  return JSON.parse(execFileSync('git', ['show', `${revision}:${path}`], { encoding: 'utf8' }))
+  return JSON.parse(git(['show', `${revision}:${path}`]))
 }
 
 const currentContract = JSON.parse(readFileSync(contractUrl, 'utf8'))
 const currentPackage = JSON.parse(readFileSync(packageUrl, 'utf8'))
+if (currentPackage.persistentMemoryReleaseLine !== releaseSource.releaseLine) {
+  throw new Error('The package release line does not match the public source manifest.')
+}
 const trustedReleaseRef = 'origin/master'
-const revisions = execFileSync(
-  'git',
-  ['log', '--format=%H', trustedReleaseRef, '--', 'release/upgrade.json'],
-  { encoding: 'utf8' },
-).trim().split('\n').filter(Boolean)
+const revisions = git(['log', '--format=%H', trustedReleaseRef, '--', 'release/upgrade.json']).trim().split('\n').filter(Boolean)
 
-const contracts = new Map()
+const records = [{ contract: currentContract, packageJson: currentPackage }]
 for (const revision of revisions) {
-  const contract = readJsonAtRevision(revision, 'release/upgrade.json')
   const packageJson = readJsonAtRevision(revision, 'package.json')
-  if (typeof contract.release === 'string' && !contracts.has(contract.release)) {
-    contracts.set(contract.release, { contract, packageVersion: packageJson.version })
-  }
+  if (packageJson.persistentMemoryReleaseLine !== releaseSource.releaseLine) continue
+  records.push({ contract: readJsonAtRevision(revision, 'release/upgrade.json'), packageJson })
 }
-contracts.set(currentContract.release, { contract: currentContract, packageVersion: currentPackage.version })
+const contracts = validateReleaseLineContracts(records, releaseSource.releaseLine)
 
-const availableReleases = new Set(contracts.keys())
-for (const { contract, packageVersion } of contracts.values()) {
-  validateUpgradeContract(contract, { packageVersion, availableReleases })
-}
-
-process.stdout.write(`[OK] Validated ${contracts.size} release upgrade contract(s), including ${currentContract.release}.\n`)
+process.stdout.write(`[OK] Validated ${contracts.size} ${releaseSource.releaseLine} release upgrade contract(s), including ${currentContract.release}.\n`)

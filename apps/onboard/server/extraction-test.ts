@@ -60,13 +60,15 @@ const VERDICT_SCHEMA_STRICT = {
   additionalProperties: false,
 } as const
 
+// Use the first accepted example from fact-extraction.md §8. The probe is
+// ordinary memory content, not an instruction asking the model to accept it.
 const FACT_EXTRACTION_TEST_PAYLOAD = {
   content:
-    '[component_fact_extraction_probe] gotcha: the onboarding fact extraction test must validate the selected model and API key without saving a memory. Root cause: the installer needs the same Shape-gate confidence as dashboard settings. Fix: accept this seeded backend probe as the connectivity check.',
+    "[component_floating_overlay] Clicks are intercepted after opening a dropdown. Root cause: overlay not dismissed after selection. Fix: dismiss via page.getByTestId('FloatingOverlay').click(). Prevention: all DS Dropdown callers must dismiss overlay after selectOption.",
   metadata: {
     category: 'gotcha',
-    source: 'gotcha-discovered',
-    entities: ['component_fact_extraction_probe'],
+    entities: ['component_floating_overlay'],
+    source: 'heal-cycle',
   },
 } as const
 
@@ -241,10 +243,10 @@ export async function testExtractionConnection(
         ok: false,
         provider,
         model,
-        message: 'Fact extraction responded, but rejected the seeded probe.',
+        message: 'Connection succeeded, but the model rejected the built-in extraction sample. Retry the test.',
         outcome: verdict.outcome,
         reason: verdict.reason,
-        details: verdict.missing.length ? `Missing: ${verdict.missing.join(', ')}` : undefined,
+        details: [verdict.reason, verdict.missing.length ? `Missing: ${verdict.missing.join(', ')}` : ''].filter(Boolean).join('\n') || undefined,
       }
     }
     return {

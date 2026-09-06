@@ -21,13 +21,10 @@ terminal lifecycle. It keeps its lock and plan state private to the installation
 the dashboard gateway has a separate, read-only mount prepared for the later
 browser handoff protocol.
 
-An untouched 4.0.24 shell can update directly to 4.0.29. The release retains
-small compatibility adapters for the historical updater while it completes its
-first fetch-and-build cycle; setup then installs the coordinator. Releases
-4.0.0–4.0.23 need a one-time `git pull --ff-only origin master` bootstrap before
-running the updater, because their updater predates the moved deployment layout.
-Coordinator-capable releases resolve the actual branch or exact-release target
-before planning. They read the durable
+Version 1.0.0 establishes the first public release baseline. Later releases use
+the public release line and upgrade contracts to declare supported paths. The
+coordinator resolves the actual branch or exact-release target
+before planning. It reads the durable
 completed-update marker first, so manually pulling a newer checkout never makes
 the updater mistake checkout HEAD for the running release. A legacy installation
 without that marker can use the dashboard's served release history instead. The

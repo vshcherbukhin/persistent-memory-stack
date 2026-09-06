@@ -14,7 +14,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)"
 cd "$REPO_ROOT"
 
 STACK_NAME="persistent-memory-devtest"
@@ -120,7 +122,7 @@ load_env() {
 wait_for_api() {
   local deadline=$((SECONDS + 180))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    if curl --fail --silent --output /dev/null "http://127.0.0.1:${PM_API_PORT}/health"; then
+    if curl --fail --silent "http://127.0.0.1:${PM_API_PORT}/health" >/dev/null; then
       return 0
     fi
     sleep 2

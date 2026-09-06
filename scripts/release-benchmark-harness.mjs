@@ -87,7 +87,9 @@ function removePortBlocks(compose) {
 /** Build a no-port, no-container-name Compose source plus a small API-only port override. */
 export function createBenchmarkHarness({ source, runId }) {
   assertBenchmarkRunId(runId)
-  let compose = source
+  // Git can check out Compose with CRLF on Windows. Normalize before line-based
+  // isolation transforms so no production container names or mounts survive.
+  let compose = source.replace(/\r\n/g, '\n')
     .replace(/^name: persistent-memory\s*$/m, 'name: ${PM_BENCHMARK_COMPOSE_NAME:?PM_BENCHMARK_COMPOSE_NAME is required}')
     .replace(/^\s+container_name:.*\n/gm, '')
     .replace(/^\s+restart: unless-stopped\s*\n/gm, '')

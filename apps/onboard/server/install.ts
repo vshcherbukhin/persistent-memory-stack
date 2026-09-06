@@ -18,6 +18,7 @@ import {
 } from './register.js'
 import { targetMemoryFiles, writeRuleTargets } from './rule.js'
 import { writeOwnershipManifest } from './ownership.js'
+import { hostCommand } from './host.js'
 
 export type InstallEvent =
   | { type: 'run-start'; total: number; steps: { id: string; name: string }[] }
@@ -57,6 +58,8 @@ export interface WizardPayload {
   /** Absolute path to apps/mcp/persistent-memory-mcp.sh (node launch). */
   wrapperPath: string
   home: string
+  /** Host profile directories, supplied by the server rather than browser input. */
+  profileEnv?: NodeJS.ProcessEnv
   apps: WizardApps
   regLevel: 'global' | 'project'
   projectPaths: string[]
@@ -82,7 +85,7 @@ function doRegister(ctx: InstallContext, token: string, emit: (e: InstallEvent) 
   }
   try {
     // Map the selected apps + scope → the exact config writes (directory-aware; see planRegistration).
-    const plan = planRegistration({ apps: w.apps, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, mcpRuntime: w.mcpRuntime })
+    const plan = planRegistration({ apps: w.apps, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, profileEnv: w.profileEnv, mcpRuntime: w.mcpRuntime })
     for (const item of plan.writes) {
       const entry = buildMcpEntry({
         mcpRuntime: w.mcpRuntime,
@@ -120,7 +123,7 @@ function doWriteRule(ctx: InstallContext, emit: (e: InstallEvent) => void): bool
   try {
     // Claude reads the project CLAUDE.md in folder sessions whether via Code or Desktop, so the rule
     // targets Claude when EITHER is selected (mirrors the directory-aware MCP scope).
-    const targets = targetMemoryFiles({ claude: w.apps.claudeCli || w.apps.claudeDesktop, codex: w.apps.codexCli || w.apps.codexDesktop, level: w.regLevel, projectPaths: w.projectPaths, home: w.home })
+    const targets = targetMemoryFiles({ claude: w.apps.claudeCli || w.apps.claudeDesktop, codex: w.apps.codexCli || w.apps.codexDesktop, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, profileEnv: w.profileEnv })
     writeRuleTargets(targets, w.ruleBody, w.memoryBlock)
     if (targets.length === 0) emit({ type: 'stdout', id: 'write-rule', chunk: 'No CLAUDE.md/AGENTS.md targets — rule not written.\n' })
     for (const t of targets) emit({ type: 'stdout', id: 'write-rule', chunk: `✓ ${t.ruleFile} (+ ref in ${t.memoryFile})\n` })
@@ -187,9 +190,19 @@ function runStep(
   emit: (e: InstallEvent) => void,
 ): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve) => {
-    const child = spawn(step.cmd[0]!, step.cmd.slice(1), {
+    let resolved: ReturnType<typeof hostCommand>
+    try {
+      resolved = hostCommand(step.cmd[0]!, step.cmd.slice(1), { env: { ...process.env, ...ctx.env, ...(step.envOverride ?? {}) } })
+    } catch (error) {
+      const stdout = `${error instanceof Error ? error.message : String(error)}\n`
+      emit({ type: 'stdout', id: step.id, chunk: stdout })
+      resolve({ code: 1, stdout })
+      return
+    }
+    const child = spawn(resolved.command, resolved.args, {
       cwd: join(ctx.root, step.cwd),
-      env: { ...process.env, ...ctx.env, ...(step.envOverride ?? {}) },
+      env: resolved.env,
+      windowsHide: true,
     })
     let stdout = ''
     const onData = (b: Buffer): void => {
@@ -226,9 +239,14 @@ async function waitHealthy(
 /** Like runStep but without streaming (used by the wait poll). */
 function runStepSilent(step: InstallStep, ctx: InstallContext): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve) => {
-    const child = spawn(step.cmd[0]!, step.cmd.slice(1), {
+    let resolved: ReturnType<typeof hostCommand>
+    try {
+      resolved = hostCommand(step.cmd[0]!, step.cmd.slice(1), { env: { ...process.env, ...ctx.env, ...(step.envOverride ?? {}) } })
+    } catch (error) { resolve({ code: 1, stdout: String(error) }); return }
+    const child = spawn(resolved.command, resolved.args, {
       cwd: join(ctx.root, step.cwd),
-      env: { ...process.env, ...ctx.env, ...(step.envOverride ?? {}) },
+      env: resolved.env,
+      windowsHide: true,
     })
     let stdout = ''
     child.stdout.on('data', (b: Buffer) => (stdout += b.toString()))
@@ -268,6 +286,19 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
     memoryInstallMode: w?.memoryInstallMode,
   })
   emit({ type: 'run-start', total: steps.length, steps: steps.map((s) => ({ id: s.id, name: s.name })) })
+
+  // The server can also be started directly, bypassing the lifecycle launcher.
+  // Resolve required host runtimes before any dependency install or Compose start.
+  for (const step of steps) {
+    if (step.kind === 'fn' || !step.cmd.length) continue
+    try {
+      hostCommand(step.cmd[0]!, step.cmd.slice(1), { env: { ...process.env, ...ctx.env, ...(step.envOverride ?? {}) } })
+    } catch (error) {
+      emit({ type: 'error', id: step.id, message: error instanceof Error ? error.message : String(error) })
+      emit({ type: 'done', ok: false })
+      return
+    }
+  }
 
   // Effective token for the register step: the remote token (client flows) or the
   // one captured live from the seed step (full flow).
@@ -356,8 +387,8 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
     }
   }
   if (w) {
-    const registrations = planRegistration({ apps: w.apps, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, mcpRuntime: w.mcpRuntime }).writes
-    const rules = targetMemoryFiles({ claude: w.apps.claudeCli || w.apps.claudeDesktop, codex: w.apps.codexCli || w.apps.codexDesktop, level: w.regLevel, projectPaths: w.projectPaths, home: w.home })
+    const registrations = planRegistration({ apps: w.apps, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, profileEnv: w.profileEnv, mcpRuntime: w.mcpRuntime }).writes
+    const rules = targetMemoryFiles({ claude: w.apps.claudeCli || w.apps.claudeDesktop, codex: w.apps.codexCli || w.apps.codexDesktop, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, profileEnv: w.profileEnv })
     writeOwnershipManifest(w.home, [
       ...registrations.map((item) => ({ path: item.path, artifactType: 'mcp-registration' as const, scope: item.level })),
       ...rules.flatMap((item) => [

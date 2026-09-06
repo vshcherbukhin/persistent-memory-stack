@@ -12,7 +12,10 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { getJSON, postJSON, streamNDJSON } from './api'
+import { startWizardHeartbeat } from './heartbeat'
 import { ProgressBar, Field, StepList, Terminal, StatusRow, type StepState } from './components'
+import { PrereqProgress } from './PrereqProgress'
+import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
 import { type Flow, type Phase, phasesFor, nextPhase, prevPhase, prereqsBlocked, modelPresence, extractionNextBlocked } from './flow'
 
 const LOCAL_DASHBOARD_URL = 'http://localhost:3200'
@@ -72,14 +75,6 @@ interface Answers {
   userName: string
   userPassword: string
   // Full-local optional dashboard update notifications
-  updateNotifications: boolean
-  updateBitbucketUrl: string
-  updateBitbucketToken: string
-  updateBitbucketScope: 'project' | 'user'
-  updateBitbucketProject: string
-  updateBitbucketUser: string
-  updateBitbucketRepo: string
-  updateBitbucketBranch: string
   // Personal/shared memory surfaces
   personalMemoryEnabled: boolean
   memoryInstallMode: 'shared-only' | 'personal-only' | 'personal-and-shared'
@@ -109,14 +104,6 @@ const DEFAULT_ANSWERS: Answers = {
   userEmail: '',
   userName: '',
   userPassword: '',
-  updateNotifications: false,
-  updateBitbucketUrl: '',
-  updateBitbucketToken: '',
-  updateBitbucketScope: 'project',
-  updateBitbucketProject: '',
-  updateBitbucketUser: '',
-  updateBitbucketRepo: '',
-  updateBitbucketBranch: 'master',
   personalMemoryEnabled: true,
   memoryInstallMode: 'personal-only',
   defaultMemorySurface: 'personal',
@@ -130,7 +117,7 @@ const EMBED_MODELS = [
 
 const PHASE_LABEL: Record<Phase, string> = {
   flow: 'Get started', prereqs: 'Environment pre-check', account: 'Account', remote: 'Connect server', embedding: 'Embeddings',
-  pullModel: 'Pull model', extraction: 'Extraction LLM', updates: 'Updates', ecosystem: 'Ecosystem',
+  pullModel: 'Pull model', extraction: 'Extraction LLM', ecosystem: 'Ecosystem',
   registration: 'Registration', rule: 'Memory rule', review: 'Review env', shared: 'Shared Memories', install: 'Install',
   done: 'Done',
 }
@@ -240,6 +227,7 @@ function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase:
 }
 
 export default function App() {
+  useEffect(() => startWizardHeartbeat(), [])
   const [phase, setPhase] = useState<Phase>('flow')
   const [flow, setFlow] = useState<Flow>('full')
   const [answers, setAnswers] = useState<Answers>(DEFAULT_ANSWERS)
@@ -310,7 +298,6 @@ export default function App() {
               {phase === 'embedding' && <EmbeddingPicker {...shared} />}
               {phase === 'pullModel' && <PullModel {...shared} />}
               {phase === 'extraction' && <Extraction {...shared} />}
-              {phase === 'updates' && <UpdateNotifications {...shared} />}
               {phase === 'ecosystem' && <Ecosystem {...shared} />}
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
@@ -427,6 +414,10 @@ function FlowRouter({ onPick }: { onPick: (f: Flow, personalMemoryEnabled: boole
 
 // ── Prereqs (flow-aware) ──────────────────────────────────────────────────────────
 interface PrereqResult {
+  platform?: string
+  automaticInstallSupported?: boolean
+  automaticInstallComponents?: Partial<Record<PrereqKey, boolean>>
+  manualHints?: Partial<Record<PrereqKey, string>> | null
   homebrew?: {
     ok: boolean
     detail: string
@@ -451,7 +442,7 @@ type PrereqKey = 'node' | 'docker' | 'compose' | 'ollama'
 type PrecheckStatus = 'pending' | 'verifying' | 'installing' | 'ok' | 'warn'
 
 const PREREQ_ITEMS: { key: PrereqKey; label: string }[] = [
-  { key: 'node', label: 'Node 20+' },
+  { key: 'node', label: 'Node 22.12+' },
   { key: 'docker', label: 'Docker daemon' },
   { key: 'compose', label: 'Docker Compose v2' },
   { key: 'ollama', label: 'Ollama (host)' },
@@ -513,6 +504,7 @@ function prereqProbe(p: PrereqResult, key: PrereqKey): { ok: boolean; detail: st
 }
 
 function prereqAction(p: PrereqResult, key: PrereqKey): string | undefined {
+  if (p.automaticInstallComponents ? !p.automaticInstallComponents[key] : p.automaticInstallSupported === false) return undefined
   const brewMissing = !!(p.homebrew && !p.homebrew.ok)
   if (key === 'node') return p.node.ok || brewMissing ? undefined : 'Install'
   if (key === 'docker') return p.docker.ok ? undefined : p.docker.installed ? 'Start' : brewMissing ? undefined : 'Install'
@@ -525,6 +517,7 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
   const [p, setP] = useState<PrereqResult | null>(null)
   const [completedChecks, setCompletedChecks] = useState(0)
   const [installing, setInstalling] = useState<PrereqKey | null>(null)
+  const [progress, setProgress] = useState<PrereqProgressState | null>(null)
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const check = async () => {
@@ -549,9 +542,12 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
   useEffect(() => { setNextDisabled(!p || completedChecks < PREREQ_ITEMS.length || blocked) }, [p, completedChecks, blocked])
   const install = async (component: PrereqKey) => {
     setInstalling(component); setLog([]); setError(null)
+    setProgress({ label: p && prereqAction(p, component) === 'Start' ? 'Starting' : 'Preparing installation' })
     let failed: string | null = null
     try {
       await streamNDJSON('/api/prereqs/install', { component }, (e) => {
+        const update = prereqProgressEvent(e)
+        if (update) setProgress(update)
         if (e.type === 'stdout') setLog((l) => [...l.slice(-300), String(e.chunk)])
         if (e.type === 'error' && e.message) failed = String(e.message)
       })
@@ -559,6 +555,7 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
       failed = e instanceof Error ? e.message : String(e)
     } finally {
       setInstalling(null)
+      setProgress(null)
     }
     if (failed) {
       setError(failed)
@@ -574,16 +571,19 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
         {PREREQ_ITEMS.map((item, idx) => {
           const isInstalling = installing === item.key
           if (isInstalling) {
-            return <PrereqCard key={item.key} status="installing" label={item.label} detail="installing..." />
+            return <PrereqCard key={item.key} status="installing" label={item.label} detail={progress?.label ?? 'Working…'} />
           }
           if (!p) {
+            if (error) return <PrereqCard key={item.key} status="pending" label={item.label} detail="Not checked." />
             return <PrereqCard key={item.key} status={idx === 0 ? 'verifying' : 'pending'} label={item.label} detail={idx === 0 ? 'verifying...' : 'pending...'} />
           }
           if (completedChecks <= idx) {
             return <PrereqCard key={item.key} status={completedChecks === idx ? 'verifying' : 'pending'} label={item.label} detail={completedChecks === idx ? 'verifying...' : 'pending...'} />
           }
           const probe = prereqProbe(p, item.key)
-          const detail = brewMissing && !probe.ok && item.key !== 'node'
+          const detail = !probe.ok && p.manualHints?.[item.key]
+            ? `${probe.detail} ${p.manualHints[item.key]}`
+            : brewMissing && !probe.ok && item.key !== 'node'
             ? `${probe.detail} Install Homebrew first.`
             : probe.detail
           return (
@@ -593,17 +593,21 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
               label={item.label}
               detail={detail}
               action={prereqAction(p, item.key)}
-              onInstall={() => void install(item.key)}
+              onInstall={installing ? undefined : () => void install(item.key)}
             />
           )
         })}
       </div>
+      {installing && progress ? (
+        <PrereqProgress progress={progress} component={PREREQ_ITEMS.find(item => item.key === installing)!.label} />
+      ) : null}
       {brewMissing && p?.homebrew?.manualInstall ? (
-        <p className="notice warn">Homebrew is required for automatic installs on macOS. Install Homebrew in Terminal, then return to this step.</p>
+        <HomebrewManualCard detail={p.homebrew.detail} manual={p.homebrew.manualInstall} />
       ) : null}
-      {(blocked && p) || error ? (
-        <p className="notice bad prereq-error">{error ?? 'A required check failed. Fix it or use the install action in the matching card before continuing.'}</p>
+      {!installing && ((blocked && p) || error) ? (
+        <p className="notice bad prereq-error">{error ?? 'A required check failed. Use the matching install/start action or follow its instructions, then check again.'}</p>
       ) : null}
+      {(p || error) && !installing ? <button type="button" onClick={() => void check()}>Check again</button> : null}
       {log.length > 0 && <div className="prereq-log"><Terminal lines={log} /></div>}
     </section>
   )
@@ -867,13 +871,21 @@ function PullModel({ serverPin, setNextDisabled }: StepProps) {
   const [pulled, setPulled] = useState<boolean | null>(null)
   const [pulling, setPulling] = useState(false)
   const [log, setLog] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const check = () => getJSON<{ models: string[] }>('/api/prereqs').then((r) => setPulled(r.models.some((m) => m === model || m.startsWith(model)))).catch(() => setPulled(null))
   useEffect(() => { void check() }, [])
   useEffect(() => { setNextDisabled(!pulled) }, [pulled])
   const pull = async () => {
     setPulling(true)
-    await streamNDJSON('/api/ollama/pull', { model }, (e) => { if (e.type === 'stdout') setLog((l) => [...l.slice(-200), String(e.chunk)]) })
-    setPulling(false); void check()
+    setError(null)
+    try {
+      await streamNDJSON('/api/ollama/pull', { model }, (e) => { if (e.type === 'stdout') setLog((l) => [...l.slice(-200), String(e.chunk)]) })
+      await check()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPulling(false)
+    }
   }
   return (
     <section>
@@ -881,6 +893,7 @@ function PullModel({ serverPin, setNextDisabled }: StepProps) {
       <p>The shared server requires <code>{model}</code> for client-managed embeddings. This local dashboard must run the <em>exact same</em> model before connecting.</p>
       <StatusRow ok={pulled} label={model} detail={pulled ? 'pulled' : pulling ? 'pulling…' : 'not pulled'} />
       {!pulled && <div className="row"><button disabled={pulling} onClick={() => void pull()}>{pulling ? 'Pulling…' : `Pull ${model}`}</button></div>}
+      {error && <p className="notice bad">{error}</p>}
       {log.length > 0 && <Terminal lines={log} />}
     </section>
   )
@@ -888,8 +901,8 @@ function PullModel({ serverPin, setNextDisabled }: StepProps) {
 
 // ── Extraction LLM (full flow) ────────────────────────────────────────────────────
 function Extraction({ answers, set, setNextDisabled }: StepProps) {
-  // Detect API keys already in the user's .env so they don't re-paste them (the auto-generated
-  // secrets — TOKEN_PEPPER/DOCKER_CONTROL_TOKEN/USAGE_INGEST_TOKEN — are always regenerated instead).
+  // Detect saved provider keys so the user can keep them without re-pasting.
+  // Generated service secrets are preserved by the server when configuration is saved.
   const [onFile, setOnFile] = useState<{ anthropic: boolean; openai: boolean }>({ anthropic: false, openai: false })
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [testResult, setTestResult] = useState<ExtractionTestResult | null>(null)
@@ -976,136 +989,14 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
       )}
       {keyOnFile && <p className="notice ok">✓ An existing <code>{isAnthropic ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'}</code> was found in your <code>.env.persistent-memory</code> — leave the field blank to keep it, or enter a new one to replace it.</p>}
       {needsKey ? <p className="notice warn">API key is required to continue.</p> : null}
-      <div className="row" style={{ marginTop: 12 }}>
+      <div className="row">
         <button type="button" onClick={() => void testFactExtraction()} disabled={needsKey || testState === 'testing'}>
           {testState === 'testing' ? 'Testing...' : 'Test fact extraction'}
         </button>
       </div>
       {testState === 'ok' ? <p className="notice ok">{testResult?.message ?? 'Fact extraction test passed.'}</p> : null}
       {testState === 'error' ? <p className="notice bad">{testResult?.message ?? 'Fact extraction test failed.'}{testResult?.details ? <> {testResult.details}</> : null}</p> : null}
-      <p className="notice">You don’t enter these. <b>Regenerated</b> each install: <code>TOKEN_PEPPER</code>, <code>DOCKER_CONTROL_TOKEN</code>, <code>USAGE_INGEST_TOKEN</code>. The DB / MinIO passwords are <b>kept in sync with your data volumes</b> — preserved if a <code>.env.persistent-memory</code> already exists, generated fresh otherwise.</p>
-    </section>
-  )
-}
-
-// ── Dashboard update notifications (full flow, optional) ───────────────────────
-function UpdateNotifications({ answers, set, setNextDisabled }: StepProps) {
-  const [tokenOnFile, setTokenOnFile] = useState(false)
-  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
-  const [testMessage, setTestMessage] = useState<string | null>(null)
-  useEffect(() => {
-    void getJSON<{
-      updateProvider?: string
-      updateBitbucketUrl?: string
-      updateBitbucketTokenPresent?: boolean
-      updateBitbucketScope?: 'project' | 'user'
-      updateBitbucketProject?: string
-      updateBitbucketUser?: string
-      updateBitbucketRepo?: string
-      updateBitbucketBranch?: string
-    }>('/api/env/existing').then((r) => {
-      setTokenOnFile(Boolean(r.updateBitbucketTokenPresent))
-      if (!answers.updateNotifications && r.updateProvider === 'bitbucket') set('updateNotifications', true)
-      if (!answers.updateBitbucketUrl && r.updateBitbucketUrl) set('updateBitbucketUrl', r.updateBitbucketUrl)
-      if (r.updateBitbucketScope === 'project' || r.updateBitbucketScope === 'user') set('updateBitbucketScope', r.updateBitbucketScope)
-      if (!answers.updateBitbucketProject && r.updateBitbucketProject) set('updateBitbucketProject', r.updateBitbucketProject)
-      if (!answers.updateBitbucketUser && r.updateBitbucketUser) set('updateBitbucketUser', r.updateBitbucketUser)
-      if (!answers.updateBitbucketRepo && r.updateBitbucketRepo) set('updateBitbucketRepo', r.updateBitbucketRepo)
-      if ((!answers.updateBitbucketBranch || answers.updateBitbucketBranch === 'master') && r.updateBitbucketBranch) {
-        set('updateBitbucketBranch', r.updateBitbucketBranch)
-      }
-    }).catch(() => {})
-  }, [])
-  const setUpdateValue = <K extends keyof Answers>(key: K, value: Answers[K]) => {
-    set(key, value)
-    setTestState('idle')
-    setTestMessage(null)
-  }
-  const enabled = answers.updateNotifications
-  const missingToken = enabled && !answers.updateBitbucketToken.trim() && !tokenOnFile
-  const missingOwner = answers.updateBitbucketScope === 'user'
-    ? !answers.updateBitbucketUser.trim()
-    : !answers.updateBitbucketProject.trim()
-  const missingFields = enabled && (
-    !answers.updateBitbucketUrl.trim() ||
-    missingToken ||
-    missingOwner ||
-    !answers.updateBitbucketRepo.trim() ||
-    !answers.updateBitbucketBranch.trim()
-  )
-  const blocked = enabled && (missingFields || testState !== 'ok')
-  useEffect(() => { setNextDisabled(blocked) }, [blocked])
-  useEffect(() => {
-    if (!enabled) {
-      setTestState('idle')
-      setTestMessage(null)
-    }
-  }, [enabled])
-  const testConnection = async () => {
-    setTestState('testing')
-    setTestMessage(null)
-    const r = await postJSON<{ ok: boolean; message?: string }>('/api/update/test', {
-      url: answers.updateBitbucketUrl,
-      token: answers.updateBitbucketToken,
-      scope: answers.updateBitbucketScope,
-      project: answers.updateBitbucketProject,
-      user: answers.updateBitbucketUser,
-      repo: answers.updateBitbucketRepo,
-      branch: answers.updateBitbucketBranch,
-    }).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }))
-    setTestState(r.ok ? 'ok' : 'error')
-    setTestMessage(r.message ?? (r.ok ? 'Connection verified.' : 'Connection failed.'))
-  }
-  return (
-    <section>
-      <h2>Dashboard updates</h2>
-      <p>Enable dashboard notifications about the available release update (require personal Bitbucket API token).</p>
-      <label className={`checkrow${enabled ? ' checked' : ''}`}>
-        <input type="checkbox" checked={enabled} onChange={(e) => setUpdateValue('updateNotifications', e.target.checked)} />
-        <span className="checkbox" aria-hidden>{enabled ? '✓' : ''}</span>
-        <span className="checkrow-label">Show update notifications from Bitbucket</span>
-      </label>
-      {enabled ? (
-        <div className="update-fields">
-          <Field label="Bitbucket/Stash URL" hint="Base URL only, for example https://stash.company.com">
-            <input value={answers.updateBitbucketUrl} onChange={(e) => setUpdateValue('updateBitbucketUrl', e.target.value)} placeholder="https://stash.company.com" />
-          </Field>
-          <Field label="Bitbucket token" hint="Stored only in .env.persistent-memory and used by update-runner for read-only release checks.">
-            <input type="password" value={answers.updateBitbucketToken} onChange={(e) => setUpdateValue('updateBitbucketToken', e.target.value)} placeholder={tokenOnFile ? '•••• existing token — leave blank to keep' : 'token'} />
-          </Field>
-          {tokenOnFile ? <p className="notice ok">✓ Existing Bitbucket token found — leave blank to keep it.</p> : null}
-          <div className="seg-group">
-            <span className="seg-label">Repository owner</span>
-            <div className="seg-row">
-              <button type="button" className={`seg${answers.updateBitbucketScope === 'project' ? ' active' : ''}`} onClick={() => setUpdateValue('updateBitbucketScope', 'project')}>Project repo</button>
-              <button type="button" className={`seg${answers.updateBitbucketScope === 'user' ? ' active' : ''}`} onClick={() => setUpdateValue('updateBitbucketScope', 'user')}>Personal repo</button>
-            </div>
-          </div>
-          {answers.updateBitbucketScope === 'project' ? (
-            <Field label="Project key" hint="For URLs like /projects/ENG/repos/example-service/browse">
-              <input value={answers.updateBitbucketProject} onChange={(e) => setUpdateValue('updateBitbucketProject', e.target.value)} placeholder="ENG" />
-            </Field>
-          ) : (
-            <Field label="User slug" hint="For URLs like /users/example.user/repos/example-service/browse">
-              <input value={answers.updateBitbucketUser} onChange={(e) => setUpdateValue('updateBitbucketUser', e.target.value)} placeholder="example.user" />
-            </Field>
-          )}
-          <Field label="Repository slug">
-            <input value={answers.updateBitbucketRepo} onChange={(e) => setUpdateValue('updateBitbucketRepo', e.target.value)} placeholder="example-service" />
-          </Field>
-          <Field label="Branch">
-            <input value={answers.updateBitbucketBranch} onChange={(e) => setUpdateValue('updateBitbucketBranch', e.target.value)} placeholder="master" />
-          </Field>
-          {missingFields ? <p className="notice warn">Fill every Bitbucket field, or turn update notifications off.</p> : null}
-          <div className="row">
-            <button type="button" onClick={() => void testConnection()} disabled={missingFields || testState === 'testing'}>{testState === 'testing' ? 'Testing...' : 'Test Bitbucket connection'}</button>
-          </div>
-          {testState === 'ok' ? <p className="notice ok">{testMessage ?? 'Connection verified.'}</p> : null}
-          {testState === 'error' ? <p className="notice bad">{testMessage ?? 'Connection failed.'} Tip: check VPN connection is UP.</p> : null}
-        </div>
-      ) : (
-        <p className="notice">Enable dashboard notifications about the available release update (require personal Bitbucket API token).</p>
-      )}
+      <p className="notice">Service secrets and database passwords are generated for you. Existing values in <code>.env.persistent-memory</code> are <b>preserved</b> so saved passwords, tokens, and data connections keep working. Only missing secrets are generated.</p>
     </section>
   )
 }
@@ -1123,7 +1014,7 @@ function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
         setApps({ claudeCli: d.claudeCli, claudeDesktop: d.claudeDesktop, codexCli: d.codexCli, codexDesktop: d.codexDesktop })
         if (appsInited) appsInited.current = true
       }
-    }).catch(() => setDet(null))
+    }).catch(() => setDet({ claudeCli: false, claudeDesktop: false, codexCli: false, codexDesktop: false }))
   }, [])
   const rows: { key: keyof Apps; label: string; present: boolean }[] = det ? [
     { key: 'claudeCli', label: 'Claude CLI', present: det.claudeCli },
@@ -1136,15 +1027,15 @@ function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
   return (
     <section>
       <h2>Register the MCP with…</h2>
-      <p>Detected agent apps on this machine. Undetected ones are disabled.</p>
+      <p>Select the agent apps you use. Detected apps are selected by default; you can also select an app installed in a custom location.</p>
       {!det ? <p>Detecting installed apps…</p> : (
         <div className="checklist">
           {rows.map((r) => {
             const checked = apps[r.key]
             const tag = !r.present ? 'not detected' : ''
             return (
-              <label key={r.key} className={`checkrow${checked ? ' checked' : ''}${!r.present ? ' disabled' : ''}`}>
-                <input type="checkbox" checked={checked} disabled={!r.present} onChange={(e) => setApps({ ...apps, [r.key]: e.target.checked })} />
+              <label key={r.key} className={`checkrow${checked ? ' checked' : ''}`}>
+                <input type="checkbox" checked={checked} onChange={(e) => setApps({ ...apps, [r.key]: e.target.checked })} />
                 <span className="checkbox" aria-hidden>{checked ? '✓' : ''}</span>
                 <span className="checkrow-label">{r.label}</span>
                 {tag ? <span className="checkrow-tag">{tag}</span> : null}
@@ -1177,7 +1068,7 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
     try {
       const r = await postJSON<{ path?: string; canceled?: boolean; unsupported?: boolean }>('/api/choose-folder', {})
       if (r.path) setPath(i, r.path)
-      else if (r.unsupported) setPickNote('The system folder picker runs on macOS/Linux only — type or paste the absolute path here.')
+      else if (r.unsupported) setPickNote('The system folder picker is unavailable — type or paste the absolute path here.')
     } catch { setPickNote('Could not open the folder picker — type or paste the absolute path here.') }
   }
   // Project scope needs ≥1 folder (Claude + Codex both write per-folder configs).
@@ -1188,8 +1079,8 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
     <section>
       <h2>Registration</h2>
       <p>persistent-memory is added to the MCP config of the apps you picked. Your other MCP servers are left
-        untouched, and re-running the installer just updates this one entry. Config files are saved private to
-        your user (owner read/write only).</p>
+        untouched, and re-running the installer just updates this one entry. Windows files inherit their
+        folder permissions; macOS files are created with owner read/write permissions.</p>
       <div className="seg-group">
         <span className="seg-label">MCP runtime</span>
         <div className="seg-row">
@@ -1212,7 +1103,7 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
           <span className="field-label">Project folders <span className="seg-hint">· pick via the system dialog, or type/paste an absolute path</span></span>
           {answers.projectPaths.map((p, i) => (
             <div key={i} className="row">
-              <input value={p} placeholder="/abs/path/to/project" onChange={(e) => setPath(i, e.target.value)} />
+              <input value={p} placeholder="C:\Projects\My Project or /path/to/project" onChange={(e) => setPath(i, e.target.value)} />
               <button type="button" className="folders-choose" onClick={() => void pickFolder(i)}>📁 Choose…</button>
               <button type="button" className="folders-del" onClick={() => delPath(i)}>✕</button>
             </div>
@@ -1223,6 +1114,8 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
       )}
       <div className="notice">
         <b>What gets registered</b>
+        <p className="field-hint">The paths below show the default locations. On Windows, <code>~</code> means your user profile folder.
+          Configured <code>CODEX_HOME</code> and <code>CLAUDE_CONFIG_DIR</code> locations take precedence for global files.</p>
         {(apps.claudeCli || apps.claudeDesktop) && (
           <div>{isProject
             ? <>Claude (Code + Desktop folder sessions) → <code>~/.claude.json</code> per folder (<code>projects.&lt;path&gt;</code>).</>
@@ -1299,9 +1192,10 @@ function RuleStep({ answers, set, apps, setNextDisabled }: StepProps) {
   return (
     <section>
       <h2>Memory-usage rule</h2>
-      <p>Written to {ruleSpecs.map((s, i) => (
+      <p>{isProject ? 'Written to ' : 'Default locations: '}{ruleSpecs.map((s, i) => (
         <span key={i}>{i > 0 ? ' + ' : ''}<code>{isProject ? projPath(s.tail) : s.global}</code></span>
       ))}. Edit freely.{isProject && folders.length > 0 ? <span className="field-hint"> Hover <b>&lt;project_path&gt;</b> for the exact file per folder.</span> : null}</p>
+      {!isProject && <p className="field-hint">On Windows, <code>~</code> means your user profile folder. Configured <code>CODEX_HOME</code> and <code>CLAUDE_CONFIG_DIR</code> locations also apply to these rule files.</p>}
       <Field label={`Top memory block — inserted as the first section under ${memLabel}`} hint={`Any persistent-memory rule reference in this block is rewritten per target (${ruleRefLabel}).`}>
         <textarea value={answers.memoryBlock} rows={8} onChange={(e) => set('memoryBlock', e.target.value)} />
       </Field>
@@ -1341,14 +1235,6 @@ function Review({ flow, answers, serverPin, setNextDisabled }: { flow: Flow; ans
         personalApiUrl: 'http://localhost:8090',
         sharedApiUrl: personalAndShared ? answers.remoteApiUrl : '',
         sharedUserToken: personalAndShared ? answers.remoteToken : '',
-        updateCheckProvider: answers.updateNotifications ? 'bitbucket' as const : 'none' as const,
-        updateBitbucketUrl: answers.updateNotifications ? answers.updateBitbucketUrl : '',
-        updateBitbucketToken: answers.updateNotifications ? answers.updateBitbucketToken : '',
-        updateBitbucketScope: answers.updateBitbucketScope,
-        updateBitbucketProject: answers.updateNotifications ? answers.updateBitbucketProject : '',
-        updateBitbucketUser: answers.updateNotifications ? answers.updateBitbucketUser : '',
-        updateBitbucketRepo: answers.updateNotifications ? answers.updateBitbucketRepo : '',
-        updateBitbucketBranch: answers.updateNotifications ? answers.updateBitbucketBranch : 'master',
       }
       try {
         const r = await postJSON<{ preview: string; issues: { key: string; message: string }[] }>('/api/env', { answers: envAnswers })
@@ -1397,6 +1283,10 @@ function Install({ flow, body, onToken, onDone }: { flow: Flow; body: InstallBod
           if (e.ok) onDone()
           break
       }
+    }).catch((error: unknown) => {
+      setFailed(true)
+      setRunning(false)
+      setLog((lines) => [...lines.slice(-400), error instanceof Error ? error.message : String(error)])
     })
   }, [])
   const total = steps.length || 1

@@ -34,11 +34,10 @@ failure state. It never publishes raw exception output to the browser and never
 overwrites a more specific failure already reported by the lifecycle child.
 
 The coordinator itself runs the snapshot before any lifecycle hop, then passes
-the snapshot checkpoint to the legacy lifecycle so setup cannot make a duplicate
-snapshot. A legacy exact target without `release/upgrade.json` (for example
-`--release 4.0.27`) remains a coordinator-recorded one-hop bridge. An untouched
-4.0.25–4.0.27 updater still performs its existing direct bridge to 4.0.28 first,
-because an old shell cannot launch coordinator code it has not fetched.
+the snapshot checkpoint to the lifecycle so setup cannot make a duplicate
+snapshot. The first public release is 1.0.0 and includes the coordinator and
+`release/upgrade.json`. Update targets must belong to the public release line;
+the initial contract declares no intermediate release bridges.
 
 For each lifecycle hop, the coordinator-owned handoff remains browser-advisory.
 The legacy executor splits image building from container deployment: it builds

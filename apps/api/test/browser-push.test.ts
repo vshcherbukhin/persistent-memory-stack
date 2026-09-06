@@ -74,6 +74,14 @@ describe('browser push subscription data', () => {
 })
 
 describe('browser push delivery', () => {
+  it('sends release notices without a separate event preference while respecting disabled browser subscriptions', async () => {
+    const enabled = { id: 'enabled', endpoint: 'https://push.example.test/enabled', p256dh: 'a', auth: 'b', enabled: true, notificationTypes: [] }
+    const disabled = { ...enabled, id: 'disabled', endpoint: 'https://push.example.test/disabled', enabled: false }
+    const send = vi.fn(async () => {})
+    expect(await deliverBrowserPushRows([enabled, disabled], { type: 'newReleases', title: 'Update available' }, send, async () => {})).toBe(1)
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ endpoint: enabled.endpoint }), expect.any(String))
+  })
+
   it('filters by enabled type and removes expired subscriptions', async () => {
     const sent: string[] = []
     const removed: string[] = []

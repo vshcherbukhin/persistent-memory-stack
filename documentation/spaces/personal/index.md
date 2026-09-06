@@ -37,7 +37,7 @@ The Overview cards summarize the local stack. Each **Open details** or **Open se
 | Workers | Scheduled maintenance jobs and their last-run logs |
 | Token usage | Token, request, model, service, user, and estimated-cost totals |
 | Security | Open DLP and secret-detection findings |
-| Notifications | Update checks and local browser notification preferences |
+| Notifications | Local browser notification preferences |
 | System Settings | Fact extraction, embeddings, retention, and stream session timeout |
 
 ## Actions

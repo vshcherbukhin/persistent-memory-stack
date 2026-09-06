@@ -4,7 +4,7 @@ import test from 'node:test'
 import { evaluateSystemHealth, renderSystemHealthReport } from './system-health-report.mjs'
 
 const expectations = JSON.parse(
-  readFileSync(new URL('./release-benchmark/specs/4.0.30.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./release-benchmark/fixtures/4.0.30-capability-spec.json', import.meta.url), 'utf8'),
 )
 
 function passingEvidence() {

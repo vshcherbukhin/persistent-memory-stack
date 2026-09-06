@@ -1,13 +1,13 @@
 {
   "name": "persistent-memory-onboard",
-  "version": "0.7.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "One-command onboarding installer web app for persistent-memory (host-only; NOT shipped to the server).",
   "scripts": {
     "build": "npm run build:web && npm run build:server",
     "build:web": "vite build",
-    "build:server": "tsc -p tsconfig.server.json && mkdir -p dist/apps/onboard/templates && cp templates/persistent-memory-rule.md dist/apps/onboard/templates/persistent-memory-rule.md",
+    "build:server": "tsc -p tsconfig.server.json && node ../../scripts/onboard-assets.mjs",
     "start": "node dist/apps/onboard/server/index.js",
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -7,14 +7,13 @@ export const LEGACY_LAPTOP_NOTIFICATION_KEY = 'pm:laptopNotifications'
 export const BROWSER_NOTIFICATION_TYPES_KEY = 'pm:browserNotificationTypes'
 
 export const PERSONAL_NOTIFICATION_TYPES = [
-  { id: 'newReleases', label: 'New releases' },
   { id: 'memoryAdded', label: 'Memory added' },
   { id: 'memoryUpdated', label: 'Memory updated' },
   { id: 'memoryRemoved', label: 'Memory removed' },
   { id: 'securityAlerts', label: 'Security alerts' },
 ] as const
 
-export type BrowserNotificationType = (typeof PERSONAL_NOTIFICATION_TYPES)[number]['id']
+export type BrowserNotificationType = BrowserPushNotificationType
 
 export const DEFAULT_BROWSER_NOTIFICATION_TYPES = PERSONAL_NOTIFICATION_TYPES.map((option) => option.id)
 
@@ -59,7 +58,7 @@ export function saveBrowserNotificationsRequested(enabled: boolean): void {
 
 export function normalizeBrowserNotificationTypes(value: unknown): BrowserNotificationType[] {
   if (!Array.isArray(value)) return DEFAULT_BROWSER_NOTIFICATION_TYPES
-  const allowed = new Set(PERSONAL_NOTIFICATION_TYPES.map((option) => option.id))
+  const allowed = new Set<BrowserNotificationType>(PERSONAL_NOTIFICATION_TYPES.map((option) => option.id))
   const next = value.filter((item): item is BrowserNotificationType => allowed.has(item as BrowserNotificationType))
   return next
 }
@@ -82,7 +81,7 @@ export function canSendBrowserNotification(type: BrowserNotificationType): boole
   return browserNotificationsSupported()
     && readBrowserNotificationsRequested()
     && Notification.permission === 'granted'
-    && readBrowserNotificationTypes().includes(type)
+    && (type === 'newReleases' || readBrowserNotificationTypes().includes(type))
 }
 
 function urlBase64ToArrayBuffer(value: string): ArrayBuffer {

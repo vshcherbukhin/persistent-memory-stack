@@ -8,7 +8,7 @@ pm_normalize_handoff_state_dir() {
     source_root="$1"
     configured_dir="${2:-$source_root/.local/update-state}"
     case "$configured_dir" in
-        /*) printf '%s\n' "$configured_dir" ;;
+        /*|[A-Za-z]:[\\/]*) printf '%s\n' "${configured_dir//\\//}" ;;
         *) printf '%s/%s\n' "$source_root" "$configured_dir" ;;
     esac
 }

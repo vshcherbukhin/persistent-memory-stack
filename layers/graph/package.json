@@ -1,6 +1,6 @@
 {
   "name": "@pm/graph",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory graph capability layer: Graphiti client, memory graph sync stamping, and worker Graphiti episode helpers.",

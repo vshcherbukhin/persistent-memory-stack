@@ -6,7 +6,7 @@ set -euo pipefail
 # Runs prereq checks, bootstraps the .env from the committed template, brings
 # the SERVER stack up, and applies the data layer as the owner role:
 #   prisma migrate deploy -> rls.sql (pm_app role + RLS; password via PGOPTIONS)
-#   -> seed (bootstrap superuser + show-once token) -> restart api/worker as pm_app.
+#   -> initialize settings (+ server bootstrap admin) -> restart api/worker as pm_app.
 # MinIO buckets + Graphiti graph indices are created automatically at runtime by
 # the api/worker/graphiti services on first use. MCP registration is handled by
 # the onboarding wizard: a shared Streamable HTTP MCP service for local personal
@@ -31,7 +31,9 @@ set -euo pipefail
 # SCRIPT_DIR = this script's dir (deploy/scripts/); INSTALL_DIR = the repo root,
 # where deploy/compose/docker-compose.yml + .env.persistent-memory live.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${INSTALL_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+. "$SCRIPT_DIR/lib/host-platform.sh"
+SCRIPT_DIR="$(pm_host_path "$SCRIPT_DIR")"
+INSTALL_DIR="$(pm_host_path "${INSTALL_DIR:-$(cd "$SCRIPT_DIR/../.." && pm_host_pwd)}")"
 
 ENV_TEMPLATE="$INSTALL_DIR/.env.persistent-memory.example"
 COMPOSE_FILE="$INSTALL_DIR/deploy/compose/docker-compose.yml"
@@ -263,10 +265,9 @@ section "Phase 4: Per-service setup"
 #                                            RLS, policies. MUST run AFTER migrate
 #                                            (tables must exist) and BEFORE the
 #                                            app connects as pm_app.
-#   3. seed as OWNER                      — owner bypasses FORCE'd RLS, so it can
-#                                            insert the first team/superuser with
-#                                            no app.team_id set; mints the
-#                                            show-once bootstrap token.
+#   3. seed as OWNER                      — initialize missing system settings;
+#                                            server mode also creates the first
+#                                            team-less admin + show-once token.
 #   4. restart api/worker                 — they pick up DATABASE_URL=pm_app
 #                                            (RLS-subject) and the new health probe.
 PRISMA_DIR="$INSTALL_DIR/layers/core/schema"
@@ -293,9 +294,9 @@ if [ -d "$PRISMA_DIR" ] && [ -f "$PRISMA_DIR/schema.prisma" ]; then
         && ok "RLS policies + pm_app role applied (container psql, as owner)." \
         || { fail "rls.sql apply failed."; exit 1; }
 
-    # 3. seed (owner) — bootstrap superuser + show-once token (idempotent).
+    # 3. Initialize settings; server mode also bootstraps its administrator.
     ( cd "$PRISMA_DIR" && DATABASE_MIGRATE_URL="$HOST_MIGRATE_URL" npm run --silent seed ) \
-        && ok "Seed complete (bootstrap superuser; token shown above if first run)." \
+        && ok "System settings initialized; server bootstrap credentials shown above if created." \
         || warn "Seed step reported an error — review output above."
 
     # 4. restart api/worker so they connect as pm_app (RLS-subject) at runtime.
@@ -308,7 +309,7 @@ fi
 
 # MinIO evidence bucket + Graphiti graph indices are created automatically at
 # runtime by the api/worker/graphiti services (no manual step). The bootstrap
-# superuser + its show-once token are minted by the seed step above; further
+# server superuser + its show-once token are minted by the seed step above; further
 # users/tokens are issued from the dashboard webapp.
 todo "MCP registration: use the onboarding wizard to register the stream service."
 todo "Before PRODUCTION: set the real extraction provider API key in the env."

@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile as readSourceFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
+import { hostCommand } from '../../onboard/server/host.ts'
+
+const readFile = (path: URL, encoding: 'utf8') => readSourceFile(path, encoding).then((text) => text.replace(/\r\n/g, '\n'))
 
 describe('terminal update script', () => {
   function lockfileAllowlist(script: string): RegExp {
@@ -24,10 +27,11 @@ describe('terminal update script', () => {
   }
 
   function normalizeRuntimeHandoffStateDir(configuredDir: string): string {
+    const command = hostCommand('bash', ['-c', 'source "$1"; pm_normalize_handoff_state_dir "$2" "$3"', '_', 'deploy/scripts/lib/update-handoff-state.sh', '/runtime/source', configuredDir])
     return execFileSync(
-      'bash',
-      ['-c', 'source "$1"; pm_normalize_handoff_state_dir "$2" "$3"', '_', 'deploy/scripts/lib/update-handoff-state.sh', '/runtime/source', configuredDir],
-      { cwd: new URL('../../../', import.meta.url), encoding: 'utf8' },
+      command.command,
+      command.args,
+      { cwd: new URL('../../../', import.meta.url), encoding: 'utf8', env: command.env, windowsHide: true },
     ).trim()
   }
 
@@ -267,14 +271,16 @@ describe('terminal update script', () => {
     expect(script.indexOf('reserve_coordinator_before_source_resolution\nPM_COORDINATOR_STATE_DIR="$COORDINATOR_INSTALLATION_HOME/state"\nexport PM_COORDINATOR_STATE_DIR\nensure_dashboard_gateway_handoff_mount\nsection "persistent-memory — update"')).toBeGreaterThan(-1)
     expect(script).toContain('--legacy-script "$SCRIPT_REPO_ROOT/deploy/scripts/update.sh"')
     expect(compose).toContain('${PM_COORDINATOR_STATE_DIR:-../../.local/update-coordinator-state}:/run/persistent-memory/update-coordinator-state:ro')
-    expect(rootPackage).toContain('npm run build:update-coordinator')
-    expect(rootPackage).toContain('node scripts/install-update-coordinator.mjs')
+    expect(JSON.parse(rootPackage).scripts.setup).toBe('node scripts/setup.mjs')
+    const setup = await readFile(new URL('../../../scripts/setup.mjs', import.meta.url), 'utf8')
+    expect(setup).toContain("runNpm(['run', 'build:update-coordinator']")
+    expect(setup).toContain("run(process.execPath, ['scripts/install-update-coordinator.mjs'")
   })
 
   it('keeps the initiating environment and browser handoff through coordinator bridge hops', async () => {
     const script = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
 
-    expect(script).toContain('ENV_RUNTIME="${PM_COORDINATOR_ENV_RUNTIME:-$REPO_ROOT/.env.persistent-memory}"')
+    expect(script).toContain('ENV_RUNTIME="$(pm_host_path "${PM_COORDINATOR_ENV_RUNTIME:-$REPO_ROOT/.env.persistent-memory}")"')
     expect(script).toContain('HANDOFF_RUN_ID="${PM_HANDOFF_ID:-$(date -u +"%Y%m%dT%H%M%SZ")-$$}"')
     expect(script).toContain('PM_COORDINATOR_BRANCH')
     expect(script).not.toContain('PM_COORDINATOR_SNAPSHOT_READY=1')

@@ -74,7 +74,7 @@ export default async function MemoriesPage({
       surface={surface}
       isAdmin={isAdmin}
       canRunBackfill={surface === 'personal' && isSuperuser(who)}
-      graphEnabled={process.env.PM_MEMORY_GRAPH_UI_ENABLED === 'true'}
+      graphEnabled={process.env.PM_MEMORY_GRAPH_UI_ENABLED !== 'false'}
       initial={initial}
       initialTotal={initialTotal}
       initialNextCursor={initialNextCursor}

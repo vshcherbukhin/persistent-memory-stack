@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-mcp",
-  "version": "0.4.8",
+  "version": "1.0.0",
   "private": true,
   "description": "persistent-memory MCP — stream service for Personal Memories and optional Shared Memories. Maps tools to API endpoints, composes recall_context across memory + graph, and embeds locally for client-managed embeddings. The API is the authorization choke-point; the MCP does NO auth/RLS itself.",
   "type": "module",

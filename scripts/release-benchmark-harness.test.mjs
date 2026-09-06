@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertBenchmarkCleanup, benchmarkMigrateUrl, benchmarkSeedEnv, createBenchmarkHarness, removeBenchmarkRuntimeSecrets } from './release-benchmark-harness.mjs'
 
-test('creates a Compose-safe disposable benchmark topology without production names or env files', async () => {
-  const source = await readFile(new URL('../deploy/compose/docker-compose.yml', import.meta.url), 'utf8')
+for (const lineEnding of ['\n', '\r\n']) test(`creates a Compose-safe disposable benchmark topology from ${lineEnding === '\n' ? 'LF' : 'CRLF'} without production names or env files`, async () => {
+  const source = (await readFile(new URL('../deploy/compose/docker-compose.yml', import.meta.url), 'utf8')).replace(/\r?\n/g, lineEnding)
   const harness = createBenchmarkHarness({ source, runId: 'pm-benchmark-test-20260717' })
 
   assert.match(harness.compose, /^name: \$\{PM_BENCHMARK_COMPOSE_NAME/m)

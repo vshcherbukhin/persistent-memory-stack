@@ -1,15 +1,14 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { ApiError, api, normalizeMemorySurface } from '@/lib/api'
+import { api, normalizeMemorySurface } from '@/lib/api'
 import { requireControlPlane, isSuperuser } from '@/lib/session'
-import type { NotifySettingsInput, UpdateConnectionTestResult, UpdateNotificationSettingsInput } from '@/lib/types'
+import type { NotifySettingsInput } from '@/lib/types'
 
 export interface NotifyState {
   ok?: boolean
   error?: string
   nonce?: number
-  connection?: UpdateConnectionTestResult
 }
 
 function splitList(v: FormDataEntryValue | null): string[] {
@@ -21,11 +20,6 @@ function splitList(v: FormDataEntryValue | null): string[] {
 
 function text(v: FormDataEntryValue | null): string {
   return String(v ?? '').trim()
-}
-
-function errorText(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return [error.message, error.details].filter(Boolean).join(' ')
-  return error instanceof Error ? error.message : fallback
 }
 
 /**
@@ -58,24 +52,6 @@ function parseBody(formData: FormData): NotifySettingsInput {
   return body
 }
 
-function parseUpdateSettingsBody(formData: FormData): UpdateNotificationSettingsInput {
-  const enabled = formData.get('enabled') === 'on'
-  const scope = text(formData.get('bitbucketScope')) === 'user' ? 'user' : 'project'
-  return {
-    enabled,
-    provider: enabled ? 'bitbucket' : 'none',
-    bitbucket: {
-      url: text(formData.get('bitbucketUrl')),
-      token: text(formData.get('bitbucketToken')),
-      scope,
-      project: text(formData.get('bitbucketProject')),
-      user: text(formData.get('bitbucketUser')),
-      repo: text(formData.get('bitbucketRepo')),
-      branch: text(formData.get('bitbucketBranch')),
-    },
-  }
-}
-
 export async function saveNotifyTargetAction(_prev: NotifyState, formData: FormData): Promise<NotifyState> {
   const who = await requireControlPlane()
   const targetKind = text(formData.get('targetKind'))
@@ -97,26 +73,4 @@ export async function saveNotifyTargetAction(_prev: NotifyState, formData: FormD
   }
   revalidatePath('/notifications')
   return { ok: true, nonce: Date.now() }
-}
-
-export async function saveUpdateNotificationsAction(_prev: NotifyState, formData: FormData): Promise<NotifyState> {
-  const who = await requireControlPlane()
-  if (!isSuperuser(who)) return { error: 'Superuser only.', nonce: Date.now() }
-  try {
-    await api.saveUpdateSettings(parseUpdateSettingsBody(formData))
-  } catch (e) {
-    return { error: errorText(e, 'Save failed'), nonce: Date.now() }
-  }
-  revalidatePath('/notifications')
-  return { ok: true, nonce: Date.now() }
-}
-
-export async function testUpdateNotificationsAction(_prev: NotifyState, formData: FormData): Promise<NotifyState> {
-  const who = await requireControlPlane()
-  if (!isSuperuser(who)) return { error: 'Superuser only.', nonce: Date.now() }
-  try {
-    return { connection: await api.testUpdateSettings(parseUpdateSettingsBody(formData)), nonce: Date.now() }
-  } catch (e) {
-    return { error: errorText(e, 'Connection test failed'), nonce: Date.now() }
-  }
 }

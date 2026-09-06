@@ -1,18 +1,12 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { hostCommand } from '../../onboard/server/host.ts'
 
 const root = new URL('../../../', import.meta.url)
 const releaseContract = new URL('../../../release/upgrade.json', import.meta.url)
 const releaseSchema = new URL('../../../schemas/release-upgrade.schema.json', import.meta.url)
 const releaseValidator = new URL('../../../scripts/validate-release-upgrade.mjs', import.meta.url)
-
-function nextPatch(version: string): string {
-  const parts = version.split('.').map(Number)
-  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) throw new Error(`invalid release version: ${version}`)
-  const [major, minor, patch] = parts as [number, number, number]
-  return `${major}.${minor}.${patch + 1}`
-}
 
 describe('release upgrade contract', () => {
   it('ships a machine-readable bootstrap contract for the current release', () => {
@@ -24,9 +18,11 @@ describe('release upgrade contract', () => {
     expect(contract).toMatchObject({
       schemaVersion: 1,
       release: rootPackage.version,
-      minimumSupportedSource: '4.0.24',
-      compatibleMajorLine: 4,
-      directFrom: `>=4.0.24 <${nextPatch(rootPackage.version)}`,
+      minimumSupportedSource: '1.0.0',
+      compatibleMajorLine: 1,
+      directFrom: '=1.0.0',
+      bridges: [],
+      requiredStops: [],
       coordinator: { minimumVersion: 1, bootstrap: true },
     })
   })
@@ -55,8 +51,11 @@ describe('release upgrade contract', () => {
   // This test intentionally compiles the checked-out updater before validation.
   // The default Vitest 5s budget flakes on a cold TypeScript cache.
   it('validates the checked-out release contract through the compiled release validator', () => {
-    expect(() => execFileSync('npm', ['run', 'validate:release-upgrade'], {
+    const command = hostCommand('npm', ['run', 'validate:release-upgrade'])
+    expect(() => execFileSync(command.command, command.args, {
       cwd: new URL('../../../', import.meta.url),
+      env: command.env,
+      windowsHide: true,
       stdio: 'pipe',
     })).not.toThrow()
   }, 20_000)

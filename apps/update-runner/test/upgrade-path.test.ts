@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   planUpgradePath,
   validateUpgradeContract,
+  validateReleaseLineContracts,
   type ReleaseUpgradeContract,
 } from '../../../layers/update-ops/release-versioning/upgrade-contract.ts'
 
@@ -17,6 +18,26 @@ const bootstrap: ReleaseUpgradeContract = {
 }
 
 describe('release upgrade path planning', () => {
+  it('starts public1.0.0 without claiming a downgrade path from the old4.x release line', () => {
+    const fresh = { ...bootstrap, release: '1.0.0', minimumSupportedSource: '1.0.0', compatibleMajorLine: 1, directFrom: '=1.0.0' }
+    const contracts = new Map([[fresh.release, fresh]])
+    expect(planUpgradePath('1.0.0', fresh, contracts)).toEqual([])
+    expect(() => planUpgradePath('4.0.37', fresh, contracts)).toThrow('downgrade paths are unsupported')
+    expect(() => planUpgradePath('0.9.0', fresh, contracts)).toThrow('older than the supported minimum')
+  })
+
+  it('excludes unmarked, foreign-line and reused historical versions from public compatibility', () => {
+    const fresh = { ...bootstrap, release: '1.0.0', minimumSupportedSource: '1.0.0', compatibleMajorLine: 1, directFrom: '=1.0.0' }
+    const contracts = validateReleaseLineContracts([
+      { contract: fresh, packageJson: { version: '1.0.0', persistentMemoryReleaseLine: 'public-v1' } },
+      { contract: { invalid: 'old4 contract' }, packageJson: { version: '4.0.37' } },
+      { contract: { invalid: 'reused old1 version' }, packageJson: { version: '1.0.0' } },
+      { contract: { invalid: 'other product line' }, packageJson: { version: '1.0.1', persistentMemoryReleaseLine: 'private-v0' } },
+    ], 'public-v1')
+    expect([...contracts.keys()]).toEqual(['1.0.0'])
+    expect(contracts.get('1.0.0')).toEqual(fresh)
+  })
+
   it('plans a direct previous-patch update to the target release', () => {
     expect(planUpgradePath('4.0.28', bootstrap, new Map([[bootstrap.release, bootstrap]]))).toEqual(['4.0.29'])
   })

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const src = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
-const root = (path: string) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8')
+const src = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const root = (path: string) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 function cssRule(selector: string): string {
   const css = src('../app/globals.css')

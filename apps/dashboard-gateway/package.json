@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-dashboard-gateway",
-  "version": "0.1.8",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Stable localhost dashboard gateway for Persistent Memory update handoff.",

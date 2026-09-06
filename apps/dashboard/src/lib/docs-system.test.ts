@@ -15,8 +15,8 @@ vi.mock('@/components/ui/Icon', () => ({
 }))
 vi.mock('@/lib/session', () => ({ requireSession: requireSessionMock }))
 
-const dashboard = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
-const root = (path: string) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8')
+const dashboard = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const root = (path: string) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 const personalGuidePages = [
   { file: 'index.md', screenshots: ['personal-space-start.png'] },
@@ -27,10 +27,10 @@ const personalGuidePages = [
   { file: 'workers.md', screenshots: ['workers-page.png', 'worker-schedule-modal.png', 'worker-logs-modal.png'] },
   { file: 'token-usage.md', screenshots: ['token-usage-page.png'] },
   { file: 'security.md', screenshots: ['security-empty.png', 'security-finding.png'] },
-  { file: 'notifications.md', screenshots: ['system-notifications.png'] },
+  { file: 'notifications.md', screenshots: [] },
   { file: 'system-settings.md', screenshots: ['settings-fact-extraction.png', 'settings-embeddings.png', 'settings-stream-sessions.png'] },
   { file: 'profile.md', screenshots: ['profile-modal.png'] },
-  { file: 'releases-and-updates.md', screenshots: ['application-updates.png', 'release-notes-modal.png', 'update-progress.png'] },
+  { file: 'releases-and-updates.md', screenshots: ['release-notes-modal.png', 'update-progress.png'] },
 ] as const
 
 const personalSpaceNavigation = [
@@ -507,8 +507,11 @@ describe('dashboard documentation integration', () => {
     expect(docsPackage.devDependencies?.mermaid).toBe('11.16.0')
     expect(dockerfile).toContain('node_modules/mermaid/dist/mermaid.min.js')
     expect(dockerfile).toContain('/site/assets/javascripts/mermaid.min.js')
-    expect(rootPackage.scripts?.['docs:install']).toContain('npm ci --prefix apps/documentation')
-    expect(rootPackage.scripts?.['docs:build']).toContain('mermaid.min.js')
+    expect(rootPackage.scripts?.['docs:install']).toBe('node scripts/docs-tool.mjs install')
+    expect(rootPackage.scripts?.['docs:build']).toBe('node scripts/docs-tool.mjs build')
+    const docsTool = root('scripts/docs-tool.mjs')
+    expect(docsTool).toContain("runNpm(['ci', '--prefix', 'apps/documentation']")
+    expect(docsTool).toContain('apps/documentation/node_modules/mermaid/dist/mermaid.min.js')
     expect(existsSync(initializerUrl)).toBe(true)
     expect(existsSync(mainOverrideUrl)).toBe(true)
     const mainOverride = existsSync(mainOverrideUrl) ? readFileSync(mainOverrideUrl, 'utf8') : ''
@@ -563,13 +566,13 @@ describe('dashboard documentation integration', () => {
     const styles = root('documentation/stylesheets/pm-management.css')
     const history = root('documentation/release-history.md')
 
-    expect(docsPackage.version).toBe('0.2.9')
+    expect(docsPackage.version).toBe('1.0.0')
     expect(requirements.trim()).toBe('mkdocs-material==9.7.6')
     expect(config).toContain('site_name: PM Management Documentation')
     expect(config).toContain('custom_dir: documentation/overrides')
     expect(config).toContain('logo: assets/images/pm-logo.svg')
     expect(config).toContain('stylesheets/pm-management.css')
-    expect(config).toContain('docs_version: 0.2.9')
+    expect(config).toContain(`docs_version: ${docsPackage.version}`)
     expect(header).toContain('{% include "partials/search.html" %}')
     expect(header).toContain('class="pm-docs-version"')
     expect(header.indexOf('{% include "partials/search.html" %}')).toBeLessThan(header.indexOf('class="pm-docs-version"'))
@@ -577,8 +580,7 @@ describe('dashboard documentation integration', () => {
     expect(styles).toContain('--pm-accent: #16a7db')
     expect(styles).toContain('.pm-docs-version')
     expect(history).toMatch(/^# Documentation Release History/m)
-    expect(history).toContain('## 0.1.0 - 2026-07-13')
-    expect(history).not.toContain('## 0.4.0')
+    expect([...history.matchAll(/^## (\d+\.\d+\.\d+) -/gm)].map((match) => match[1])).toEqual([docsPackage.version])
   })
 
   it('keeps a complete screenshot-backed Personal Space guide', () => {
@@ -600,7 +602,7 @@ describe('dashboard documentation integration', () => {
 
     for (const { file, screenshots, url } of guides) {
       if (!existsSync(url)) continue
-      const content = readFileSync(url, 'utf8')
+      const content = readFileSync(url, 'utf8').replace(/\r\n/g, '\n')
       const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/)
 
       expect(frontmatter, `${file} must start with YAML frontmatter`).not.toBeNull()
@@ -610,8 +612,13 @@ describe('dashboard documentation integration', () => {
       expect(content, `${file} must use portable Markdown cautions`).not.toMatch(/^!!! caution\b/m)
 
       const imageLinks = [...content.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1])
-      expect(imageLinks.length, `${file} needs a real Personal Space screenshot`).toBeGreaterThan(0)
-      expect(imageLinks[0], `${file} must lead with its full-page or primary-state screenshot`).toBe(`../../assets/spaces/personal/${screenshots[0]}`)
+      // The removed update settings appear in the old Notifications capture.
+      // Keep it unreferenced until a replacement can be captured through the required Chrome extension.
+      if (file === 'notifications.md') expect(imageLinks).toEqual([])
+      else {
+        expect(imageLinks.length, `${file} needs a real Personal Space screenshot`).toBeGreaterThan(0)
+        expect(imageLinks[0], `${file} must lead with its full-page or primary-state screenshot`).toBe(`../../assets/spaces/personal/${screenshots[0]}`)
+      }
       expect(imageLinks.map((link) => link.split('/').at(-1))).toEqual(expect.arrayContaining([...screenshots]))
       for (const imageLink of imageLinks) {
         expect(imageLink, `${file} screenshot must use the Personal Space asset directory`).toMatch(/^\.\.\/\.\.\/assets\/spaces\/personal\//)

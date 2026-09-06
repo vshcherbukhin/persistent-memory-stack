@@ -7,6 +7,7 @@ import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { hostCommand } from '../apps/onboard/server/host.js'
 
 export type ServerInstallTopology = 'server-managed' | 'client-managed'
 export type LegacyServerMode = 'mode-a' | 'mode-b'
@@ -345,16 +346,6 @@ export function renderServerModeEnv(defaults: ServerModeDefaults, answers: Serve
     `UPDATE_RUNNER_TOKEN=${secrets.updateRunnerToken}`,
     `USAGE_INGEST_TOKEN=${secrets.usageIngestToken}`,
     'DOCKER_GID=0',
-    '',
-    '# Dashboard update notifications stay off for shared/server installs.',
-    'UPDATE_CHECK_PROVIDER=none',
-    'UPDATE_BITBUCKET_URL=',
-    'UPDATE_BITBUCKET_TOKEN=',
-    'UPDATE_BITBUCKET_SCOPE=project',
-    'UPDATE_BITBUCKET_PROJECT=',
-    'UPDATE_BITBUCKET_USER=',
-    'UPDATE_BITBUCKET_REPO=',
-    'UPDATE_BITBUCKET_BRANCH=master',
     '',
     '# DLP / PII gate.',
     'PII_GATE_ENABLED=true',
@@ -882,9 +873,11 @@ async function applyRls(repoRoot: string, defaults: ServerModeDefaults, env: Rec
 
 function run(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv; input?: string }): Promise<void> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, {
+    const resolved = hostCommand(command, args, { env: options.env ?? process.env })
+    const child = spawn(resolved.command, resolved.args, {
       cwd: options.cwd,
-      env: options.env,
+      env: resolved.env,
+      windowsHide: true,
       stdio: options.input ? ['pipe', 'inherit', 'inherit'] : 'inherit',
     })
     if (options.input && child.stdin) {
@@ -907,14 +900,13 @@ async function assertPortsAvailable(assignments: PortAssignment[]): Promise<void
   if (conflicts.length > 0) throw new Error(formatPortConflictMessage(conflicts))
 }
 
-function canBindPort(host: string, port: number): Promise<boolean> {
+export function canBindPort(host: string, port: number, serverFactory: () => ReturnType<typeof createServer> = createServer): Promise<boolean> {
   return new Promise((resolveBind) => {
-    const server = createServer()
-    server.once('error', (err: NodeJS.ErrnoException) => {
-      // Codex/sandboxed shells can return EPERM for all bind probes. Only block
-      // the installer for the real conflict signal; Docker will still perform its
-      // own bind validation during compose-up.
-      resolveBind(err.code !== 'EADDRINUSE')
+    const server = serverFactory()
+    server.once('error', () => {
+      // Windows reserved/excluded ports can report EACCES rather than EADDRINUSE.
+      // A failed bind never proves the port is available, including in a sandbox.
+      resolveBind(false)
     })
     server.once('listening', () => {
       server.close(() => resolveBind(true))
@@ -925,7 +917,8 @@ function canBindPort(host: string, port: number): Promise<boolean> {
 
 function capture(command: string, args: string[]): Promise<string> {
   return new Promise((resolveCapture, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const resolved = hostCommand(command, args)
+    const child = spawn(resolved.command, resolved.args, { env: resolved.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk) => { stdout += String(chunk) })

@@ -19,6 +19,7 @@ import {
 } from '../src/services/fact-extraction.ts'
 import { classifyProviderFailure, LlmProviderError } from '../src/protocol/llm/client.ts'
 import { VALID_SOURCES } from '../src/protocol/shapes.ts'
+import { FACT_EXTRACTION_PROMPT } from '../src/protocol/prompt.ts'
 
 describe('fact extraction model catalog', () => {
   it('offers the requested Claude and OpenAI model choices', () => {
@@ -36,9 +37,19 @@ describe('fact extraction model catalog', () => {
 })
 
 describe('FACT_EXTRACTION_TEST_PAYLOAD', () => {
-  it('uses Shape-gate-valid source metadata for the seeded backend probe', () => {
+  it('serializes exactly the first known accepted example from prompt section 8', () => {
+    const section = FACT_EXTRACTION_PROMPT.split('## 8. Few-shot Examples')[1]
+    expect(section).toBeDefined()
+    const example = /Input:\r?\n([^\r\n]+)\r?\nOutput:\r?\n([^\r\n]+)/u.exec(section!)
+    expect(example).not.toBeNull()
+    expect(JSON.stringify(FACT_EXTRACTION_TEST_PAYLOAD)).toBe(example![1])
+    expect(JSON.parse(example![2]!)).toMatchObject({
+      outcome: 'accept', facts: [FACT_EXTRACTION_TEST_PAYLOAD.content], missing: [],
+    })
     expect(VALID_SOURCES).toContain(FACT_EXTRACTION_TEST_PAYLOAD.metadata.source)
-    expect(FACT_EXTRACTION_TEST_PAYLOAD.content).toContain('component_fact_extraction_probe')
+    for (const entity of FACT_EXTRACTION_TEST_PAYLOAD.metadata.entities) {
+      expect(FACT_EXTRACTION_TEST_PAYLOAD.content).toContain(`[${entity}]`)
+    }
   })
 })
 

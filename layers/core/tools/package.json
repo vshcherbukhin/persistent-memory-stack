@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-tools",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory dev-only CLIs. rls-check (npm run rls:check at the repo root): connects as pm_app and asserts the RLS floor. Plain Node ESM, no build step. NOT shipped in any server image.",

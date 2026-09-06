@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { logoutAction } from '@/app/login/actions'
 import {
   POST_UPDATE_HANDOFF_SEEN_KEY,
+  PUBLIC_RELEASE_LINE,
   POST_UPDATE_RELEASE_NOTES_KEY,
   POST_UPDATE_RELEASE_NOTES_SEEN_KEY,
   POST_UPDATE_RELEASE_NOTES_SHOWN_VERSION_KEY,
@@ -174,7 +175,7 @@ export function AppHeader({
     if (!status.updateAvailable || !status.latestVersion) return
     void sendBrowserNotificationOnce('newReleases', status.latestVersion, 'Persistent Memory update available', {
       body: `Version ${status.latestVersion} is ready to install.`,
-      data: { url: '/notifications?setting=application-updates' },
+      data: { url: '/overview' },
     })
   }
 
@@ -233,6 +234,12 @@ export function AppHeader({
       const res = await fetch('/api/update/status', { cache: 'no-store' })
       if (!res.ok) throw new Error(`update status returned ${res.status}`)
       const status = (await res.json()) as UpdateStatus
+      // A cached pre-public backend must not advertise its 4.x releases to the public 1.x app.
+      if (status.releaseLine !== PUBLIC_RELEASE_LINE) {
+        setUpdateStatus(null)
+        setUpdateError(null)
+        return
+      }
       setUpdateStatus(status)
       setUpdateError(null)
       notifyUpdateAvailable(status)

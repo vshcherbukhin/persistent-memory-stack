@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Bash runs on macOS, Linux, and Git for Windows; CRLF breaks shell parsing.
+*.sh text eol=lf

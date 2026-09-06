@@ -1,6 +1,6 @@
 {
   "name": "@pm/shared",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "persistent-memory shared core — embedding adapter (ollama/voyage/openai), Qdrant multi-tenant vector layer (named vectors + is_tenant), the dimension/provider switch tool, MinIO blob storage, the BullMQ ingest queue contract, and text extraction + token-aware chunking. Prisma-FREE: deals in plain bytes/vectors/payloads + string ids; callers own the DB.",
