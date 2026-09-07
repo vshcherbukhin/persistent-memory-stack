@@ -70,37 +70,32 @@ todo()    { echo "  [TODO] $1"; }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat <<'HELP'
-install.sh — Set up the Persistent-Memory stack (Phase 1 SCAFFOLD)
+install.sh — Set up the Persistent-Memory server stack
 
 USAGE
   ./install.sh
   ./install.sh --help | -h
 
-WHAT IT DOES (Phase 1 — scaffolding only)
-  1. Prerequisites    — checks for Docker (daemon running) + docker compose,
-                        the HOST Ollama daemon, and the configured embedding
-                        model. Emits actionable hints; does NOT auto-install.
+WHAT IT DOES
+  1. Prerequisites    — checks Docker + Compose and the selected embedding runtime.
   2. Env bootstrap    — copies .env.persistent-memory from the committed
                         .example (safe defaults + empty secret placeholders) if absent.
-                        Fails if a required value is still blank.
-  3. Bring up         — `docker compose up -d` for the SERVER stack (delegates
-                        to deploy/scripts/start.sh so the Ollama/idempotency logic is shared).
-  4. Per-service setup — STUBBED. Prints TODO markers for the work that later
-                        phases own (Prisma migrate, MinIO buckets, Graphiti
-                        init, MCP registration, admin seed).
-  5. Next steps        — prints URLs and what to do once the real builds land.
+                        Preserves existing values and validates required settings.
+  3. Resource gate    — checks current RAM and disk budgets before Docker writes.
+  4. Image checks     — builds serially, checks isolated image runtimes and retries
+                        only a failed image once. Never deletes user data volumes.
+  5. Setup + verify   — starts validated images, applies migrations/RLS, initializes
+                        settings/server administrator, and verifies runtime health.
 
-WHAT IT DOES NOT DO YET (later phases)
-  - No Prisma schema / migrate (layers/core/schema/ is an empty .gitkeep dir this phase).
-  - No MinIO bucket creation.
-  - No Graphiti graph bootstrap.
-  - No ~/.claude.json / Claude Desktop MCP registration.
-  - No admin user / token seeding (Argon2 + TOKEN_PEPPER hashing).
-  Each is marked [TODO] with the owning phase in the output.
+For a personal installation and Claude/Codex registration, use the browser wizard:
+  npm run install-persistent-memory
 
 ENVIRONMENT VARIABLES
   INSTALL_DIR  Override the install location (defaults to the directory
-               this script lives in).
+               containing the repository).
+  PM_RESOURCE_WARNINGS_ACKNOWLEDGED=1
+               Explicitly accept recommendations after reviewing the resource
+               checker output. Minimum requirements can never be bypassed.
 HELP
     exit 0
 fi
@@ -108,7 +103,6 @@ fi
 echo ""
 echo "============================================"
 echo "  Persistent-Memory Stack — Installation"
-echo "  (Phase 1 — scaffolding)"
 echo "============================================"
 
 # ============================================================
@@ -151,7 +145,15 @@ fi
 OLLAMA_HOST_URL="${OLLAMA_URL/host.docker.internal/localhost}"
 
 # --- Host Ollama daemon ---
-if curl -sf "${OLLAMA_HOST_URL}/api/tags" >/dev/null 2>&1; then
+EMBED_PROVIDER="$(pm_env_get EMBED_PROVIDER ollama "$ENV_RUNTIME")"
+if [ -f "$ENV_RUNTIME" ]; then
+    OLLAMA_URL="$(pm_env_get OLLAMA_URL "$OLLAMA_URL" "$ENV_RUNTIME")"
+    EMBED_MODEL="$(pm_env_get EMBED_MODEL "$EMBED_MODEL" "$ENV_RUNTIME")"
+    OLLAMA_HOST_URL="${OLLAMA_URL/host.docker.internal/localhost}"
+fi
+if [ "$EMBED_PROVIDER" != "ollama" ]; then
+    ok "Remote embeddings selected ($EMBED_PROVIDER); host Ollama is not required."
+elif curl -sf "${OLLAMA_HOST_URL}/api/tags" >/dev/null 2>&1; then
     ok "Ollama reachable at ${OLLAMA_HOST_URL}."
     # --- Embedding model pulled? ---
     if curl -sf "${OLLAMA_HOST_URL}/api/tags" 2>/dev/null | grep -q "\"${EMBED_MODEL}\""; then
@@ -241,15 +243,14 @@ pm_env_validate_deploy_required "$ENV_RUNTIME" \
 # Phase 3: Bring up the SERVER stack
 # ============================================================
 section "Phase 3: Bring up SERVER stack"
-# Delegate to start.sh so the Ollama check + idempotency logic stays in one
-# place. start.sh runs Compose with --env-file .env.persistent-memory for the
-# default services.
-if [ -x "$SCRIPT_DIR/start.sh" ]; then
-    "$SCRIPT_DIR/start.sh"
-else
-    warn "start.sh not executable — running 'docker compose up -d' directly."
-    ( cd "$INSTALL_DIR" && "${COMPOSE[@]}" up -d )
+RESOURCE_ARGS=(--root "$INSTALL_DIR")
+if [ "${PM_RESOURCE_WARNINGS_ACKNOWLEDGED:-0}" = "1" ]; then
+    RESOURCE_ARGS+=(--acknowledge-warnings)
 fi
+node "$INSTALL_DIR/scripts/check-install-resources.mjs" "${RESOURCE_ARGS[@]}"
+# The helper builds serially, validates immutable images in isolated no-data
+# smoke containers, then starts with --no-build. Never reuse a failed image unchecked.
+( cd "$INSTALL_DIR" && COMPOSE_PARALLEL_LIMIT=1 node scripts/docker-image-lifecycle.mjs up-storage )
 
 # ============================================================
 # Phase 4: Per-service setup
@@ -297,12 +298,12 @@ if [ -d "$PRISMA_DIR" ] && [ -f "$PRISMA_DIR/schema.prisma" ]; then
     # 3. Initialize settings; server mode also bootstraps its administrator.
     ( cd "$PRISMA_DIR" && DATABASE_MIGRATE_URL="$HOST_MIGRATE_URL" npm run --silent seed ) \
         && ok "System settings initialized; server bootstrap credentials shown above if created." \
-        || warn "Seed step reported an error — review output above."
+        || { fail "System settings initialization failed — review output above."; exit 1; }
 
     # 4. restart api/worker so they connect as pm_app (RLS-subject) at runtime.
-    ( cd "$INSTALL_DIR" && "${COMPOSE[@]}" up -d --no-deps api worker >/dev/null 2>&1 ) \
-        && ok "api + worker restarted as pm_app (RLS-subject runtime role)." \
-        || warn "Could not restart api/worker — run 'docker compose -f deploy/compose/docker-compose.yml --env-file .env.persistent-memory up -d api worker'."
+    ( cd "$INSTALL_DIR" && node scripts/docker-image-lifecycle.mjs start-apps ) \
+        && ok "Validated applications restarted after database initialization." \
+        || { fail "Could not start app services; inspect Docker storage and service logs before retrying."; exit 1; }
 else
     todo "Postgres schema: layers/core/schema/ has no schema.prisma yet. [Phase: API/data layer]"
 fi
@@ -317,6 +318,7 @@ todo "Before PRODUCTION: set the real extraction provider API key in the env."
 # ============================================================
 # Phase 5: Summary
 # ============================================================
+( cd "$INSTALL_DIR" && bash deploy/scripts/verify-install.sh )
 section "Server installation complete"
 echo "  Server services (default profile):"
 echo "    Dashboard:          http://localhost:3200"

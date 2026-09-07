@@ -327,8 +327,11 @@ fi
 # ============================================================
 # 5. Host Ollama + embedding model
 # ============================================================
-section "5. Host Ollama"
-if http_ok "${OLLAMA_HOST_URL}/api/tags"; then
+section "5. Embedding runtime"
+EMBED_PROVIDER="$(pm_env_get EMBED_PROVIDER ollama "$ENV_FILE")"
+if [ "$EMBED_PROVIDER" != "ollama" ]; then
+    green "Remote embeddings selected ($EMBED_PROVIDER); host Ollama is not required"
+elif http_ok "${OLLAMA_HOST_URL}/api/tags"; then
     green "Ollama reachable at ${OLLAMA_HOST_URL}"
     if curl -sf --max-time 5 "${OLLAMA_HOST_URL}/api/tags" 2>/dev/null | grep -q "\"${EMBED_MODEL}\""; then
         green "Embedding model '${EMBED_MODEL}' pulled"
@@ -337,6 +340,15 @@ if http_ok "${OLLAMA_HOST_URL}/api/tags"; then
     fi
 else
     red "Ollama not reachable at ${OLLAMA_HOST_URL} (start it on the host)"
+fi
+
+# Resolve only the active Compose services. This is read-only: it never builds,
+# starts a smoke container, repairs an image, or removes resources.
+section "6. Required image identity and runtime state"
+if node "$REPO_ROOT/scripts/docker-image-lifecycle.mjs" verify; then
+    green "All required services use current Linux images and are not restarting"
+else
+    red "Required image/runtime validation failed; inspect the failure before retrying"
 fi
 
 # ============================================================

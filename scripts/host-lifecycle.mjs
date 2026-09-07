@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,23 +24,31 @@ function capture(command, args, env) {
   return result.stdout.trim()
 }
 
-export async function preflight(env, bash) {
-  assertShellLineEndings()
+export async function preflight(env, bash, { directory = root, captureCommand = capture, fetchImpl = fetch } = {}) {
+  assertShellLineEndings(join(directory, 'deploy/scripts'))
   console.log(`PASS Node ${process.versions.node}`)
-  console.log(`PASS ${capture('git', ['--version'], env)}`)
-  capture(bash, ['--version'], env)
+  console.log(`PASS ${captureCommand('git', ['--version'], env)}`)
+  captureCommand(bash, ['--version'], env)
   console.log(`PASS Bash: ${bash}`)
-  const engine = capture('docker', ['info', '--format', '{{.OSType}}'], env)
+  const engine = captureCommand('docker', ['info', '--format', '{{.OSType}}'], env)
   if (engine !== 'linux') throw new Error('Docker must use Linux containers. Select the Linux engine in Docker Desktop (WSL 2 backend on Windows).')
   console.log('PASS Docker Linux engine is running')
-  console.log(`PASS ${capture('docker', ['compose', 'version'], env)}`)
-  try { capture('ollama', ['--version'], env) } catch {
+  console.log(`PASS ${captureCommand('docker', ['compose', 'version'], env)}`)
+  const savedPath = join(directory, '.env.persistent-memory')
+  const saved = existsSync(savedPath) ? readFileSync(savedPath, 'utf8') : null
+  const getSaved = key => new RegExp(`^${key}=([^\\r\\n]*)`, 'm').exec(saved ?? '')?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2')
+  if (saved === null || (getSaved('EMBED_PROVIDER') || 'ollama') !== 'ollama') {
+    console.log(saved === null ? 'Ollama check deferred until an embedding provider is selected in the installer.' : 'Remote embeddings selected; host Ollama is not required.')
+    console.log('Host checks passed. No installation or configuration writes performed.')
+    return
+  }
+  try { captureCommand('ollama', ['--version'], env) } catch {
     throw new Error('Ollama was not found. Run npm run install-persistent-memory and choose Install on the Ollama prerequisite card; the wizard can install it for you.')
   }
-  const url = (env.OLLAMA_URL ?? 'http://localhost:11434').replace('host.docker.internal', 'localhost')
+  const url = (getSaved('OLLAMA_URL') || env.OLLAMA_URL || 'http://localhost:11434').replace('host.docker.internal', 'localhost')
   let ollamaReady = false
   try {
-    const response = await fetch(`${url.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(5000) })
+    const response = await fetchImpl(`${url.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(5000) })
     ollamaReady = response.ok && Array.isArray((await response.json()).models)
   } catch { /* The diagnostic below also covers a stopped or unreachable API. */ }
   if (!ollamaReady) throw new Error(`Ollama is not ready at ${url}. Run npm run install-persistent-memory and choose Start on the Ollama prerequisite card, or start the host Ollama app, then retry.`)

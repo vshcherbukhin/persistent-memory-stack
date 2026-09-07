@@ -20,11 +20,12 @@ USAGE
   deploy/scripts/start.sh --help | -h
 
 WHAT IT DOES
-  - Verifies the HOST Ollama daemon is reachable on $OLLAMA_URL (default
+  - For local embeddings only (EMBED_PROVIDER=ollama), verifies the HOST Ollama
+    daemon is reachable on $OLLAMA_URL (default
     http://host.docker.internal:11434, probed from the host as
     http://localhost:11434). Starts it via `brew services start ollama`
     if not running.
-  - Verifies the configured $EMBED_MODEL is pulled in Ollama (warns with
+  - For local embeddings, verifies the configured $EMBED_MODEL is pulled in Ollama (warns with
     the `ollama pull` command if missing — embeddings will fail without it).
   - Runs `docker compose up -d` for the SERVER stack:
       persistent-memory-qdrant, persistent-memory-falkordb,
@@ -121,18 +122,10 @@ COMPOSE=(docker compose -f "$COMPOSE_FILE")
 if [ -f "$ENV_FILE" ]; then
     COMPOSE+=(--env-file "$ENV_FILE")
 fi
-OLLAMA_URL="http://host.docker.internal:11434"
-EMBED_MODEL="qwen3-embedding:4b"
-MCP_RUNTIME="node"
-if [ -f "$ENV_FILE" ]; then
-    # Pull just the keys we care about; tolerate missing keys.
-    _ollama=$(grep -E '^OLLAMA_URL=' "$ENV_FILE" | head -1 | cut -d= -f2-)
-    _model=$(grep -E '^EMBED_MODEL=' "$ENV_FILE" | head -1 | cut -d= -f2-)
-    _mcp_runtime=$(grep -E '^PM_MCP_RUNTIME=' "$ENV_FILE" | head -1 | cut -d= -f2-)
-    [ -n "$_ollama" ] && OLLAMA_URL="$_ollama"
-    [ -n "$_model" ] && EMBED_MODEL="$_model"
-    [ -n "$_mcp_runtime" ] && MCP_RUNTIME="$_mcp_runtime"
-fi
+OLLAMA_URL="$(pm_env_get OLLAMA_URL http://host.docker.internal:11434 "$ENV_FILE")"
+EMBED_PROVIDER="$(pm_env_get EMBED_PROVIDER ollama "$ENV_FILE")"
+EMBED_MODEL="$(pm_env_get EMBED_MODEL qwen3-embedding:4b "$ENV_FILE")"
+MCP_RUNTIME="$(pm_env_get PM_MCP_RUNTIME stream "$ENV_FILE")"
 if [ "$MCP_RUNTIME" = "stream" ]; then
     COMPOSE+=(--profile mcp-stream)
 fi
@@ -169,6 +162,7 @@ echo "=== Starting Persistent-Memory Stack (SERVER) ==="
 # pattern as the mem0 stack). Containers reach it at host.docker.internal;
 # we probe from the host at localhost.
 # ---------------------------------------------------------------------------
+if [ "$EMBED_PROVIDER" = "ollama" ]; then
 if ! curl -sf "${OLLAMA_HOST_URL}/api/tags" >/dev/null 2>&1; then
     echo "Ollama not reachable at ${OLLAMA_HOST_URL} — starting it..."
     if command -v brew >/dev/null 2>&1; then
@@ -195,6 +189,9 @@ else
     echo "WARNING: Ollama still not reachable at ${OLLAMA_HOST_URL}."
     echo "         Server-mode embeddings (EMBED_PROVIDER=ollama) will fail."
     echo "         Start Ollama on the host, then: ollama pull ${EMBED_MODEL}"
+fi
+else
+    echo "Remote embeddings (${EMBED_PROVIDER}/${EMBED_MODEL}) configured — host Ollama is not required."
 fi
 
 "${COMPOSE[@]}" up -d

@@ -7,7 +7,7 @@ nav_order: 10
 ---
 # Install Persistent Memory
 
-The installer creates a local Personal Memories stack first: local embeddings,
+The installer creates a local Personal Memories stack first: local storage,
 the local dashboard, and stream MCP. Shared Memories is optional and can be
 connected later from the dashboard. Public release checks are automatic after
 installation; no update-source account, token, or setup step is required.
@@ -31,11 +31,13 @@ Choose **Get started** to begin a local Personal Memories installation.
 
 ## 2. Check your environment
 
-Confirm Node 24 LTS or Node 22.12+ in the Node 22 line, Docker, Docker Compose,
-and Ollama are ready. Windows also requires Git for Windows. On Windows, prepare
-Node, Git, and Docker manually; use **Install** or **Start** in the Ollama card
-to prepare local embeddings. Resolve failed prerequisites before proceeding to
-the next wizard step. Missing Ollama does not prevent launching the wizard.
+Confirm Node 24 LTS or Node 22.12+ in the Node 22 line, Docker, and Docker Compose
+are ready. Windows also requires Git for Windows. Review the resource table's
+actual, minimum, and recommended RAM and disk figures. Next remains blocked
+until the base application can run with API embeddings and extraction. Missing
+Ollama is optional here; it is required only when you choose local embeddings.
+See [machine requirements](machine-requirements.md) before preparing a small Mac
+or Windows laptop.
 
 ![Environment pre-check](../assets/lifecycle/onboarding/installer-prereqs.png)
 
@@ -48,8 +50,11 @@ screen. Leave it blank to open Personal Overview directly after installation.
 
 ## 4. Choose embeddings
 
-Pick the local embedding model appropriate for your available memory and
-performance requirements.
+Setup suggests a model based on the measured resources. Choose Ollama for local
+embeddings or OpenAI/Voyage for API embeddings. Local choices below minimum are
+blocked; warnings require acknowledgement. API choices require a key and a
+successful **Test embedding connection**. If you select a local model, use
+**Install / start Ollama** here if needed; its model downloads during installation.
 
 ![Embedding selection](../assets/lifecycle/onboarding/installer-embedding.png)
 
@@ -85,7 +90,7 @@ corrections. Review it before continuing.
 
 ## 9. Review the generated environment
 
-Confirm the local dashboard URL, stream runtime, local embeddings, and selected
+Confirm the local dashboard URL, stream runtime, embedding provider, and selected
 integrations. Secrets remain masked.
 
 ![Environment review](../assets/lifecycle/onboarding/installer-review.png)

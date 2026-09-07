@@ -53,6 +53,11 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
   },
 
   // ── Voyage (cloud, asymmetric) ─────────────────────────────────────────────
+  // Voyage 4 family: current provider catalog, September 2026. Keep Voyage 3
+  // for installed corpora; changing models still requires a vector migration.
+  'voyage-4': { provider: 'voyage', nativeDim: 1024, supportedDims: [256, 512, 1024, 2048], asymmetric: true },
+  'voyage-4-large': { provider: 'voyage', nativeDim: 1024, supportedDims: [256, 512, 1024, 2048], asymmetric: true },
+  'voyage-4-lite': { provider: 'voyage', nativeDim: 1024, supportedDims: [256, 512, 1024, 2048], asymmetric: true },
   'voyage-3-large': {
     provider: 'voyage',
     nativeDim: 1024,

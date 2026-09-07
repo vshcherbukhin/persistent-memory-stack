@@ -16,6 +16,9 @@ import { startWizardHeartbeat } from './heartbeat'
 import { ProgressBar, Field, StepList, Terminal, StatusRow, type StepState } from './components'
 import { PrereqProgress } from './PrereqProgress'
 import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
+import { EmbeddingSetup, embeddingTestSignature } from './EmbeddingSetup'
+import { ResourceSummary } from './ResourceSummary'
+import { RESOURCE_MODELS, evaluateResources, recommendResources, type ResourceSnapshot } from '../../shared/resource-policy'
 import { type Flow, type Phase, phasesFor, nextPhase, prevPhase, prereqsBlocked, modelPresence, extractionNextBlocked } from './flow'
 
 const LOCAL_DASHBOARD_URL = 'http://localhost:3200'
@@ -48,7 +51,7 @@ interface ExtractionTestResult {
 interface Answers {
   // Full-flow embedding (defines the SERVER pin)
   embeddingMode: 'server' | 'client-bridge'
-  embedProvider: 'ollama'
+  embedProvider: 'ollama' | 'openai' | 'voyage'
   embedModel: string
   embedDim: number
   // Full-flow extraction LLM
@@ -56,6 +59,8 @@ interface Answers {
   extractionModel: string
   anthropicApiKey: string
   openaiApiKey: string
+  voyageApiKey: string
+  resourceAcknowledged: boolean
   graphBackend: 'falkordb' | 'neo4j'
   semaphoreLimit: number
   // Optional Shared Memories connector
@@ -83,13 +88,15 @@ interface Answers {
 
 const DEFAULT_ANSWERS: Answers = {
   embeddingMode: 'server',
-  embedProvider: 'ollama',
-  embedModel: 'qwen3-embedding:4b',
-  embedDim: 2560,
+  embedProvider: 'openai',
+  embedModel: 'text-embedding-3-small',
+  embedDim: 1536,
   extractionProvider: 'anthropic',
   extractionModel: 'claude-haiku-4-5-20251001',
   anthropicApiKey: '',
   openaiApiKey: '',
+  voyageApiKey: '',
+  resourceAcknowledged: false,
   graphBackend: 'falkordb',
   semaphoreLimit: 10,
   remoteApiUrl: 'http://localhost:8090',
@@ -108,12 +115,6 @@ const DEFAULT_ANSWERS: Answers = {
   memoryInstallMode: 'personal-only',
   defaultMemorySurface: 'personal',
 }
-
-const EMBED_MODELS = [
-  { model: 'qwen3-embedding:0.6b', dim: 1024, note: 'CPU-friendly', ram: '< 16 GB' },
-  { model: 'qwen3-embedding:4b', dim: 2560, note: 'balanced', ram: '≥ 16 GB' },
-  { model: 'qwen3-embedding:8b', dim: 4096, note: 'highest quality, needs RAM', ram: '≥ 64 GB' },
-]
 
 const PHASE_LABEL: Record<Phase, string> = {
   flow: 'Get started', prereqs: 'Environment pre-check', account: 'Account', remote: 'Connect server', embedding: 'Embeddings',
@@ -236,6 +237,30 @@ export default function App() {
   const [remoteIdentity, setRemoteIdentity] = useState<RemoteIdentity | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [nextDisabled, setNextDisabled] = useState(false)
+  const [resources, setResources] = useState<ResourceSnapshot | null>(null)
+  const [resourceError, setResourceError] = useState<string | null>(null)
+  const [embeddingTested, setEmbeddingTested] = useState('')
+  const embeddingInited = useRef(false)
+  const refreshResources = async () => {
+    setResourceError(null)
+    setAnswers(current => ({ ...current, resourceAcknowledged: false }))
+    try {
+      const snapshot = await getJSON<ResourceSnapshot>('/api/resources')
+      setResources(snapshot)
+      if (!embeddingInited.current) {
+        const existing = await getJSON<{ embedding?: { provider: string; model: string; dim: number } | null }>('/api/env/existing')
+        const saved = existing.embedding
+        const recommended = recommendResources(snapshot)
+        const choice = saved && RESOURCE_MODELS.some(model => model.provider === saved.provider && model.model === saved.model)
+          ? saved : recommended
+        setAnswers(current => ({ ...current, embedProvider: choice.provider as Answers['embedProvider'], embedModel: choice.model, embedDim: choice.dim }))
+        embeddingInited.current = true
+      }
+    } catch (error) {
+      setResources(null)
+      setResourceError(error instanceof Error ? error.message : String(error))
+    }
+  }
   // Whether the Ecosystem step has applied its detected defaults — so navigating
   // back/forward doesn't clobber the user's manual app selection.
   const appsInited = useRef(false)
@@ -257,6 +282,7 @@ export default function App() {
 
   const shared = {
     answers, set, apps, setApps, appsInited, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, flow,
+    resources, resourceError, refreshResources,
     onBack: () => go('back'), onNext: () => go('next'), setNextDisabled,
   }
 
@@ -295,13 +321,13 @@ export default function App() {
               {phase === 'prereqs' && <Prereqs {...shared} />}
               {phase === 'account' && <Account {...shared} />}
               {phase === 'remote' && <RemoteConnect {...shared} />}
-              {phase === 'embedding' && <EmbeddingPicker {...shared} />}
+              {phase === 'embedding' && <EmbeddingSetup {...shared} tested={embeddingTested} setTested={setEmbeddingTested} set={(key, value) => setAnswers(current => ({ ...current, [key]: value }))} />}
               {phase === 'pullModel' && <PullModel {...shared} />}
               {phase === 'extraction' && <Extraction {...shared} />}
               {phase === 'ecosystem' && <Ecosystem {...shared} />}
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
-              {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} />}
+              {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} />}
               {phase === 'shared' && <SharedConnect {...shared} />}
               {phase === 'install' && (
                 <Install
@@ -309,6 +335,7 @@ export default function App() {
                   body={installBody(flow, answers, apps, serverPin)}
                   onToken={setToken}
                   onDone={() => setPhaseAndResetGate('done')}
+                  onBack={() => setPhaseAndResetGate('prereqs')}
                 />
               )}
               {phase === 'done' && <Done flow={flow} token={token} remoteToken={answers.remoteToken} apps={apps} passwordConfigured={Boolean(answers.userPassword)} />}
@@ -351,6 +378,7 @@ interface InstallBody {
   userEmail?: string
   userName?: string
   userPassword?: string
+  resourceAcknowledged?: boolean
 }
 
 function installBody(flow: Flow, a: Answers, apps: Apps, pin: ServerPin | null): InstallBody {
@@ -370,6 +398,7 @@ function installBody(flow: Flow, a: Answers, apps: Apps, pin: ServerPin | null):
     userEmail: a.userEmail,
     userName: a.userName,
     userPassword: a.userPassword,
+    resourceAcknowledged: a.resourceAcknowledged,
   }
   return {
     ...base,
@@ -396,6 +425,9 @@ interface StepProps {
   onBack: () => void
   onNext: () => void
   setNextDisabled: (b: boolean) => void
+  resources: ResourceSnapshot | null
+  resourceError: string | null
+  refreshResources: () => Promise<void>
 }
 
 // ── Step 0: flow router ─────────────────────────────────────────────────────────
@@ -513,7 +545,7 @@ function prereqAction(p: PrereqResult, key: PrereqKey): string | undefined {
   return undefined
 }
 
-function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
+function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, refreshResources }: StepProps) {
   const [p, setP] = useState<PrereqResult | null>(null)
   const [completedChecks, setCompletedChecks] = useState(0)
   const [installing, setInstalling] = useState<PrereqKey | null>(null)
@@ -525,7 +557,8 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
     setCompletedChecks(0)
     setError(null)
     try {
-      setP(await getJSON<PrereqResult>('/api/prereqs'))
+      const [result] = await Promise.all([getJSON<PrereqResult>('/api/prereqs'), refreshResources()])
+      setP(result)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -537,7 +570,9 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
     const timers = PREREQ_ITEMS.map((_, idx) => window.setTimeout(() => setCompletedChecks(idx + 1), 160 + (idx * 180)))
     return () => timers.forEach((timer) => window.clearTimeout(timer))
   }, [p])
-  const blocked = prereqsBlocked(flow, p, { personalMemoryEnabled: answers.personalMemoryEnabled })
+  const baseline = resources ? evaluateResources(resources, { provider: 'openai', model: 'text-embedding-3-small' }) : null
+  const localEnabled = resources ? recommendResources(resources).localEnabled : false
+  const blocked = prereqsBlocked(flow, p, { personalMemoryEnabled: answers.personalMemoryEnabled }) || !baseline?.allowed
   const brewMissing = !!(p?.homebrew && !p.homebrew.ok)
   useEffect(() => { setNextDisabled(!p || completedChecks < PREREQ_ITEMS.length || blocked) }, [p, completedChecks, blocked])
   const install = async (component: PrereqKey) => {
@@ -581,11 +616,15 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
             return <PrereqCard key={item.key} status={completedChecks === idx ? 'verifying' : 'pending'} label={item.label} detail={completedChecks === idx ? 'verifying...' : 'pending...'} />
           }
           const probe = prereqProbe(p, item.key)
+          if (item.key === 'ollama' && (answers.embedProvider !== 'ollama' || !localEnabled)) {
+            return <PrereqCard key={item.key} status="ok" label="Ollama (optional)" detail={localEnabled ? 'Not needed for API embeddings. Choose a provider in the Embeddings step.' : 'Local embeddings unavailable with these resources. Use API embeddings.'} />
+          }
           const detail = !probe.ok && p.manualHints?.[item.key]
             ? `${probe.detail} ${p.manualHints[item.key]}`
             : brewMissing && !probe.ok && item.key !== 'node'
             ? `${probe.detail} Install Homebrew first.`
             : probe.detail
+          if (item.key === 'ollama') return <PrereqCard key={item.key} status={probe.ok ? 'ok' : 'warn'} label={item.label} detail={probe.ok ? detail : `${detail} Install or start it in the Embeddings step after reviewing the model’s resource requirements.`} />
           return (
             <PrereqCard
               key={item.key}
@@ -598,6 +637,8 @@ function Prereqs({ flow, answers, setNextDisabled }: StepProps) {
           )
         })}
       </div>
+      {resources && baseline ? <ResourceSummary snapshot={resources} assessment={baseline} /> : <p className="notice warn">{resourceError ?? 'Measuring RAM and disk space…'}</p>}
+      <p className="field-hint">The baseline assumes API keys for both embeddings and fact extraction. Ollama adds model-specific requirements in the Embeddings step.</p>
       {installing && progress ? (
         <PrereqProgress progress={progress} component={PREREQ_ITEMS.find(item => item.key === installing)!.label} />
       ) : null}
@@ -825,42 +866,6 @@ function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, 
       <div className="row"><button onClick={() => void test()} disabled={testing || !answers.remoteApiUrl || !answers.remoteToken}>{testing ? 'Testing…' : 'Test connection'}</button></div>
       {error ? <p className="notice bad">{error} Check it was copied whole (<code>tokenId.secret</code>) and not expired.</p> : null}
       {whoami ? <p className="notice ok">✓ Connected — <b>{whoami.userEmail ?? 'server user'}</b>{whoami.teamName ? <> on team <b>{whoami.teamName}</b></> : null}; role <b>{whoami.adminLevel}</b>. Server pins <code>{serverPin?.model} @ {serverPin?.dim}</code>.</p> : null}
-    </section>
-  )
-}
-
-// ── Embedding picker (full flow — defines the server pin) ─────────────────────────
-function EmbeddingPicker({ answers, set, flow }: StepProps) {
-  const [rec, setRec] = useState<{ model: string; dim: number } | null>(null)
-  const [models, setModels] = useState<string[]>([])
-  useEffect(() => { void getJSON<{ recommended: { model: string; dim: number } }>('/api/specs').then((s) => setRec(s.recommended)).catch(() => setRec(null)) }, [])
-  useEffect(() => { void getJSON<{ models: string[] }>('/api/prereqs').then((r) => setModels(r.models)).catch(() => setModels([])) }, [])
-  const pick = (model: string) => { const m = EMBED_MODELS.find((x) => x.model === model)!; set('embedModel', m.model); set('embedDim', m.dim) }
-  return (
-    <section>
-      <h2>Embeddings</h2>
-      <p>Defines the <b>{flow === 'full' ? 'local server pin' : 'personal memory pin'}</b> — the one model + dim the local corpus commits to. This host
-        embeds personal/local memories on the laptop.</p>
-      <div className="seg-group">
-        <span className="seg-label">Local embedding model {rec ? <span className="seg-hint">· recommended for this host: {rec.model} @ {rec.dim}</span> : null}</span>
-        <div className="modellist">
-          {EMBED_MODELS.map((m) => {
-            const on = answers.embedModel === m.model
-            return (
-              <button type="button" key={m.model} className={`modelrow${on ? ' active' : ''}`} onClick={() => pick(m.model)}>
-                <span className="modelradio" aria-hidden />
-                <span className="modelrow-main">
-                  <span className="modelrow-name">{m.model}</span> <span className="modelrow-dim">@ {m.dim}</span> <span className="modelrow-note">· {m.note}</span>
-                </span>
-                <span className="modelrow-ram">{m.ram}</span>
-                <span className={`modelrow-rec ${modelPresence(models, m.model) === 'installed' ? 'ok' : 'warn'}`}>{modelPresence(models, m.model) === 'installed' ? 'installed' : 'will be installed'}</span>
-                {rec && rec.model === m.model ? <span className="modelrow-rec">recommended</span> : null}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-      <p className="notice warn">Switching the model/dim later forces a full <b>re-embed migration</b> of the whole corpus — pick deliberately. Matryoshka lets you truncate down (2560 → 1024 → 768…) within qwen3.</p>
     </section>
   )
 }
@@ -1207,11 +1212,13 @@ function RuleStep({ answers, set, apps, setNextDisabled }: StepProps) {
 }
 
 // ── Review .env (full flow) ───────────────────────────────────────────────────────
-function Review({ flow, answers, serverPin, setNextDisabled }: { flow: Flow; answers: Answers; serverPin: ServerPin | null; setNextDisabled: (b: boolean) => void }) {
+function Review({ flow, answers, serverPin, setNextDisabled, embeddingTested, onEmbedding }: { flow: Flow; answers: Answers; serverPin: ServerPin | null; setNextDisabled: (b: boolean) => void; embeddingTested: string; onEmbedding: () => void }) {
   const [preview, setPreview] = useState<string | null>(null)
   const [issues, setIssues] = useState<{ key: string; message: string }[]>([])
   const [error, setError] = useState<string | null>(null)
+  const needsEmbeddingTest = answers.embedProvider !== 'ollama' && embeddingTested !== embeddingTestSignature(answers)
   useEffect(() => {
+    if (needsEmbeddingTest) { setNextDisabled(true); return }
     void (async () => {
       setNextDisabled(true)
       const personalAndShared = answers.memoryInstallMode === 'personal-and-shared'
@@ -1220,7 +1227,7 @@ function Review({ flow, answers, serverPin, setNextDisabled }: { flow: Flow; ans
       const envAnswers = {
         embeddingMode: answers.embeddingMode, embedProvider: answers.embedProvider, embedModel, embedDim,
         extractionProvider: answers.extractionProvider, extractionModel: answers.extractionModel,
-        anthropicApiKey: answers.anthropicApiKey, openaiApiKey: answers.openaiApiKey,
+        anthropicApiKey: answers.anthropicApiKey, openaiApiKey: answers.openaiApiKey, voyageApiKey: answers.voyageApiKey,
         graphBackend: answers.graphBackend, semaphoreLimit: answers.semaphoreLimit,
         // Review runs when a local stack will exist: full-local, or client flows
         // with isolated personal memory. The local stack is always no-auth/local.
@@ -1244,11 +1251,12 @@ function Review({ flow, answers, serverPin, setNextDisabled }: { flow: Flow; ans
         setNextDisabled(true)
       }
     })()
-  }, [answers, flow, serverPin, setNextDisabled])
+  }, [answers, flow, serverPin, setNextDisabled, needsEmbeddingTest])
   return (
     <section>
       <h2>Review .env.persistent-memory</h2>
       <p>Secrets are masked. Written to <code>.env.persistent-memory</code> (gitignored).</p>
+      {needsEmbeddingTest ? <div className="notice warn"><p>The embedding model or API key changed after its connection test. Test the final selection before installing.</p><button type="button" onClick={onEmbedding}>Return to embedding connection test</button></div> : null}
       {error ? <p className="notice bad">{error}</p> : null}
       {issues.length > 0 ? (
         <div className="notice bad">
@@ -1256,14 +1264,14 @@ function Review({ flow, answers, serverPin, setNextDisabled }: { flow: Flow; ans
         </div>
       ) : null}
       <div className="review-env-terminal">
-        {preview ? <Terminal lines={[preview]} /> : <p>Generating…</p>}
+        {preview ? <Terminal lines={[preview]} /> : needsEmbeddingTest ? null : <p>Generating…</p>}
       </div>
     </section>
   )
 }
 
 // ── Install (flow-aware body) ─────────────────────────────────────────────────────
-function Install({ flow, body, onToken, onDone }: { flow: Flow; body: InstallBody; onToken: (t: string) => void; onDone: () => void }) {
+function Install({ flow, body, onToken, onDone, onBack }: { flow: Flow; body: InstallBody; onToken: (t: string) => void; onDone: () => void; onBack: () => void }) {
   const [steps, setSteps] = useState<{ id: string; name: string; state: StepState }[]>([])
   const [log, setLog] = useState<string[]>([])
   const [doneCount, setDoneCount] = useState(0)
@@ -1277,7 +1285,7 @@ function Install({ flow, body, onToken, onDone }: { flow: Flow; body: InstallBod
         case 'stdout': setLog((l) => [...l.slice(-400), String(e.chunk)]); break
         case 'step-done': setSteps((ss) => ss.map((s) => (s.id === e.id ? { ...s, state: e.ok ? 'done' : 'failed' } : s))); if (e.ok) setDoneCount((c) => c + 1); break
         case 'token': if (e.token) onToken(String(e.token)); break
-        case 'error': setFailed(true); setRunning(false); break
+        case 'error': setFailed(true); setRunning(false); if (e.message) setLog(lines => [...lines.slice(-400), String(e.message)]); break
         case 'done':
           setRunning(false)
           if (e.ok) onDone()
@@ -1302,6 +1310,7 @@ function Install({ flow, body, onToken, onDone }: { flow: Flow; body: InstallBod
       <StepList steps={steps} />
       <Terminal lines={log} caret={running} />
       {failed && <p className="notice bad">A step failed — see the output above. Fix the issue and re-run <code>npm run install-persistent-memory</code>.</p>}
+      {failed ? <button type="button" onClick={onBack}>Return to environment checks</button> : null}
     </section>
   )
 }

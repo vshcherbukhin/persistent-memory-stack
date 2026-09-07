@@ -10,9 +10,15 @@ async function localFetch(url: string, options?: RequestInit): Promise<Response>
   }
 }
 
+async function responseError(response: Response, url: string): Promise<Error> {
+  const payload: unknown = await response.json().catch(() => null)
+  const fields = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  return new Error(typeof fields.message === 'string' ? fields.message : typeof fields.error === 'string' ? fields.error : `${url} → ${response.status}`)
+}
+
 export async function getJSON<T>(url: string): Promise<T> {
   const r = await localFetch(url)
-  if (!r.ok) throw new Error(`${url} → ${r.status}`)
+  if (!r.ok) throw await responseError(r, url)
   return r.json() as Promise<T>
 }
 
@@ -22,7 +28,7 @@ export async function postJSON<T>(url: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error(`${url} → ${r.status}`)
+  if (!r.ok) throw await responseError(r, url)
   return r.json() as Promise<T>
 }
 
@@ -38,10 +44,7 @@ export async function streamNDJSON(
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const payload: unknown = await res.json().catch(() => null)
-    const message = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-      ? payload.error : `${url} → ${res.status}`
-    throw new Error(message)
+    throw await responseError(res, url)
   }
   const reader = res.body?.getReader()
   if (!reader) throw new Error('The installer returned no progress stream. Check its state before retrying.')

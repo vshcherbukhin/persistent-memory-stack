@@ -12,6 +12,7 @@
  * Existing values are retained; cloud API keys come from the wizard.
  */
 import { randomBytes } from 'node:crypto'
+import { validateEmbeddingSelection, type EmbeddingProvider } from './embedding-config.js'
 
 export interface Answers {
   embeddingMode: 'server' | 'client-bridge'
@@ -88,6 +89,17 @@ const POSTGRES_USER = 'pmuser'
 const POSTGRES_DB = 'persistent_memory'
 const MINIO_ROOT_USER = 'pmadmin'
 
+/** Operator deployment identity, paths, ports and load tuning are not wizard
+ * answers. Losing these can redirect a retry to different containers/volumes. */
+const PRESERVED_RUNTIME_KEYS = [
+  'COMPOSE_PROJECT_NAME', 'PM_CONTAINER_PREFIX', 'PM_VOLUME_PREFIX', 'PM_IMAGE_PREFIX', 'PM_NETWORK_NAME',
+  'PM_RUNTIME_ENV_FILE', 'PM_RUNTIME_ROOT', 'PM_DASHBOARD_SOURCE_ROOT', 'PM_COORDINATOR_STATE_DIR', 'PM_LEGACY_HANDOFF_STATE_DIR',
+  'PM_API_PORT', 'PM_DASHBOARD_PORT', 'PM_MCP_PORT', 'PM_POSTGRES_PORT', 'PM_REDIS_PORT',
+  'PM_GRAPHITI_PORT', 'PM_QDRANT_HTTP_PORT', 'PM_QDRANT_GRPC_PORT', 'PM_FALKORDB_PORT', 'PM_FALKORDB_BROWSER_PORT',
+  'PM_MINIO_API_PORT', 'PM_MINIO_CONSOLE_PORT', 'PM_NEO4J_HTTP_PORT', 'PM_NEO4J_BOLT_PORT', 'PM_TEST_STACK',
+  'EMBED_BATCH_SIZE', 'EMBED_MAX_RETRIES', 'EMBED_TIMEOUT_MS', 'WORKER_CONCURRENCY', 'CHUNK_MAX_TOKENS', 'CHUNK_OVERLAP_TOKENS',
+] as const
+
 export interface EnvValidationIssue {
   key: string
   message: string
@@ -96,7 +108,6 @@ export interface EnvValidationIssue {
 const ALWAYS_REQUIRED_KEYS = [
   'TOKEN_PEPPER',
   'PM_HOST_BIND',
-  'OLLAMA_URL',
   'EMBED_PROVIDER',
   'EMBED_MODEL',
   'EMBED_DIM',
@@ -182,8 +193,11 @@ export function validateEnvForDeploy(env: Record<string, string>): EnvValidation
   if (extraction === 'openai') addRequired(out, env, 'OPENAI_API_KEY')
 
   const embed = (env.EMBED_PROVIDER ?? '').trim()
+  if (embed === 'ollama') addRequired(out, env, 'OLLAMA_URL')
   if (embed === 'voyage') addRequired(out, env, 'VOYAGE_API_KEY')
   if (embed === 'openai') addRequired(out, env, 'OPENAI_API_KEY')
+  const embeddingIssue = validateEmbeddingSelection({ provider: embed as EmbeddingProvider, model: env.EMBED_MODEL, dim: Number(env.EMBED_DIM) })
+  if (embeddingIssue) out.push({ key: 'EMBED_MODEL', message: embeddingIssue })
 
   return out
 }
@@ -324,6 +338,11 @@ export function renderEnv(a: Answers, s: Secrets, existingEnv: Readonly<Record<s
     'RERANK_GAMMA=0.2',
     'RERANK_HALFLIFE_DAYS=30',
     '',
+    ...(PRESERVED_RUNTIME_KEYS.some(key => existingEnv[key]?.trim()) ? [
+      '# ── Preserved deployment identity and operator resource settings ──',
+      ...PRESERVED_RUNTIME_KEYS.filter(key => existingEnv[key]?.trim()).map(key => `${key}=${existingEnv[key]}`),
+      '',
+    ] : []),
   ].join('\n')
 }
 

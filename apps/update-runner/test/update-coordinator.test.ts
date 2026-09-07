@@ -25,6 +25,18 @@ import {
 const tempRoots: string[] = []
 const releaseLine = 'public-v1'
 const contractModuleUrl = new URL('../../../layers/update-ops/release-versioning/upgrade-contract.ts', import.meta.url).href
+// These fixtures describe a fixed historical release. Copying the checkout's
+// current contract makes their package/contract pairs invalid on the next release.
+const initialPublicContract = {
+  schemaVersion: 1,
+  release: '1.0.0',
+  minimumSupportedSource: '1.0.0',
+  compatibleMajorLine: 1,
+  directFrom: '=1.0.0',
+  bridges: [],
+  requiredStops: [],
+  coordinator: { minimumVersion: 1, bootstrap: true },
+}
 
 async function tempRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'pm-update-coordinator-'))
@@ -579,7 +591,7 @@ describe('update coordinator bootstrap', () => {
     const contractPath = join(repoRoot, 'upgrade.json')
     await writeFile(packagePath, JSON.stringify({ version: '1.0.0' }))
     await writeFile(deployedStatePath, JSON.stringify({ version: '1.0.0', releaseLine }))
-    await writeFile(contractPath, await readFile(new URL('../../../release/upgrade.json', import.meta.url)))
+    await writeFile(contractPath, JSON.stringify(initialPublicContract))
     const options = { repoRoot, coordinatorHome: installation.installationHome, releaseLine, packagePath, deployedStatePath, contractPath, liveReleaseHistoryUrl: 'http://dashboard.example.test/history', upgradeContractModuleUrl: contractModuleUrl }
     await expect(planCoordinatorBootstrap(options)).rejects.toThrow('target package does not belong')
     await expect(planLegacyBridge(options)).rejects.toThrow('target package does not belong')
@@ -595,7 +607,7 @@ describe('update coordinator bootstrap', () => {
     await writeFile(join(repoRoot, 'layers', 'update-ops', 'update-flow', 'public-source.json'), JSON.stringify({ releaseLine }))
     await expect(coordinatorReleaseLineFor(repoRoot)).resolves.toBe(releaseLine)
     await writeFile(join(repoRoot, 'package.json'), JSON.stringify({ version: '1.0.0', persistentMemoryReleaseLine: releaseLine }))
-    await writeFile(join(repoRoot, 'release', 'upgrade.json'), await readFile(new URL('../../../release/upgrade.json', import.meta.url)))
+    await writeFile(join(repoRoot, 'release', 'upgrade.json'), JSON.stringify(initialPublicContract))
     git('add', '.')
     git('commit', '--quiet', '-m', 'Public initial release')
     const publicCommit = git('rev-parse', 'HEAD')
@@ -608,6 +620,7 @@ describe('update coordinator bootstrap', () => {
     git('update-ref', 'refs/remotes/origin/master', 'HEAD')
     const contracts = await loadTrustedUpgradeContracts(repoRoot, 'master', releaseLine, contractModuleUrl)
     expect([...contracts.keys()]).toEqual(['1.0.0'])
+    expect(contracts.get('1.0.0')).toEqual(initialPublicContract)
     await expect(coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '4.0.37', releaseLine)).rejects.toThrow('unavailable from trusted origin/master')
     const worktree = await coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '1.0.0', releaseLine)
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8', windowsHide: true }).trim()).toBe(publicCommit)
