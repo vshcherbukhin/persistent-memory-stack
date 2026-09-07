@@ -9,9 +9,11 @@ nav_order: 5
 
 Persistent Memory uses the same Linux Docker images on Windows and macOS. On
 Windows, run the installer from PowerShell with native Windows Node.js, Git for
-Windows, Docker Desktop, and Ollama. The wizard and agent configuration writers
+Windows and Docker Desktop. The wizard and agent configuration writers
 run on the host; the API, dashboard, databases, workers, and stream MCP run in
-Docker. Ollama runs on the host and stores its models there.
+Docker. Optional Ollama runs on the host and stores its models there; API
+embeddings use OpenAI or Voyage instead. Review the shared Windows/macOS
+[machine requirements](machine-requirements.md), especially on 8 GB machines.
 
 This guide prepares a manual Windows installation. Completing prerequisite checks
 does not establish that an installation works: verify the running services,
@@ -29,7 +31,7 @@ commands; prerequisite installers may request elevation separately.
 | [Node.js](https://nodejs.org/en/download) | Install Node 24 LTS, or Node 22.12 or newer within the Node 22 line. npm is included. This project's host tooling requires Node 22.12+ even though some dependencies still permit Node 20. |
 | [Git for Windows](https://gitforwindows.org/) | Install Git with Git Bash and make Git available to command-line applications. Lifecycle helpers use the bundled Bash and Unix utilities. |
 | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) | Use a currently supported Windows version, enable hardware virtualization and WSL 2, and select the WSL 2 backend with **Linux containers**. Start Docker Desktop and wait for its engine to be ready. |
-| [Ollama for Windows](https://docs.ollama.com/windows) | Choose **Install** in the wizard's Ollama card, or **Start** if it is already installed. You can also install it manually. Keep the native application running while using Persistent Memory; models need additional disk space. |
+| [Ollama for Windows](https://docs.ollama.com/windows) — local embeddings only | Choose **Install / start Ollama** in the Embeddings step after reviewing resources, or install it manually. Keep the native application running for local embeddings; API embeddings do not need it. |
 
 Docker requires WSL 2.1.5 or newer; use the current WSL release. Check with
 `wsl --version`. Follow Docker's prerequisite instructions if WSL needs installing
@@ -134,18 +136,19 @@ provider with your own credentials. Review the selected Windows Claude/Codex
 tools and registration level before choosing **Generate & Install**. Shared
 Memories is optional and can be connected later from the local dashboard.
 
-On the Environment pre-check screen, choose **Install** in the Ollama card if
-Ollama is missing, or **Start** if it is installed but stopped. Wait for the card
-to report that Ollama is ready before continuing. Node and Docker prerequisite
-cards provide manual setup instructions.
+The Environment pre-check screen blocks Next until minimum base RAM, disk,
+CPU, and Docker requirements pass. Ollama is optional here. The Embeddings step
+suggests a model, offers OpenAI/Voyage API choices and tests, and can install or
+start Ollama after you review a local model's requirements. Node and Docker
+prerequisite cards provide manual setup instructions.
 
-During the Ollama download, the progress bar shows bytes and a percentage when
-the file size is known. Verification, installation, startup, and readiness checks
-show an activity indicator with the current stage; they do not display an
-estimated percentage. The terminal log remains below the progress bar. **Next**
-stays disabled until readiness is confirmed.
+During the Ollama download, a progress bar reports bytes and percentage when
+the total size is known. Verification, installation, startup, and readiness
+checks show the current stage; the installation log remains available below.
+**Next** stays disabled until local readiness is confirmed, or until the selected
+API embedding connection test succeeds and resource requirements pass.
 
-**Install** downloads the official Windows Ollama installer, verifies its
+**Install / start Ollama** downloads the official Windows Ollama installer if needed, verifies its
 signature, installs it for your Windows account, and starts it. The wizard
 refreshes its process PATH and checks reachability. Existing Ollama installations
 and downloaded models are reused. A separate package manager is not required;
@@ -216,11 +219,13 @@ After installation finishes, run:
 ```powershell
 npm.cmd run verify-persistent-memory
 docker compose -f deploy/compose/docker-compose.yml --env-file .env.persistent-memory --profile mcp-stream ps
+# For local Ollama embeddings only:
 Invoke-RestMethod http://localhost:11434/api/tags
 ```
 
 Open [the dashboard](http://localhost:3200). Confirm Services reports the expected
-containers and host Ollama as healthy, the configured embedding model is present,
+containers as healthy. For local embeddings, check host Ollama and model presence;
+for API embeddings, check the configured provider connection. Confirm
 and the wizard's selected AI tools can connect to stream MCP. Restart selected
 AI tools so they load their new registration. Save and recall a harmless test
 memory to verify an actual agent round trip; a running container alone does not
@@ -231,6 +236,44 @@ For the follow-up verification, keep the output from `check:host` and
 redacted output; the generated environment file and agent configuration may
 contain private information. Live Windows installation, GPU use, and the
 end-to-end memory round trip remain to be verified on your machine.
+
+## Memory Graph graphics performance
+
+The 3D Memory Graph renders through WebGL in your browser, using the GPU selected
+for that browser. Docker serves the application and graph data; changing Docker's
+GPU settings does not select the browser's graphics processor. On a hybrid laptop,
+Chrome may use integrated graphics even when a separate NVIDIA or AMD GPU is
+available. Using that GPU is optional and does not guarantee smoother rotation.
+
+To check or change Chrome's GPU preference on Windows 11:
+
+1. In Chrome, open `chrome://settings/system` and check that **Use graphics
+   acceleration when available** is enabled.
+2. Open Windows **Settings > System > Display > Graphics**.
+3. Select Chrome, or add it as a **Desktop app** using **Browse**. A common
+   executable location is `C:\Program Files\Google\Chrome\Application\chrome.exe`.
+   For a custom installation, open `chrome://version` and use its **Executable
+   Path** to select the correct application.
+4. Open Chrome's **Options** or **GPU preference**, choose **High performance**,
+   and check that the named adapter is your intended NVIDIA or AMD GPU. Select
+   **Save** if shown. If the machine has only integrated graphics, there is no
+   separate adapter to select.
+5. Save any unfinished browser work, fully close Chrome, and reopen it so the
+   preference takes effect. These per-app choices are documented in
+   [Microsoft's graphics preference instructions](https://support.microsoft.com/en-us/windows/hardware/display-graphics/optimizations-for-windowed-games-in-windows-11).
+6. Open `chrome://gpu`. Check that **WebGL** reports **Hardware accelerated** and
+   inspect **GL_RENDERER** for the adapter actually in use. Selecting a preference
+   alone is not confirmation that Chrome switched GPUs.
+
+Use the Windows per-app preference first: Windows graphics assignments take
+precedence over the NVIDIA Control Panel's preferred-processor setting. See
+[NVIDIA's graphics processor selection guidance](https://www.nvidia.com/content/Control-Panel-Help/vLatest/en-us/mergedProjects/nv3d/Setting_the_Preferred_Graphics_Processor.htm).
+
+Higher display resolution and pixel density from scaling can increase the number
+of pixels the graph must draw. A smaller browser window or narrower graph filters
+can reduce work. Actual responsiveness also depends on graph size, CPU work,
+drivers, power settings, and other applications; compare the same graph and view
+before judging the effect of a GPU preference change.
 
 ## Ollama: host and container addresses
 
@@ -280,8 +323,8 @@ Run these commands from the same checkout:
 | `npm.cmd run verify-persistent-memory` | Check the installed stack. |
 | `npm.cmd run update-persistent-memory` | Run the protected snapshot, update, migration, and verification flow. |
 
-Start Docker Desktop and native Ollama before starting or verifying the stack
-after a reboot. Docker Desktop and Ollama have their own launch-at-login
+Start Docker Desktop, and native Ollama only for local embeddings, before starting
+or verifying the stack after a reboot. Docker Desktop and Ollama have their own launch-at-login
 settings. Stopping the stack does not uninstall those host applications.
 
 Use [Uninstall and export](uninstall-memory-stack.md) only when you intend to
@@ -291,7 +334,7 @@ Desktop, or delete `.env.persistent-memory` to troubleshoot an installation.
 
 ## macOS uses the same lifecycle commands
 
-Keep using native Node, Docker Desktop, and host Ollama on macOS, with Node 24
+Keep using native Node, Docker Desktop, and optional host Ollama on macOS, with Node 24
 LTS or Node 22.12+ in the Node 22 line. Use `npm run check:host` and then
 `npm run install-persistent-memory` from the checkout. The launcher uses the
 system Bash on macOS; Git for Windows and WSL are Windows prerequisites only.

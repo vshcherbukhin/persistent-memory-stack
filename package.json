@@ -1,7 +1,7 @@
 {
   "name": "persistent-memory",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "persistent-memory monorepo root — personal-first memory stack with stream MCP, optional Shared Memories connection, dashboard, API, worker, and reusable shared/db packages.",
   "workspaces": [
@@ -105,7 +105,7 @@
     "eval:mcp": "python3 scripts/evaluation.py -t http -u ${PM_MCP_URL:-http://127.0.0.1:8091/mcp} -o apps/mcp/eval_report.md apps/mcp/evals.xml",
     "setup": "node scripts/setup.mjs",
     "check:host": "node scripts/host-lifecycle.mjs check",
-    "test:host": "node --test scripts/host-runtime.test.mjs scripts/github-lifecycle.test.mjs scripts/public-release-manifests.test.mjs",
+    "test:host": "node --test scripts/host-runtime.test.mjs scripts/github-lifecycle.test.mjs scripts/public-release-manifests.test.mjs scripts/docker-image-lifecycle.test.mjs scripts/host-preflight-embedding.test.mjs scripts/start-embeddings.test.mjs",
     "install-persistent-memory": "node scripts/host-lifecycle.mjs install",
     "update-persistent-memory": "node scripts/host-lifecycle.mjs update",
     "uninstall-persistent-memory": "node scripts/host-lifecycle.mjs uninstall",

@@ -12,7 +12,7 @@ Start with your own **Personal Memories** stack. Connect **Shared Memories**
 later when you want access to a team's knowledge.
 
 [Get started](#get-started) · [Features](#what-you-can-do) ·
-[Documentation](documentation/) · [Release notes](release-history.md)
+[Documentation](documentation/) · [Releases](https://github.com/vshcherbukhin/persistent-memory-stack/releases) · [Release notes](release-history.md)
 
 ## What you can do
 
@@ -24,7 +24,7 @@ later when you want access to a team's knowledge.
 | **Explore a living knowledge graph** | Browse memories, entities, and connections in 3D or 2D. Filter by project, tags, badges, and fact validity; follow how knowledge changes over time. |
 | **Keep the evidence** | Ingest documents and retain links between sources, memories, and derived graph facts. Review graph impact before deleting a memory. |
 | **Keep personal and shared work distinct** | Use Personal Memories independently, then optionally connect a Shared Memories server with scoped access. |
-| **Choose your models** | Run embeddings through Ollama and configure your extraction provider and model. Test the provider connection during setup and manage settings from the dashboard. |
+| **Choose models that fit your computer** | Setup checks RAM, disk space, and Docker resources. Use local Ollama embeddings or OpenAI/Voyage APIs, with suggested models and connection tests. Configure fact extraction separately. |
 | **See what the system is doing** | Inspect memories, service health, worker activity, security findings, and model token usage from one dashboard. |
 | **Avoid unnecessary model work** | Unchanged memory updates skip extraction, embedding, and graph processing; meaningful edits keep the full pipeline. |
 | **Maintain memory with control** | Background workers handle processing and maintenance. Sensitive-data checks and access controls protect the memory flow; explicit updates take snapshots before rebuilding. |
@@ -40,8 +40,48 @@ Prepare **Node.js 24 LTS** (or Node 22.12+ within the Node 22 line), **Git**, an
 **Docker Desktop running Linux containers**. Windows also needs **Git for Windows
 with Git Bash**. The wizard can install or start Ollama and guide model setup.
 
+### Machine requirements
+
+These are conservative **installation budgets for the whole application**, not
+model-vendor minimums or measured performance guarantees. All rows use API fact
+extraction. Values are GiB; disk figures mean **free space before installation**.
+
+| Embeddings | Host RAM minimum / recommended | Free host RAM minimum / recommended | Free installation disk minimum / recommended¹ |
+| --- | --- | --- | --- |
+| **OpenAI or Voyage API** — lowest local resource needs | **8 / 16** | **2 / 4** | **35 / 60** |
+| Ollama `nomic-embed-text` | 12 / 16 | 3 / 5 | 37 / 64 |
+| Ollama `qwen3-embedding:0.6b` | 16 / 24 | 4 / 6 | 39 / 66 |
+| Ollama `qwen3-embedding:4b` | 24 / 32 | 6 / 10 | 43 / 72 |
+| Ollama `qwen3-embedding:8b` | 48 / 64 | 12 / 16 | 51 / 84 |
+
+Every choice also needs **2 / 4 logical CPUs**, **4 / 6 GiB assigned to Docker**,
+and **25 / 40 GiB free inside Docker's Linux storage** (minimum / recommended).
+¹ The table combines application and Ollama space on the same physical disk.
+Separate model or Docker disks are checked separately. Leave additional room
+for a growing memory database, documents, backups, and OS updates.
+
+**For an 8 GB M2 Mac mini, use API embeddings and API fact extraction.** Setup
+disables local models below their minimum, and blocks installation if even the
+API configuration cannot meet the minimum. Close other memory-heavy apps and
+free disk space before rechecking. Unknown Docker storage measurements are
+identified explicitly and require checking Docker Desktop before continuing.
+
+OpenAI `text-embedding-3-small` is the API default for value;
+`text-embedding-3-large` offers higher retrieval quality at higher cost and
+vector storage. Voyage offers `voyage-4` for balance, `voyage-4-large` for quality,
+and `voyage-4-lite` for lower latency/cost. Anthropic does not supply a Claude
+embedding model: Voyage needs a **separate Voyage API key**. Remote embedding
+requests send memory/search text to the selected provider; the database remains
+local. See [requirements and model choices](documentation/installation/machine-requirements.md)
+for the selection policy and official provider guidance.
+
 Windows users: follow the [Windows preparation guide](documentation/installation/windows-installation.md)
 for Docker/WSL prerequisites and native Windows installation details.
+
+**Windows graphics tip:** If Memory Graph zooming or rotation feels slow on a
+laptop with integrated and NVIDIA/AMD graphics, check which GPU your browser
+uses. Windows can assign Chrome to integrated graphics even when a discrete GPU
+is available. See [browser GPU setup and verification](documentation/installation/windows-installation.md#memory-graph-graphics-performance).
 
 Clone the project:
 
@@ -64,7 +104,8 @@ npm.cmd run install-persistent-memory
 
 The 12-step wizard checks prerequisites, prepares models, tests your extraction
 provider, builds the stack, and registers your selected Claude/Codex clients.
-Have your chosen extraction provider's API key ready. Keep the installer terminal
+Have your extraction API key and, for API embeddings, an embedding API key ready
+(the same OpenAI key can serve both). Keep the installer terminal
 open until it finishes.
 
 Then open the dashboard at **[localhost:3200](http://localhost:3200)** and reconnect

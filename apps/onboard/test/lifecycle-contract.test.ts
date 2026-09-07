@@ -72,7 +72,7 @@ describe('uninstall ownership-safety contract', () => {
     const script = uninstallSource()
     const cleanup = script.indexOf('cleanup_installer_owned_agent_artifacts')
     const stackOnly = script.indexOf('stack-only removal')
-    const composeDown = script.indexOf('down --remove-orphans --volumes --rmi all')
+    const composeDown = script.indexOf('down --remove-orphans --volumes')
 
     expect(cleanup).toBeGreaterThanOrEqual(0)
     expect(stackOnly).toBeGreaterThanOrEqual(0)

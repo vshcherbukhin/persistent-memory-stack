@@ -13,8 +13,9 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import Fastify from 'fastify'
 import fastifyStatic from '@fastify/static'
-import { validateEnvForDeploy } from './env.js'
 import { registerEnvWriteRoute } from './env-route.js'
+import { registerInstallRoute } from './install-route.js'
+import { readInstalledEmbeddingPin } from './installed-embedding.js'
 import {
   buildPrereqInstallPlan,
   prereqInstallCapabilities,
@@ -29,8 +30,14 @@ import {
   type PrereqComponent,
   type PrereqInstallStep,
 } from './prereq.js'
-import { runInstall, parseEnvFile, type InstallEvent, type WizardPayload } from './install.js'
-import { readSpecs, readApps } from './detect.js'
+import { parseEnvFile, type WizardPayload } from './install.js'
+import { readApps } from './detect.js'
+import { readResources } from './resources.js'
+import { resourceGate } from './resource-gate.js'
+import { recommendResources } from '../shared/resource-policy.js'
+import { registerEmbeddingTestRoute } from './embedding-test.js'
+import { readEmbeddingSelection } from './embedding-config.js'
+import { parseEnv } from 'node:util'
 import { readDefaultRule, defaultMemoryBlock } from './rule.js'
 import { originGuardReason } from './guard.js'
 import { testExtractionConnection, type ExtractionProvider } from './extraction-test.js'
@@ -73,11 +80,12 @@ function execCapture(cmd: string, args: string[]): Promise<{ code: number; stdou
     let resolved: ReturnType<typeof hostCommand>
     try { resolved = hostCommand(cmd, args) } catch (error) { resolve({ code: 1, stdout: String(error) }); return }
     const child = spawn(resolved.command, resolved.args, { env: resolved.env, windowsHide: true })
+    const timeout = setTimeout(() => child.kill(), 10_000)
     let stdout = ''
     child.stdout.on('data', (b: Buffer) => (stdout += b.toString()))
     child.stderr.on('data', (b: Buffer) => (stdout += b.toString()))
-    child.on('error', () => resolve({ code: 1, stdout }))
-    child.on('close', (code) => resolve({ code: code ?? 1, stdout }))
+    child.on('error', () => { clearTimeout(timeout); resolve({ code: 1, stdout }) })
+    child.on('close', (code) => { clearTimeout(timeout); resolve({ code: code ?? 1, stdout }) })
   })
 }
 
@@ -244,8 +252,14 @@ async function runPrereqStep(step: PrereqInstallStep, emit: (e: unknown) => void
 }
 
 let prerequisiteInstallActive = false
-app.post<{ Body: { component: PrereqComponent } }>('/api/prereqs/install', async (req, reply) => {
-  if (prerequisiteInstallActive) return reply.code(409).send({ error: 'A prerequisite installation is already running. Wait for it to finish.' })
+app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } }>('/api/prereqs/install', async (req, reply) => {
+  if (installationActive || prerequisiteInstallActive) return reply.code(409).send({ error: 'installation_active', message: 'An installation is already running. Wait for it to finish.' })
+  if (req.body?.component === 'ollama') {
+    const snapshot = await readResources({ installPath: PM_ROOT })
+    const blocked = resourceGate(snapshot, { provider: 'ollama', model: 'nomic-embed-text' }, req.body.resourceAcknowledged === true)
+    if (blocked) return reply.code(422).send({ error: 'resource_requirements', message: blocked })
+  }
+  if (installationActive || prerequisiteInstallActive) return reply.code(409).send({ error: 'installation_active', message: 'An installation is already running. Wait for it to finish.' })
   const stream = createNdjsonStream(reply)
   const { emit } = stream
   prerequisiteInstallActive = true
@@ -287,7 +301,11 @@ app.post<{ Body: { component: PrereqComponent } }>('/api/prereqs/install', async
 })
 
 // ── System specs (→ recommended model) + installed agent apps ────────────────────
-app.get('/api/specs', async () => readSpecs())
+app.get('/api/specs', async () => {
+  const resources = await readResources({ installPath: PM_ROOT })
+  return { totalMemGB: resources.host.totalMemoryBytes == null ? null : resources.host.totalMemoryBytes / 1e9, recommended: recommendResources(resources), resources }
+})
+app.get('/api/resources', async () => readResources({ installPath: PM_ROOT }))
 app.get('/api/apps', async () => readApps())
 
 // The host dialog appears only when the user chooses a project folder.
@@ -331,7 +349,12 @@ app.post<{ Body: ExtractionTestBody }>('/api/extraction/test', async (req) => {
 })
 
 // ── Ollama: pull a model (NDJSON progress) ──────────────────────────────────────
-app.post<{ Body: { model: string } }>('/api/ollama/pull', async (req, reply) => {
+app.post<{ Body: { model: string; resourceAcknowledged?: boolean } }>('/api/ollama/pull', async (req, reply) => {
+  if (installationActive || prerequisiteInstallActive) return reply.code(409).send({ error: 'installation_active', message: 'An installation is already running. Wait for it to finish.' })
+  const blocked = resourceGate(await readResources({ installPath: PM_ROOT }), { provider: 'ollama', model: req.body?.model ?? '' }, req.body?.resourceAcknowledged === true)
+  if (blocked) return reply.code(422).send({ error: 'resource_requirements', message: blocked })
+  if (installationActive || prerequisiteInstallActive) return reply.code(409).send({ error: 'installation_active', message: 'An installation is already running. Wait for it to finish.' })
+  prerequisiteInstallActive = true
   const stream = createNdjsonStream(reply)
   const { emit } = stream
   const releaseWork = idleLifecycle.beginWork()
@@ -351,6 +374,7 @@ app.post<{ Body: { model: string } }>('/api/ollama/pull', async (req, reply) => 
     emit({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     emit({ type: 'done', ok: false })
   } finally {
+    prerequisiteInstallActive = false
     releaseWork()
     stream.end()
   }
@@ -374,18 +398,33 @@ function existingUserKeys(): Record<string, string> {
 
 app.get('/api/env/existing', async () => {
   const k = existingUserKeys()
+  const env = existsSync(ENV_PATH) ? parseEnv(readFileSync(ENV_PATH, 'utf8')) as Record<string, string> : {}
   return {
     anthropicKeyPresent: Boolean(k.ANTHROPIC_API_KEY),
     openaiKeyPresent: Boolean(k.OPENAI_API_KEY),
     voyageKeyPresent: Boolean(k.VOYAGE_API_KEY),
+    embedding: readEmbeddingSelection(env),
   }
 })
 
 // ── Generate + write the .env ───────────────────────────────────────────────────
-registerEnvWriteRoute(app, ENV_PATH)
+registerEnvWriteRoute(app, ENV_PATH, {
+  readInstalledPin: () => readInstalledEmbeddingPin(PM_ROOT, ENV_PATH),
+  canWrite: () => !installationActive && !prerequisiteInstallActive,
+})
+registerEmbeddingTestRoute(app, ENV_PATH, {
+  checkLocalResources: async selection => resourceGate(await readResources({ installPath: PM_ROOT }), selection, (selection as typeof selection & { resourceAcknowledged?: boolean }).resourceAcknowledged === true),
+  beginTest: () => {
+    if (installationActive || prerequisiteInstallActive) return null
+    prerequisiteInstallActive = true
+    const releaseWork = idleLifecycle.beginWork()
+    return () => { prerequisiteInstallActive = false; releaseWork() }
+  },
+})
 
 // ── Run the install (NDJSON stream) — flow-aware ─────────────────────────────────
 interface InstallBody {
+  resourceAcknowledged?: boolean
   flow?: 'full' | 'engine' | 'mcp'
   mcpRuntime?: 'stream' | 'node'
   personalMemoryEnabled?: boolean
@@ -457,43 +496,18 @@ function buildWizardPayload(body: InstallBody): WizardPayload {
   }
 }
 
-app.post<{ Body: InstallBody }>('/api/install', async (req, reply) => {
-  const body = req.body ?? {}
-  const needsLocalEnv = true
-  let env: Record<string, string> = {}
-  if (needsLocalEnv) {
-    // Full local-server installs and client installs with isolated personal memory
-    // need a generated local .env. Shared-only client flows never touch the stack.
-    if (!existsSync(ENV_PATH)) {
-      return reply.code(400).send({ error: 'no_env', message: 'Generate the .env first (POST /api/env).' })
-    }
-    env = parseEnvFile(readFileSync(ENV_PATH, 'utf8'))
-    const issues = validateEnvForDeploy(env)
-    if (issues.length > 0) {
-      return reply.code(400).send({
-        error: 'invalid_env',
-        message: `Missing required env value(s): ${issues.map((i) => i.key).join(', ')}`,
-        issues,
-      })
-    }
-  }
-  const wizard = buildWizardPayload(body)
-  const stream = createNdjsonStream(reply)
-  const { emit } = stream
-  const releaseWork = idleLifecycle.beginWork()
-  const wrapped = (e: InstallEvent): void => {
-    if (e.type === 'token' && e.token) bootstrapToken = e.token
-    emit(e)
-  }
-  try {
-    await runInstall({ root: PM_ROOT, env, wizard }, wrapped)
-  } catch (error) {
-    emit({ type: 'error', message: error instanceof Error ? error.message : String(error) })
-    emit({ type: 'done', ok: false })
-  } finally {
-    releaseWork()
-    stream.end()
-  }
+let installationActive = false
+registerInstallRoute<InstallBody>(app, {
+  root: PM_ROOT, envPath: ENV_PATH,
+  beginInstallation: () => {
+    if (installationActive || prerequisiteInstallActive) return null
+    installationActive = true
+    const releaseWork = idleLifecycle.beginWork()
+    return () => { installationActive = false; releaseWork() }
+  },
+  readResources: () => readResources({ installPath: PM_ROOT }),
+  buildWizard: buildWizardPayload,
+  onToken: token => { bootstrapToken = token },
 })
 
 // ── The dashboard URL (so the Done screen knows where to redirect) ───────────────

@@ -56,7 +56,9 @@ export interface PrereqGateState {
 
 export function prereqsBlocked(flow: Flow, p: PrereqGateState | null, options: FlowOptions = {}): boolean {
   if (!p) return true
-  return !p.node.ok || !p.docker.ok || !p.compose.ok || !p.ollama.ok
+  // Ollama is optional: a machine that can run the stack with remote APIs must
+  // reach the embedding-provider selection even without a local model runtime.
+  return !p.node.ok || !p.docker.ok || !p.compose.ok
 }
 
 export type ModelPresence = 'installed' | 'will-be-installed'

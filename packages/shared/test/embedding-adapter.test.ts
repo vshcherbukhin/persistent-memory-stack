@@ -34,6 +34,13 @@ describe('makeEmbedder — provider selection', () => {
     expect(e).toBeInstanceOf(VoyageEmbedder)
     expect(e.provider).toBe('voyage')
   })
+  it.each(['voyage-4', 'voyage-4-large', 'voyage-4-lite'])('supports current Voyage model %s without changing installed Voyage 3 pins', model => {
+    const e = makeEmbedder(cfg({ provider: 'voyage', model, dim: 2048 }))
+    expect(e).toBeInstanceOf(VoyageEmbedder)
+    expect(e.model).toBe(model)
+    expect(e.dim).toBe(2048)
+    expect(MODEL_REGISTRY['voyage-3-large']?.provider).toBe('voyage')
+  })
   it('constructs an OpenAIEmbedder for provider=openai', () => {
     const e = makeEmbedder(cfg({ provider: 'openai', model: 'text-embedding-3-large', dim: 1536 }))
     expect(e).toBeInstanceOf(OpenAIEmbedder)

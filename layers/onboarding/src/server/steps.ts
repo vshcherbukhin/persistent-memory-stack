@@ -64,7 +64,6 @@ const RULE_STEP: InstallStep = {
 const SHARED_CONNECT_STEP: InstallStep = {
   id: 'shared-connect', name: 'Save the Shared Memories connection', cmd: [], cwd: '', kind: 'fn', fnId: 'shared-connect',
 }
-const COMPOSE_ENV_ARGS = ['docker', 'compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory'] as const
 
 /** The full local-server install: the proven 8 host-side commands. */
 function fullStackSteps(env: Record<string, string>): InstallStep[] {
@@ -91,10 +90,9 @@ function fullStackSteps(env: Record<string, string>): InstallStep[] {
     })
   }
   steps.push(
-    // --build so the installer runs the repo's CURRENT code (a stale prebuilt image would ship old
-    // server code). The api may boot before migrate on a fresh DB — it's best-effort there (in local
-    // mode) and is force-recreated post-migrate by restart-app.
-    { id: 'compose-up', name: 'Build images + start storage + app services (docker compose up --build)', cmd: [...COMPOSE_ENV_ARGS, 'up', '-d', '--build'], cwd: '', kind: 'run', envOverride: composeBuildEnv },
+    // Build current code serially, smoke-test the immutable images without user data/network,
+    // then start only those validated images. A failed image gets one bounded recovery attempt.
+    { id: 'compose-up', name: 'Validate images + pause app writers + start storage', cmd: ['node', 'scripts/docker-image-lifecycle.mjs', 'up-storage'], cwd: '', kind: 'run', envOverride: composeBuildEnv },
     { id: 'wait-postgres', name: 'Wait for Postgres to be healthy', cmd: ['docker', 'inspect', '-f', '{{.State.Health.Status}}', 'persistent-memory-postgres'], cwd: '', kind: 'wait' },
     { id: 'prisma-migrate', name: 'Apply database migrations (Prisma)', cmd: ['npm', 'run', '--silent', 'migrate:deploy'], cwd: 'layers/core/schema', envOverride: dbEnv, kind: 'run' },
     {
@@ -103,10 +101,9 @@ function fullStackSteps(env: Record<string, string>): InstallStep[] {
       envOverride: { ...dbEnv, PM_APP_PASSWORD: env.PM_APP_PASSWORD ?? 'pmapp' }, kind: 'run',
     },
     { id: 'seed', name: local ? 'Initialize local system settings' : 'Initialize system settings + bootstrap administrator', cmd: ['npm', 'run', '--silent', 'seed'], cwd: 'layers/core/schema', envOverride: dbEnv, kind: 'run', captureToken: !local },
-    // --force-recreate so the api/worker RE-BOOT now the schema + pm_app role exist: this is when
-    // local mode's ensureLocalIdentity actually creates the local super-user (plain `up -d` would be
-    // a no-op if the container is already running, and the user would never be created).
-    { id: 'restart-app', name: 'Start the API + worker as pm_app', cmd: [...COMPOSE_ENV_ARGS, 'up', '-d', '--force-recreate', '--no-deps', 'api', 'worker'], cwd: '', kind: 'run' },
+    // Writers were stopped before migrations/seed, so no worker can retain an old
+    // embedding pin across an empty-corpus bootstrap reconciliation.
+    { id: 'restart-app', name: 'Start validated app services after database initialization', cmd: ['node', 'scripts/docker-image-lifecycle.mjs', 'start-apps'], cwd: '', kind: 'run', envOverride: composeBuildEnv },
     { id: 'wait-mcp', name: 'Wait for stream MCP to be healthy', cmd: ['docker', 'inspect', '-f', '{{.State.Health.Status}}', 'persistent-memory-mcp'], cwd: '', kind: 'wait' },
     { id: 'verify', name: 'Verify the install', cmd: ['bash', 'deploy/scripts/verify-install.sh'], cwd: '', kind: 'run' },
   )

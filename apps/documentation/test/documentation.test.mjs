@@ -265,7 +265,7 @@ test('Markdown frontmatter produces the approved documentation information archi
   const config = await readFile(new URL('../../../mkdocs.yml', import.meta.url), 'utf8')
   const expectedNavigation = [
     '- "Home": index.md',
-    '- "Installation":\n      - "Windows preparation": installation/windows-installation.md\n      - "Installation steps": installation/installation-steps.md\n      - "Uninstall memory stack": installation/uninstall-memory-stack.md',
+    '- "Installation":\n      - "Windows preparation": installation/windows-installation.md\n      - "Installation steps": installation/installation-steps.md\n      - "Machine requirements and models": installation/machine-requirements.md\n      - "Uninstall memory stack": installation/uninstall-memory-stack.md',
     '- "Spaces":',
     '- "Stack Architecture":\n      - "Architecture": stack-architecture/architecture.md\n      - "Operations": stack-architecture/operations.md\n      - "Security": stack-architecture/security.md\n      - "Access Model": stack-architecture/access-model.md\n      - "Memory Protocol": stack-architecture/memory-protocol.md\n      - "Ingest": stack-architecture/ingest.md\n      - "Embedding": stack-architecture/embedding.md\n      - "Benchmarking": stack-architecture/benchmarking.md',
     '- "Stack Layers":',
@@ -299,7 +299,7 @@ test('the documentation home starts users with Persistent Memory Stack and the i
   assert.match(home, /\[Access Model\]\(stack-architecture\/access-model\.md\)/)
   assert.match(home, /\[Installation\]\(installation\/installation-steps\.md\)/)
   assert.doesNotMatch(home, /```mermaid/)
-  assert.match(config, /- "Installation":\n      - "Windows preparation": installation\/windows-installation\.md\n      - "Installation steps": installation\/installation-steps\.md\n      - "Uninstall memory stack": installation\/uninstall-memory-stack\.md/)
+  assert.match(config, /- "Installation":\n      - "Windows preparation": installation\/windows-installation\.md\n      - "Installation steps": installation\/installation-steps\.md\n      - "Machine requirements and models": installation\/machine-requirements\.md\n      - "Uninstall memory stack": installation\/uninstall-memory-stack\.md/)
 })
 
 test('lifecycle guides keep every installer and uninstall screenshot distinct and in separate flows', async () => {

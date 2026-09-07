@@ -44,9 +44,16 @@ standard JSON for a portable export.
 
 ## 4. Confirm local stack removal
 
-The final confirmation removes local containers, networks, volumes, images, and
-the generated environment file. It does not remove repository source files or
-your export.
+The script asks whether to keep or delete user data. **Keep data is the default**:
+containers and the project network are removed, while named data volumes and
+the environment file remain. Choosing data deletion removes those project
+volumes and the generated environment after confirmation. Repository source
+files and exports are preserved.
+
+A separate choice removes unused, provably installer-owned application images.
+Images referenced by another container and shared base images/build cache are
+retained. No global Docker prune runs. Older screenshots below illustrate the
+terminal journey; read the current terminal choices before confirming.
 
 ![Removal confirmation](../assets/lifecycle/uninstall/uninstall-confirm.png?v=20260713-crop)
 
