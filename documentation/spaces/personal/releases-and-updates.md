@@ -53,6 +53,40 @@ supported upgrade paths in their release contract. Automatic checks accept only
 the public release line, so earlier development version numbers are not offered
 as updates. Install updates using the command shown in the dashboard.
 
+## GitHub Releases, Packages, and Actions
+
+| GitHub feature | What it provides for this project |
+| --- | --- |
+| Releases | A named version tied to an exact Git tag, with release notes and automatic source ZIP/tar.gz downloads. |
+| Packages | A registry for separately built artifacts, such as Docker images in GitHub Container Registry (GHCR) or npm packages. |
+| Actions | Automation that can run tests, build artifacts, and publish a release or package when configured. |
+
+The public [GitHub Releases page](https://github.com/vshcherbukhin/persistent-memory-stack/releases)
+preserves versioned source snapshots. Version `v1.0.0` identifies the original
+public baseline; `v1.1.0` adds resource-aware installation and API embedding choices.
+Use the latest stable release for a fresh installation. The repository's
+`packages/` directory contains internal source workspaces; its name does not
+mean those workspaces are published in GitHub Packages or npm.
+
+These releases distribute source. The installer builds the application images
+locally using the existing Dockerfiles. Publishing a GitHub Release alone does
+not produce Windows/macOS executables or prebuilt Docker images. The dashboard
+continues to compare the version on public `master`; it does not use the GitHub
+Releases API as its update feed. Merging a version bump to `master` makes it
+eligible for automatic checks, while installing it remains explicit.
+
+For future prebuilt distribution, GHCR images would fit this Docker application.
+That requires builds for Linux `amd64` and `arm64`, versioned image tags and
+verified digests, public package visibility, and installer/Compose support for
+pulling those images. A GitHub Actions workflow can build and publish them with
+repository-scoped permissions after validation. This distribution path is not
+included in the source releases. An npm package would instead need a deliberately
+packaged CLI/library, a distributable manifest and file list, and registry
+configuration; the private monorepo root is not such a package.
+
+See GitHub's [release guide](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+and [container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
 ## States
 
 | State | Meaning |

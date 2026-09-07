@@ -19,6 +19,7 @@ import {
 import { targetMemoryFiles, writeRuleTargets } from './rule.js'
 import { writeOwnershipManifest } from './ownership.js'
 import { hostCommand } from './host.js'
+import { writeInstallSuccess } from './install-success.js'
 
 export type InstallEvent =
   | { type: 'run-start'; total: number; steps: { id: string; name: string }[] }
@@ -397,6 +398,11 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
       ]),
     ])
     emit({ type: 'stdout', id: 'write-rule', chunk: 'Recorded installer ownership manifest for safe future cleanup.\n' })
+  }
+  try { writeInstallSuccess(ctx.root, ctx.env) } catch (error) {
+    emit({ type: 'error', id: 'verify', message: error instanceof Error ? error.message : String(error) })
+    emit({ type: 'done', ok: false })
+    return
   }
   emit({ type: 'done', ok: true })
 }

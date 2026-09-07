@@ -23,7 +23,7 @@ parking notes, or historical debugging logs here.
 ## Product Model
 
 - Client installs are personal-first: always install a local Personal Memories stack,
-  local embeddings, local dashboard, and stream MCP first.
+  local dashboard, and stream MCP first, with local or API embeddings chosen for the host.
 - Shared Memories are optional and connected later from the local dashboard with a
   server-issued connector token. The local dashboard is the single user surface for
   Personal and Shared memory management.

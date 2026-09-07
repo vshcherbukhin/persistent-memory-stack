@@ -177,7 +177,8 @@ describe('renderEnv', () => {
   it('passes saved server environment flags into regeneration without adding wizard settings', () => {
     const server = readFileSync(new URL('../server/index.ts', import.meta.url), 'utf8')
     const envRoute = readFileSync(new URL('../server/env-route.ts', import.meta.url), 'utf8')
-    expect(server).toContain('registerEnvWriteRoute(app, ENV_PATH)')
+    expect(server).toContain('registerEnvWriteRoute(app, ENV_PATH,')
+    expect(server).toContain('readInstalledEmbeddingPin(PM_ROOT, ENV_PATH)')
     expect(envRoute).toContain('const env = renderEnv(a, secrets, oldEnv)')
   })
   it('renders personal-memory isolation settings for full-local installs', () => {
@@ -308,17 +309,17 @@ describe('prereq parsers', () => {
   it('hasModel matches a bare name against ":latest"', () => {
     expect(hasModel([{ name: 'foo:latest' }], 'foo')).toBe(true)
   })
-  it('all installer aliases block on missing Ollama because the personal stack is always installed', () => {
+  it('installer aliases allow API configuration without Ollama; the embeddings step enforces local readiness', () => {
     const p = {
       node: { ok: true, detail: 'Node v25.6.1.' },
       docker: { ok: true, detail: 'Docker daemon is running.' },
       compose: { ok: true, detail: 'Docker Compose v2.32.1.' },
       ollama: { ok: false, detail: 'Ollama not reachable.' },
     }
-    expect(prereqsBlocked('full', p)).toBe(true)
-    expect(prereqsBlocked('engine', p)).toBe(true)
-    expect(prereqsBlocked('mcp', p)).toBe(true)
-    expect(prereqsBlocked('mcp', p, { personalMemoryEnabled: true })).toBe(true)
+    expect(prereqsBlocked('full', p)).toBe(false)
+    expect(prereqsBlocked('engine', p)).toBe(false)
+    expect(prereqsBlocked('mcp', p)).toBe(false)
+    expect(prereqsBlocked('mcp', p, { personalMemoryEnabled: true })).toBe(false)
   })
   it('embedding model presence labels installed vs will-be-installed', () => {
     expect(modelPresence(['qwen3-embedding:4b'], 'qwen3-embedding:4b')).toBe('installed')
@@ -567,8 +568,9 @@ describe('install steps', () => {
     expect(script).toContain('210000')
     expect(script).toContain('SELECT count(*) FROM public.memory')
     expect(script).toContain('docker compose')
-    expect(script).toContain('down --remove-orphans --volumes --rmi all')
-    expect(script).toContain('docker image rm -f')
+    expect(script).not.toContain('--rmi all')
+    expect(script).not.toContain('docker image rm -f')
+    expect(script).toContain('docker-image-lifecycle.mjs')
     expect(script).toContain('persistent-memory-')
     expect(script).toContain('rm -f \"$ENV_RUNTIME\"')
     expect(script).toContain('POSTGRES_STATE_MISSING=1')
@@ -651,23 +653,10 @@ describe('install steps', () => {
     expect(steps.find((s) => s.id === 'wait-mcp')!.kind).toBe('wait')
     expect(steps.find((s) => s.id === 'wait-mcp')!.cmd).toEqual(['docker', 'inspect', '-f', '{{.State.Health.Status}}', 'persistent-memory-mcp'])
     const composeUp = steps.find((s) => s.id === 'compose-up')!
-    expect(composeUp.cmd).toEqual(['docker', 'compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory', 'up', '-d', '--build'])
+    expect(composeUp.cmd).toEqual(['node', 'scripts/docker-image-lifecycle.mjs', 'up-storage'])
     expect(composeUp.envOverride?.COMPOSE_PROFILES).toBe('mcp-stream')
     expect(composeUp.envOverride?.COMPOSE_PARALLEL_LIMIT).toBe('1')
-    expect(steps.find((s) => s.id === 'restart-app')!.cmd).toEqual([
-      'docker',
-      'compose',
-      '-f',
-      'deploy/compose/docker-compose.yml',
-      '--env-file',
-      '.env.persistent-memory',
-      'up',
-      '-d',
-      '--force-recreate',
-      '--no-deps',
-      'api',
-      'worker',
-    ])
+    expect(steps.find((s) => s.id === 'restart-app')!.cmd).toEqual(['node', 'scripts/docker-image-lifecycle.mjs', 'start-apps'])
   })
   it('legacy command-runtime input still installs stream MCP and never builds the old local command launcher', () => {
     const steps = buildSteps({ flow: 'full', mcpRuntime: 'node', env: { DATABASE_MIGRATE_URL: 'postgresql://pmuser:x@persistent-memory-postgres:5432/persistent_memory', PM_APP_PASSWORD: 'APPPW' } })

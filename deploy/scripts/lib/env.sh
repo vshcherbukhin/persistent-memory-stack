@@ -229,7 +229,7 @@ pm_env_validate_deploy_required() {
     local key value graph extraction embed
 
     for key in \
-        TOKEN_PEPPER PM_HOST_BIND OLLAMA_URL EMBED_PROVIDER EMBED_MODEL EMBED_DIM EMBEDDING_MODE \
+        TOKEN_PEPPER PM_HOST_BIND EMBED_PROVIDER EMBED_MODEL EMBED_DIM EMBEDDING_MODE \
         EXTRACTION_PROVIDER EXTRACTION_MODEL GRAPH_BACKEND SEMAPHORE_LIMIT QDRANT_URL QDRANT_API_KEY \
         POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB PM_APP_PASSWORD DATABASE_URL DATABASE_MIGRATE_URL \
         REDIS_URL MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_ENDPOINT GRAPHITI_URL API_PORT DEPLOYMENT_MODE \
@@ -268,6 +268,11 @@ pm_env_validate_deploy_required() {
     if [ "$extraction" = "openai" ] && [ -z "$(pm_env_get OPENAI_API_KEY "" "$file")" ]; then missing+=("OPENAI_API_KEY"); fi
 
     embed="$(pm_env_get EMBED_PROVIDER "" "$file")"
+    if [ "$embed" = "ollama" ] && [ -z "$(pm_env_get OLLAMA_URL "" "$file")" ]; then missing+=("OLLAMA_URL"); fi
+    case "$embed" in
+        ollama|openai|voyage) ;;
+        *) missing+=("EMBED_PROVIDER (must be ollama, openai, or voyage)") ;;
+    esac
     if [ "$embed" = "voyage" ] && [ -z "$(pm_env_get VOYAGE_API_KEY "" "$file")" ]; then missing+=("VOYAGE_API_KEY"); fi
     if [ "$embed" = "openai" ] && [ -z "$(pm_env_get OPENAI_API_KEY "" "$file")" ]; then missing+=("OPENAI_API_KEY"); fi
 

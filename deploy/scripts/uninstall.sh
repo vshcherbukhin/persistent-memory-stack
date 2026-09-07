@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Uninstall the local persistent-memory stack.
 # If memory rows exist, offer a dashboard-compatible JSON or encrypted .pm export
-# before removing Compose containers, networks, volumes, images, and generated env.
+# before stopping Compose services. Persistent data/env deletion requires a
+# separate explicit choice; image cleanup is exact-owned and reference-aware.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/host-platform.sh"
@@ -59,15 +60,14 @@ WHAT IT DOES
        - persistent-memory-export-<timestamp>.json
        - persistent-memory-export-<timestamp>.pm  (encrypted, password protected)
      in the repository root.
-  4. Stops and removes the local Compose resources, including their volumes and images.
-  5. Removes leftover persistent-memory-* image tags, including old :dev images.
-  6. Removes the generated .env.persistent-memory file.
+  4. Stops and removes the local Compose containers and networks.
+  5. Separately asks whether to delete persistent volumes and the environment file (default: keep).
+  6. Offers cleanup of unused, provably installer-owned images and temporary artifacts.
 
 WHAT IT REMOVES
   - Persistent-memory containers and project networks.
-  - Docker named and anonymous volumes for the stack.
-  - Images used by the Compose stack plus leftover persistent-memory-* images.
-  - The generated .env.persistent-memory file.
+  - Persistent volumes and .env.persistent-memory only with explicit deletion consent.
+  - Unused images recorded by this install or bearing this exact Compose project's build labels.
 
 WHAT IT PRESERVES
   - Existing memory exports are preserved in the repository root.
@@ -477,7 +477,7 @@ export_prompt_if_needed() {
 
     echo "Found $count memory record(s)."
     if ! prompt_yes_no "Export memories before uninstalling the stack?" "y"; then
-        warn "Continuing without memory export. Docker volumes and images will be removed."
+        warn "Continuing without memory export. A separate prompt controls persistent data deletion."
         return 0
     fi
 
@@ -498,21 +498,12 @@ export_prompt_if_needed() {
 }
 
 remove_project_images() {
-    local images=()
-    local image
-    while IFS= read -r image; do
-        [ -n "$image" ] && images+=("$image")
-    done < <(
-        docker image ls --format '{{.Repository}}:{{.Tag}}' \
-            | awk '/^persistent-memory(-|:)/ && $0 !~ /:<none>$/ { print }' \
-            | sort -u
-    )
-    if [ "${#images[@]}" -eq 0 ]; then
-        ok "No leftover persistent-memory image tags found."
+    if [ ! -f "$ENV_RUNTIME" ]; then
+        warn "No saved environment to prove image ownership; images were preserved."
         return 0
     fi
-    docker image rm -f "${images[@]}" >/dev/null
-    ok "Removed leftover persistent-memory image tags (${#images[@]})."
+    # Includes stopped/foreign container references; no force or prefix matching.
+    node "$REPO_ROOT/scripts/docker-image-lifecycle.mjs" uninstall-images --all-profiles
 }
 
 remove_generated_env() {
@@ -526,15 +517,27 @@ remove_generated_env() {
 
 uninstall_stack() {
     section "Uninstall stack"
-    if ! prompt_yes_no "Remove persistent-memory containers, networks, volumes, images, and generated env now?" "y"; then
+    if ! prompt_yes_no "Stop and remove persistent-memory containers and networks now?" "n"; then
         warn "Uninstall cancelled. Any export created above was kept."
         exit 0
     fi
 
-    "${COMPOSE[@]}" down --remove-orphans --volumes --rmi all
-    ok "Persistent-memory Compose resources removed."
-    remove_project_images
-    remove_generated_env
+    local delete_data=0
+    if prompt_yes_no "Also permanently delete stack data volumes and .env.persistent-memory (memories and credentials)?" "n"; then
+        delete_data=1
+        "${COMPOSE[@]}" down --remove-orphans --volumes
+    else
+        "${COMPOSE[@]}" down --remove-orphans
+        ok "Persistent data volumes and .env.persistent-memory were preserved."
+    fi
+    ok "Persistent-memory containers and networks removed."
+    if prompt_yes_no "Remove unused installer-owned images and disposable image-check artifacts?" "y"; then
+        remove_project_images
+    fi
+    if [ "$delete_data" = "1" ]; then
+        remove_generated_env
+        rm -f "$REPO_ROOT/.local/install-artifacts/success.json"
+    fi
 }
 
 if [[ "${1:-}" == "--agent-cleanup-only" ]]; then

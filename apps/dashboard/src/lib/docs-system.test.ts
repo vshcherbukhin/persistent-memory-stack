@@ -566,7 +566,7 @@ describe('dashboard documentation integration', () => {
     const styles = root('documentation/stylesheets/pm-management.css')
     const history = root('documentation/release-history.md')
 
-    expect(docsPackage.version).toBe('1.0.0')
+    expect(docsPackage.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(requirements.trim()).toBe('mkdocs-material==9.7.6')
     expect(config).toContain('site_name: PM Management Documentation')
     expect(config).toContain('custom_dir: documentation/overrides')
@@ -580,7 +580,10 @@ describe('dashboard documentation integration', () => {
     expect(styles).toContain('--pm-accent: #16a7db')
     expect(styles).toContain('.pm-docs-version')
     expect(history).toMatch(/^# Documentation Release History/m)
-    expect([...history.matchAll(/^## (\d+\.\d+\.\d+) -/gm)].map((match) => match[1])).toEqual([docsPackage.version])
+    const releasedVersions = [...history.matchAll(/^## (\d+\.\d+\.\d+) -/gm)].map((match) => match[1])
+    expect(releasedVersions[0]).toBe(docsPackage.version)
+    expect(releasedVersions).toContain('1.0.0')
+    expect(new Set(releasedVersions).size).toBe(releasedVersions.length)
   })
 
   it('keeps a complete screenshot-backed Personal Space guide', () => {
