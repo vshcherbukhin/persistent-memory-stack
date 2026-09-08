@@ -27,6 +27,7 @@ import {
 import {
   readDefaultRule,
   writeRuleTargets,
+  ruleRepairWarning,
   codexMemoryFile,
   type RuleTarget,
 } from './rule.js'
@@ -275,7 +276,8 @@ export function refreshAgentInstall(input: RefreshAgentInstallInput): RefreshAge
 
   const targets = [...ruleTargets.values()]
   if (targets.length > 0) {
-    writeRuleTargets(targets, readDefaultRule())
+    const result = writeRuleTargets(targets, readDefaultRule())
+    messages.push(...result.repairs.map(ruleRepairWarning))
     for (const target of targets) messages.push(`refreshed ${target.ruleFile} (+ ${target.memoryFile})`)
   }
 

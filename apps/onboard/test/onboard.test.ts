@@ -296,8 +296,10 @@ describe('prereq parsers', () => {
     expect(parseComposeVersion('Docker Compose version v2.32.1', 0).ok).toBe(true)
     expect(parseComposeVersion('docker-compose version 1.29.2', 0).ok).toBe(false)
   })
-  it('parseNodeVersion: 22.12+ ok', () => {
-    expect(parseNodeVersion('v25.6.1').ok).toBe(true)
+  it('parseNodeVersion: supported LTS lines only', () => {
+    expect(parseNodeVersion('v22.12.0').ok).toBe(true)
+    expect(parseNodeVersion('v24.14.1').ok).toBe(true)
+    expect(parseNodeVersion('v25.6.1').ok).toBe(false)
     expect(parseNodeVersion('v18.0.0').ok).toBe(false)
   })
   it('parseOllamaTags + hasModel', () => {

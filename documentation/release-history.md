@@ -3,6 +3,24 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.1.3 - 2026-09-08
+
+[GitHub release v1.1.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.3)
+
+- Documents Node 24 LTS or Node 22.12+ within 22.x, Homebrew selection and the
+  need to restart setup after changing the running interpreter. Newer Current
+  Node releases are not yet validated for this application.
+- Explains the named setup substeps and how to find the underlying command
+  error without treating a wrapper failure as a proven Prisma incompatibility.
+- Describes automatic recovery of damaged memory-instruction markers, original
+  backups, retained user text and conditions that still stop writes safely.
+- Updates the public wizard to install Personal Memories directly after review;
+  optional Shared Memories connections remain a separate dashboard operation.
+- Distinguishes automated and browser verification from an unverified physical
+  Mac installation. Includes version-specific
+  [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.3/README.md)
+  and the `npm run update-persistent-memory -- --release 1.1.3` update command.
+
 ## 1.1.2 - 2026-09-08
 
 [GitHub release v1.1.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.2)

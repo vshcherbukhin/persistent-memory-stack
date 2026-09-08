@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { refreshAgentInstall } from '../server/agent-update'
@@ -101,6 +101,26 @@ describe('Windows agent refresh and host profile wiring', () => {
     expect(result.ruleWrites).toBe(0)
     expect(existsSync(f.profiles.claudeDir)).toBe(false)
     expect(existsSync(f.profiles.codexDir)).toBe(false)
+  })
+
+  it('repairs existing prompt-only markers and reports the exact backup without exposing instruction contents', () => {
+    const f = fixture()
+    const instructions = join(f.profiles.codexDir, 'AGENTS.md')
+    const original = '<!-- persistent-memory:begin -->\r\n## Persistent Memory Usage\r\nKeep fixture-private-policy.\r\n'
+    write(instructions, original)
+    const result = refreshAgentInstall({ root: f.root, home: f.home, profileEnv: f.profileEnv, env: {} })
+    const backup = join(f.profiles.codexDir, readdirSync(f.profiles.codexDir).find(name => name.includes('.persistent-memory-backup-'))!)
+    expect(result.registrationWrites).toBe(0)
+    expect(result.ruleWrites).toBe(1)
+    expect(result.messages.join('\n')).toContain('WARN: Repaired incomplete or nested persistent-memory markers')
+    expect(result.messages.join('\n')).toContain(instructions)
+    expect(result.messages.join('\n')).toContain(backup)
+    expect(result.messages.join('\n')).not.toContain('fixture-private-policy')
+    expect(readFileSync(backup, 'utf8')).toBe(original)
+    expect(readFileSync(instructions, 'utf8')).toContain('Keep fixture-private-policy.')
+    expect(existsSync(join(f.profiles.codexDir, 'rules', 'persistent-memory.md'))).toBe(true)
+    const again = refreshAgentInstall({ root: f.root, home: f.home, profileEnv: f.profileEnv, env: {} })
+    expect(again.messages.join('\n')).not.toContain('WARN: Repaired')
   })
 
   it('leaves malformed custom JSON byte-identical and reports the skipped file without its contents', () => {

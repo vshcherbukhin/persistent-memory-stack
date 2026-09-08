@@ -2,6 +2,60 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.1.3 - 2026-09-08
+
+[GitHub release v1.1.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.3)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.1.3 | Current release label and release notes. |
+| onboarding | 1.1.2 | Safe instruction recovery, personal-only public wizard, supported Node checks and clearer setup failures. |
+| docs | 1.1.3 | Node LTS selection, setup troubleshooting, instruction backups and the personal installation flow. |
+| api | 1.0.1 | Existing memory APIs and published-release metadata retained. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Recover incomplete or nested managed markers in existing Claude/Codex
+  instruction files. Back up damaged originals byte-for-byte before writing,
+  preserve their text outside the new managed block, and report each backup's
+  location. Retries keep the recovered text and do not repeat the repair.
+  Invalid custom blocks, unreadable encodings and failed backups stop safely.
+- Remove Shared Memories from the public installation wizard. Review now leads
+  directly to installation of the local Personal Memories stack, and hidden
+  connection values cannot activate a shared connection. Existing operator
+  connector flows and dashboard connections remain available separately.
+- Require Node 24 LTS (24.x) or Node 22.12+ within 22.x for host installation.
+  Check the running interpreter, keep macOS/Linux npm children on that same
+  runtime, and explain when a successful Node installation requires restarting
+  the wizard. Newer Current Node releases are not yet validated for this app.
+- Name each dependency/setup substep before it runs and identify the failed
+  substep without echoing private error details in the summary. This separates
+  snapshot, dependency, Prisma, build and agent-registration failures.
+
+Direct upgrades from public 1.0.0 through 1.1.2 preserve memories, data volumes,
+credentials and embedding configuration. This patch adds no database migration
+or embedding-model change. Use a supported Node LTS version before updating.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.1.3
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.1.3`.
+For a new installation, follow the
+[v1.1.3 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.3/README.md).
+
+Validation covers automated host, installer, instruction-recovery and release
+checks, production installer builds and Chrome wizard checks. macOS runtime
+selection is covered by controlled fixtures; a physical Mac installation has
+not been verified. The reported installation failure was traced to incomplete
+instruction markers. Node 26 was a separate runtime-policy gap, not evidence
+of Prisma incompatibility.
+
 ## 1.1.2 - 2026-09-08
 
 [GitHub release v1.1.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.2)

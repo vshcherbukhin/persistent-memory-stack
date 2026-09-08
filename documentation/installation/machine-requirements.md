@@ -50,8 +50,9 @@ minimum requirement.
 All configurations need at least 2 logical CPUs (4 recommended), Docker Linux
 containers with 4 GiB of memory (6 recommended), and 25 GiB free inside Docker
 storage (40 recommended). Supported host architectures are x64 and arm64.
-Prepare Node 24 LTS or Node 22.12+ in the Node 22 line, Git, and Docker Desktop;
-Windows also needs Git Bash.
+Prepare Node 24.x LTS or Node 22.12+ in the Node 22 line, Git, and Docker Desktop;
+Windows also needs Git Bash. Only those two Node major versions are supported;
+Node 25, 26, and other majors are not supported host runtimes for this installer.
 
 Application and model disk budgets are added when they share a filesystem.
 When Docker data is on another physical disk, that disk must also meet its

@@ -1,11 +1,17 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, win32 } from 'node:path'
+import { dirname, join, posix, win32 } from 'node:path'
 
 export function supportedNode(version = process.versions.node) {
-  const [major, minor] = version.replace(/^v/, '').split('.').map(Number)
-  return major >= 24 || (major === 22 && minor >= 12)
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version)
+  if (!match) return false
+  const [, major, minor] = match.map(Number)
+  return major === 24 || (major === 22 && minor >= 12)
+}
+
+export function assertSupportedNode(version = process.versions.node) {
+  if (!supportedNode(version)) throw new Error(`Node ${version} is outside this application's supported host versions. Use Node 24 LTS (24.x) or Node 22.12+ within 22.x, then restart the installer in that terminal. Newer Current releases are not yet validated.`)
 }
 
 export function npmInvocation(args, { env = process.env, execPath = process.execPath, exists = existsSync } = {}) {
@@ -30,8 +36,15 @@ export function findGitBash(env = process.env, exists = existsSync, probe = spaw
   throw new Error('Git for Windows Bash is required. Install Git for Windows or set PM_GIT_BASH to its full bin/bash.exe path. The WSL bash.exe launcher is not supported.')
 }
 
-export function hostEnvironment({ platform = process.platform, env = process.env, bash, home = homedir() } = {}) {
-  if (platform !== 'win32') return { ...env }
+/** npm scripts and their shebangs must resolve the same Node as their launcher. */
+export function nodeEnvironment({ platform = process.platform, env = process.env, execPath = process.execPath } = {}) {
+  if (platform === 'win32') return { ...env }
+  const runtimeDir = posix.dirname(execPath)
+  return { ...env, PATH: [runtimeDir, ...(env.PATH ?? '').split(':').filter(path => path && path !== runtimeDir)].join(':') }
+}
+
+export function hostEnvironment({ platform = process.platform, env = process.env, bash, home = homedir(), execPath = process.execPath } = {}) {
+  if (platform !== 'win32') return nodeEnvironment({ platform, env, execPath })
   if (!bash) throw new Error('A validated Git for Windows Bash path is required.')
   const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'PATH'
   const result = { ...env }
@@ -57,7 +70,8 @@ export function run(command, args, options = {}) {
   })
 }
 
-export function runNpm(args, options = {}) {
-  const invocation = npmInvocation(args, { env: options.env ?? process.env })
-  return run(invocation.command, invocation.args, options)
+export function runNpm(args, options = {}, { platform = process.platform, execPath = process.execPath, exists = existsSync, runCommand = run } = {}) {
+  const env = nodeEnvironment({ platform, execPath, env: options.env ?? process.env })
+  const invocation = npmInvocation(args, { env, execPath, exists })
+  return runCommand(invocation.command, invocation.args, { ...options, env })
 }
