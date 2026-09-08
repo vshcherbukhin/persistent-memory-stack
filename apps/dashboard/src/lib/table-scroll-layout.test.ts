@@ -635,7 +635,10 @@ describe('table scroll layout contract', () => {
     expect(css).toContain('.ui-tooltip')
     expect(css).toContain('position: fixed')
     expect(css).toContain('z-index: 2147483000')
-    expect(css).toContain('--tooltip-bg: rgba(12, 15, 19, .94)')
+    // The tooltip needs an opaque, theme-owned ground in BOTH themes; the exact
+    // value belongs to the palette, so assert the token is defined twice rather
+    // than pinning a hex that a palette change legitimately moves.
+    expect(css.match(/--tooltip-bg:/g) ?? []).toHaveLength(2)
     expect(css).toContain('backdrop-filter: blur(10px) saturate(1.15)')
     expect(css).toContain('.ui-check > input:checked + .ui-check-box')
   })

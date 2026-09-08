@@ -15,6 +15,7 @@ import { startWizardHeartbeat } from './heartbeat'
 import { ProgressBar, Field, StepList, Terminal, StatusRow, type StepState } from './components'
 import { PrereqProgress } from './PrereqProgress'
 import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
+import { applyTheme, readTheme, type ThemePreference } from './theme'
 import { EmbeddingSetup, embeddingTestSignature } from './EmbeddingSetup'
 import { ResourceSummary } from './ResourceSummary'
 import { RESOURCE_MODELS, evaluateResources, recommendResources, type ResourceSnapshot } from '../../shared/resource-policy'
@@ -197,6 +198,30 @@ function HexLogo({ size = 26 }: { size?: number }) {
   )
 }
 
+// ── Appearance toggle (header) ─────────────────────────────────────────────────
+// Setup previews the theme the dashboard will open with, using the same stored
+// preference key, so the choice survives the handoff.
+function ThemeToggle() {
+  const [theme, setTheme] = useState<ThemePreference>(() => readTheme())
+  const choose = (next: ThemePreference) => { setTheme(next); applyTheme(next) }
+  return (
+    <div className="wiz-theme" role="radiogroup" aria-label="Appearance">
+      {(['obsidian', 'porcelain'] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          aria-checked={theme === option}
+          className={theme === option ? 'active' : ''}
+          onClick={() => choose(option)}
+        >
+          {option === 'obsidian' ? 'Obsidian' : 'Porcelain'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── Left step rail (per-flow phase list; jump to a visited step) ────────────────
 function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase: Phase; personalMemoryEnabled: boolean; goto: (p: Phase) => void }) {
   const seq = phasesFor(flow, { personalMemoryEnabled })
@@ -204,7 +229,11 @@ function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase:
   return (
     <aside className="wiz-rail">
       <div className="wiz-rail-flow">{RAIL_HEADING}</div>
-      <div className="wiz-rail-list">
+      {/* --conduit fills the rail's plasma trace up to the current step. */}
+      <div
+        className="wiz-rail-list"
+        style={{ ['--conduit' as string]: `${seq.length > 1 ? (Math.max(cur, 0) / (seq.length - 1)) * 100 : 0}%` }}
+      >
         {seq.map((p, idx) => {
           const state = idx < cur ? 'done' : idx === cur ? 'current' : 'todo'
           const visited = idx <= cur
@@ -293,9 +322,10 @@ export default function App() {
       <header className="wiz-header">
         <HexLogo />
         <div className="wiz-brand">
-          <span className="wiz-title">persistent-memory</span>
+          <span className="wiz-title">Persistent Memory</span>
           <span className="wiz-sub">Guided install · host-only · 127.0.0.1:4319</span>
         </div>
+        <ThemeToggle />
       </header>
 
       <div className="wiz-stage">
@@ -343,6 +373,13 @@ export default function App() {
             {showFooter && (
               <footer className="wiz-footer">
                 <button type="button" className="ghost" onClick={() => go('back')}>← Back</button>
+                <span className="wiz-step-count">
+                  {(() => {
+                    const seq = phasesFor(flow, { personalMemoryEnabled: personalFlow })
+                    const at = seq.indexOf(phase)
+                    return at < 0 ? '' : `STEP ${String(at + 1).padStart(2, '0')} / ${seq.length}`
+                  })()}
+                </span>
                 <button type="button" className="primary" disabled={nextDisabled} onClick={() => go('next')}>
                   {phase === 'review' ? 'Generate & Install' : 'Next →'}
                 </button>

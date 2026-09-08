@@ -6,6 +6,7 @@ import { DashboardLoginModeForm } from '@/components/DashboardLoginModeForm'
 import { SettingsLayout, SettingsPageFrame, SettingsSection, type SettingsNavItem } from '@/components/settings/SettingsShell'
 import type { Settings } from '@/lib/types'
 import { capabilityHealthPresentation } from '@/lib/capabilityHealth'
+import { ThemeSwitch } from '@/components/ui/ThemeSwitch'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +86,12 @@ export default async function SettingsPage({
           href: settingsSettingHref('dashboard-login'),
         }]
       : []),
+    {
+      id: 'appearance',
+      label: 'Appearance',
+      description: 'Obsidian or Porcelain theme',
+      href: settingsSettingHref('appearance'),
+    },
   ]
   const activeSetting = settingsItems.some((item) => item.id === requestedSetting)
     ? requestedSetting!
@@ -131,6 +138,17 @@ export default async function SettingsPage({
             <DashboardLoginModeForm current={settings} showHeader={false} />
           </SettingsSection>
         ) : null}
+        <SettingsSection
+          id="appearance"
+          title="Appearance"
+          description="Choose how this dashboard looks. Appearance is stored per browser, so it applies to you on this computer and never changes what anyone else sees."
+        >
+          <ThemeSwitch />
+          <p className="note" style={{ marginTop: 14, maxWidth: 680 }}>
+            Both themes are first-class: the same palette relationships, contrast targets and status colours,
+            tuned for a dark or a light ground. You can also change this from your profile.
+          </p>
+        </SettingsSection>
       </SettingsLayout>
     </SettingsPageFrame>
   )
