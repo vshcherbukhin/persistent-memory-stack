@@ -44,6 +44,8 @@ export interface UpdateStatus {
   latestVersion: string | null
   updateAvailable: boolean
   updateBranch?: string
+  releaseTag?: string
+  releaseUrl?: string
   autoUpdateReady?: boolean
   currentCommit?: string
   latestCommit?: string

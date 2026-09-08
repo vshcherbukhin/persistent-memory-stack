@@ -18,7 +18,8 @@ import {
   shouldSkipPostUpdateMarkerAfterShownVersion,
   shouldPollUpdateHandoff,
   type UpdateHandoffState,
-  updateCommandForBranch,
+  updateCommandForRelease,
+  githubReleaseUrl,
   updateHandoffProgress,
   updateHandoffTitle,
   updateStatusPollMs,
@@ -122,12 +123,8 @@ export function AppHeader({
   const handoffBlocking = isUpdateHandoffBlocking(updateHandoff)
   const handoffProgress = updateHandoffProgress(updateHandoff)
   const updatePollMs = handoffBlocking ? 1_000 : updateStatusPollMs(updateStatus)
-  const updateCommand = useMemo(() => updateCommandForBranch(updateStatus?.updateBranch), [updateStatus?.updateBranch])
-  const updateBranch = updateStatus?.updateBranch?.trim() || 'master'
-  const updateTargetsReleaseBranch = updateBranch === 'master'
-  const updateToastSubtitle = !updateTargetsReleaseBranch && updateStatus?.latestVersion === updateStatus?.currentVersion
-    ? `origin/${updateBranch} has newer commits`
-    : `${updateStatus?.currentVersion ?? APP_VERSION} → ${updateStatus?.latestVersion ?? 'unknown'}`
+  const updateCommand = updateCommandForRelease(updateStatus?.latestVersion)
+  const updateToastSubtitle = `${updateStatus?.currentVersion ?? APP_VERSION} → ${updateStatus?.latestVersion ?? 'unknown'}`
 
   const setUpdateHandoff = (state: UpdateHandoffState | null) => {
     updateHandoffRef.current = state
@@ -444,13 +441,13 @@ export function AppHeader({
               <div className="update-version">{updateStatus?.currentVersion ?? APP_VERSION}</div>
             </div>
             <div>
-              <div className="section-label">Latest version</div>
+              <div className="section-label">Latest published version</div>
               <div className="update-version">{updateStatus?.latestVersion ?? 'unknown'}</div>
             </div>
-            {!updateTargetsReleaseBranch ? (
+            {updateStatus?.releaseTag ? (
               <div>
-                <div className="section-label">Branch</div>
-                <div className="update-version">origin/{updateBranch}</div>
+                <div className="section-label">GitHub release</div>
+                <a className="update-version" href={githubReleaseUrl(updateStatus.latestVersion)} target="_blank" rel="noopener noreferrer">{updateStatus.releaseTag}</a>
               </div>
             ) : null}
           </div>
@@ -458,7 +455,7 @@ export function AppHeader({
           <div className="update-guidance">
             <div className="update-guidance-card">
               <div className="section-label">Update command</div>
-              <p>Run the terminal updater from this repository. It uses your normal host Git credentials and snapshots local data before rebuilds.</p>
+              <p>Run the terminal updater from this repository. It installs the published GitHub release and snapshots local data before rebuilds. No GitHub token is required for this public repository.</p>
               <div className="update-command-row">
                 <code>{updateCommand}</code>
                 <button type="button" className="secondary" onClick={() => void copyUpdateCommand()}>{commandCopied ? 'Copied' : 'Copy'}</button>
@@ -491,6 +488,7 @@ function ReleaseHistoryCards({ releases, fallback }: { releases: ReleaseHistoryI
             <div>
               <div className="release-card-title">{release.version}</div>
               <div className="release-card-date">{release.date}</div>
+              <a href={githubReleaseUrl(release.version)} target="_blank" rel="noopener noreferrer">View on GitHub Releases</a>
             </div>
             {release.latest ? <span className="release-latest-badge">Latest release</span> : null}
           </div>

@@ -37,7 +37,11 @@ export async function route(
   }
   if (pathname === '/start') {
     if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
-    return { status: 202, body: await ops.start() }
+    return { status: 422, body: {
+      error: 'terminal_update_required',
+      message: 'Run npm run update-persistent-memory from the repository terminal.',
+      details: 'The terminal coordinator validates published releases and required intermediate upgrades before changing services.',
+    } }
   }
   if (pathname === '/logs') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
@@ -80,16 +84,15 @@ export function createServer(deps: ServerDeps): http.Server {
 export function start(): http.Server {
   const repoDir = process.env.UPDATE_REPO_DIR ?? '/workspace'
   const backupRoot = process.env.UPDATE_BACKUP_ROOT ?? `${repoDir}/.local/update-backups`
-  const branch = process.env.UPDATE_BRANCH ?? publicUpdateSource.branch
   const token = process.env.UPDATE_RUNNER_TOKEN ?? ''
   const port = Number.parseInt(process.env.PORT ?? '9092', 10)
-  const ops = createUpdateRunner({ repoDir, backupRoot, branch })
+  const ops = createUpdateRunner({ repoDir, backupRoot })
   if (!token) {
     console.warn('WARN: [update-runner] UPDATE_RUNNER_TOKEN is empty — all requests will be rejected (401).')
   }
   const server = createServer({ token, ops })
   server.listen(port, '0.0.0.0', () => {
-    console.info(`INFO: [update-runner] listening on :${port} (repo ${repoDir}, branch ${branch})`)
+    console.info(`INFO: [update-runner] listening on :${port} (repo ${repoDir}, published releases from ${publicUpdateSource.owner}/${publicUpdateSource.repo})`)
   })
   return server
 }

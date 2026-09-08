@@ -11,10 +11,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = readPublicUpdateSource()
 const repoPath = `${source.owner}/${source.repo}`
 
-test('lifecycle reads the shared public master source manifest', () => {
+test('lifecycle reads the shared published-release source manifest', () => {
   const manifest = JSON.parse(readFileSync(join(root, 'layers/update-ops/update-flow/public-source.json'), 'utf8'))
   assert.deepEqual(source, manifest)
   assert.equal(source.branch, 'master')
+  assert.equal(source.channel, 'releases')
 })
 
 test('public source accepts matching HTTPS and normal GitHub SSH origins only', () => {

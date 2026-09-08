@@ -17,24 +17,33 @@ nav_order: 120
 
 ## Purpose
 
-Personal Space automatically checks the public master release branch for newer versions, shows release notes, provides the supported updater command, and displays a blocking progress handoff while local services rebuild.
+Personal Space automatically checks published stable GitHub Releases for newer versions, shows release notes, provides the supported updater command, and displays a blocking progress handoff while local services rebuild.
 
 ## Read the page
 
 Release checks work automatically after installation. No repository fields,
 GitHub token, or connection test is required. The dashboard checks the built-in
-public `master` source and shows **Update available** when a newer release exists.
+public repository's latest stable GitHub Release and shows **Update available**
+when its version is newer than the installed version. GitHub's designated latest
+release is used; checks do not sort every tag by version. Drafts, prereleases,
+and unpublished commits on `master` are not offered as updates. The tag, package
+version, public release line and release notes must agree at the exact tagged
+commit. The updater validates that commit's upgrade compatibility contract
+before installation.
 Checks use a 15-minute cache, share concurrent requests, and retry temporary errors
 with increasing delays. The last successful result remains available while the
 connection recovers.
 
 ![Release notes modal](../../assets/spaces/personal/release-notes-modal.png)
 
-The top-right release icon opens versioned release cards with component versions and user-facing changes. After a successful update, the dashboard can reopen the notes for the installed version automatically.
+The top-right release icon opens versioned release cards with component versions,
+user-facing changes and a link to that exact version on GitHub Releases. Update
+Details also links to the corresponding GitHub Release. After a successful update,
+the dashboard can reopen the notes for the installed version automatically.
 
 ![Update progress handoff](../../assets/spaces/personal/update-progress.png)
 
-During an update, the dashboard displays the target version, current phase, timestamp, and progress percentage. Once the update source has been fetched, the displayed version is read from that fetched branch rather than from the release currently running on the machine. This handoff remains blocking while services are being rebuilt and the dashboard is not ready for normal use. An already-open dashboard switches to the handoff as soon as an update starts. If the browser is closed, the update continues safely and the next dashboard visit opens the completed release notes.
+During an update, the dashboard displays the target version, current phase, timestamp, and progress percentage. The displayed target identifies the validated release source being installed, rather than the release currently running on the machine. This handoff remains blocking while services are being rebuilt and the dashboard is not ready for normal use. An already-open dashboard switches to the handoff as soon as an update starts. If the browser is closed, the update continues safely and the next dashboard visit opens the completed release notes.
 
 Long migration phases can also publish a read-only progress observation below the overall percentage. For example, Graph V2 rebuild reports completed, total, and remaining memories approximately once per minute. This is detail about the current phase, not a second completion bar; a failed observation does not interrupt the update or change the migration result.
 
@@ -42,7 +51,7 @@ Long migration phases can also publish a read-only progress observation below th
 
 1. When the bottom notification says **Update available**, select **Details**.
 2. Review current and latest versions, release notes, and any MCP restart warning.
-3. Copy the displayed update command and run it from the repository in a terminal. For public releases, it is `npm run update-persistent-memory -- --branch master`, which explicitly selects the public release branch. Opening Details does not start the update.
+3. Copy the displayed update command and run it from the repository in a terminal. It uses `npm run update-persistent-memory -- --release <version>` with the displayed release version, so it installs that published release. Opening Details does not start the update.
 4. Keep the dashboard open while the progress handoff reports the rebuild. The page reloads when the updated dashboard is ready.
 5. Read the release notes after reload. Restart Codex or Claude when the release explicitly says MCP changes require it.
 
@@ -52,6 +61,13 @@ Version 1.0.0 establishes the public release baseline. Later releases declare
 supported upgrade paths in their release contract. Automatic checks accept only
 the public release line, so earlier development version numbers are not offered
 as updates. Install updates using the command shown in the dashboard.
+
+Running `npm run update-persistent-memory` without a target selects the latest
+published stable release. The updater resolves its tag to a commit and uses that
+exact source throughout the update. A missing, unpublished, mismatched or invalid
+release fails before installation; it does not fall back to `master`. If an
+upgrade needs an intermediate release, that release must also be published and
+pass its compatibility checks.
 
 ## GitHub Releases, Packages, and Actions
 
@@ -71,9 +87,9 @@ mean those workspaces are published in GitHub Packages or npm.
 These releases distribute source. The installer builds the application images
 locally using the existing Dockerfiles. Publishing a GitHub Release alone does
 not produce Windows/macOS executables or prebuilt Docker images. The dashboard
-continues to compare the version on public `master`; it does not use the GitHub
-Releases API as its update feed. Merging a version bump to `master` makes it
-eligible for automatic checks, while installing it remains explicit.
+uses the GitHub Releases API as its update feed. Merging a version bump to
+`master` alone does not make it eligible: a stable GitHub Release must be
+published for the matching tag. Installing it remains explicit.
 
 For future prebuilt distribution, GHCR images would fit this Docker application.
 That requires builds for Linux `amd64` and `arm64`, versioned image tags and
@@ -91,9 +107,9 @@ and [container registry guide](https://docs.github.com/en/packages/working-with-
 
 | State | Meaning |
 | --- | --- |
-| Up to date | The public master branch has no newer release for this installation. |
-| Update available | A newer public master release was detected; Details is available. |
-| Details open | The dashboard shows versions, notes, branch context, and the terminal update command. |
+| Up to date | GitHub's latest stable release is not newer than the installed version. |
+| Update available | A newer published stable release was detected; Details is available. |
+| Details open | The dashboard shows versions, notes, release source, and the terminal update command. |
 | Updating | The handoff overlay shows the active rebuild phase and progress. |
 | Ready | The updated dashboard reloads and may open the installed release notes. |
 | Failed | The handoff or Details view reports an error; do not assume the new version is active. |
@@ -111,6 +127,8 @@ Do not treat the version shown in a screenshot as the current release. Always re
 | Problem | What to do |
 | --- | --- |
 | No update-available notification appears | Checks are automatic. Allow the cache or network retry delay to pass; inspect the update-runner log if GitHub remains unreachable. |
+| A newer commit or tag exists but no update appears | Only published stable GitHub Releases qualify. A branch commit, bare tag, draft or prerelease is not an automatic update. |
+| The requested release cannot be validated | Check that its stable GitHub Release is published and its tag, package version and upgrade contract agree. The updater will not substitute a branch head. |
 | Details opens but nothing updates | This is expected until you run the displayed command in a terminal. |
 | Progress appears stalled | Keep the terminal and dashboard open, read the current phase and error, and wait for long rebuild steps before retrying. |
 | Dashboard reloads but MCP tools are stale | Follow the release warning and restart Codex or Claude so MCP schemas reload. |

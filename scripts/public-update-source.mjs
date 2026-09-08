@@ -10,8 +10,9 @@ export function readPublicUpdateSource(path = manifest) {
   if (!source || typeof source !== 'object'
     || !/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/iu.test(source.owner ?? '')
     || !/^[a-z\d_.-]+$/iu.test(source.repo ?? '') || ['.', '..'].includes(source.repo)
-    || source.branch !== 'master' || typeof source.releaseLine !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(source.releaseLine)) throw new Error('The public update source manifest is invalid.')
-  return { owner: source.owner, repo: source.repo, branch: source.branch, releaseLine: source.releaseLine }
+    || source.branch !== 'master' || source.channel !== 'releases'
+    || typeof source.releaseLine !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(source.releaseLine)) throw new Error('The public update source manifest is invalid.')
+  return { owner: source.owner, repo: source.repo, branch: source.branch, channel: source.channel, releaseLine: source.releaseLine }
 }
 
 export function isPublicUpdateOrigin(remote, source = readPublicUpdateSource()) {

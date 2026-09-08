@@ -14,17 +14,17 @@ describe('update-runner auth and routes', () => {
     expect(authOk('Bearer secret', 'secret')).toBe(true)
   })
 
-  it('returns update status and starts exactly one bounded update action', async () => {
+  it('returns update status but refuses legacy sidecar execution before any operation', async () => {
     const o = ops()
     await expect(route('GET', '/status', new URLSearchParams(), o)).resolves.toMatchObject({
       status: 200,
       body: { latestVersion: '3.5.0', updateAvailable: true },
     })
     await expect(route('POST', '/start', new URLSearchParams(), o)).resolves.toMatchObject({
-      status: 202,
-      body: { ok: true },
+      status: 422,
+      body: { error: 'terminal_update_required', message: expect.stringContaining('npm run update-persistent-memory') },
     })
-    expect(o.start).toHaveBeenCalledTimes(1)
+    expect(o.start).not.toHaveBeenCalled()
   })
 
   it('rejects unknown verbs before any update operation can run', async () => {

@@ -2,7 +2,69 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.1.1 - 2026-09-08
+
+[GitHub release v1.1.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.1)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.1.1 | Published-release notices, exact-version GitHub links, and matching terminal update commands. |
+| api | 1.0.1 | Exposes published-release metadata and directs installation through the host coordinator. |
+| update-runner / update-flow layer | 1.0.1 | Anonymous stable-release discovery and immutable tag validation; sidecar provides status rather than installing updates. |
+| update-coordinator | 1.0.1 | Pins published commits for each upgrade step and preserves those pins during recovery. |
+| docs | 1.1.1 | Published-release update instructions, release links, and release-note validation and extraction. |
+| onboarding | 1.1.0 | Existing resource-aware installation and embedding-provider choices retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained; no new database migration. |
+| worker / database | 1.0.0 | Existing processing and durable storage retained. |
+| mcp / mcp-runtime | 1.0.0 | Existing memory tools and stream protocol retained. |
+| core-tools | 1.0.0 | Existing maintenance tools retained. |
+| graph / graphiti service | 1.0.0 | Existing memory graph behavior retained. |
+| memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing retrieval, evidence and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+Updates now follow published stable GitHub Releases, so unreleased work on
+`master` is not advertised or installed by the default update flow.
+
+- Resolve the latest published release or an explicitly requested version to
+  its exact Git tag commit, including annotated tags. Check the package version,
+  public release lineage and release history at that immutable commit.
+  Reject drafts, prereleases, unpublished tags and mismatched metadata.
+- Keep update checks anonymous, cached and bounded, with retry backoff for
+  temporary network failures and GitHub rate limits. No GitHub key is required.
+- Pin every required upgrade step to a published commit. Reject changed tags
+  and modified release worktrees; recovery retains the original release pins.
+  Explicit `--dev` and `--branch` commands remain available for developer testing.
+- Accept handoff from earlier public-release launchers only after checking
+  their target version against its exact published tag commit.
+- Route installation through the host coordinator and its snapshot/recovery
+  flow. The dashboard sidecar provides update status and terminal guidance;
+  the old direct container update path cannot bypass the coordinator.
+- Link each release card and release-note entry to its exact GitHub Release.
+  Validate those links during release preparation and extract the matching
+  release body for publication. Include the shared source manifest and release
+  resolver in the dashboard, sidecar and coordinator build artifacts they require.
+
+Direct upgrades from public 1.0.0 and 1.1.0 preserve saved credentials,
+embedding configuration, memories and data volumes. This patch adds no schema
+migration or embedding-model change.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.1.1
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.1.1`.
+For a new installation, follow the
+[v1.1.1 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.1/README.md).
+
+Verification includes automated release, host/coordinator, API and dashboard
+checks, production image builds, Windows deployment checks and live published
+release discovery. A physical macOS update was not exercised for this patch.
+
 ## 1.1.0 - 2026-09-07
+
+[GitHub release v1.1.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.0)
 
 | Service | Version | Change |
 | --- | --- | --- |
@@ -64,6 +126,8 @@ installation and deliberate Docker-storage corruption recovery have not been
 validated for this release.
 
 ## 1.0.0 - 2026-09-06
+
+[GitHub release v1.0.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.0.0)
 
 | Service | Version | Change |
 | --- | --- | --- |

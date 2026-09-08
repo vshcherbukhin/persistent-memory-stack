@@ -50,9 +50,11 @@ async function copyPrivateIfMissing(source, destination) {
 async function requireReadable(path) {
     await access(path, constants.R_OK);
 }
-async function artifactIdFor(artifact, contractLibrary) {
-    const [coordinator, contract] = await Promise.all([readFile(artifact), readFile(contractLibrary)]);
-    return createHash('sha256').update(coordinator).update('\0').update(contract).digest('hex').slice(0, 24);
+async function artifactIdFor(paths) {
+    const hash = createHash('sha256');
+    for (const bytes of await Promise.all(paths.map(path => readFile(path))))
+        hash.update(bytes).update('\0');
+    return hash.digest('hex').slice(0, 24);
 }
 export async function installCoordinator(options) {
     const repoRoot = canonicalInstallationRoot(options.repoRoot);
@@ -60,8 +62,11 @@ export async function installCoordinator(options) {
     const installationHome = join(resolve(options.coordinatorBaseDir), installationId);
     const artifact = join(resolve(options.artifactDir), 'coordinator.mjs');
     const contractLibrary = join(resolve(options.artifactDir), 'lib', 'upgrade-contract.mjs');
-    await Promise.all([requireReadable(artifact), requireReadable(contractLibrary)]);
-    const artifactId = await artifactIdFor(artifact, contractLibrary);
+    const releaseLibrary = join(resolve(options.artifactDir), 'lib', 'github-releases.mjs');
+    const publicSource = join(resolve(options.artifactDir), 'lib', 'public-source.json');
+    const artifacts = [artifact, contractLibrary, releaseLibrary, publicSource];
+    await Promise.all(artifacts.map(requireReadable));
+    const artifactId = await artifactIdFor(artifacts);
     const home = join(installationHome, 'bundles', artifactId);
     await mkdir(join(home, 'lib'), { recursive: true, mode: 0o700 });
     await mkdir(join(installationHome, 'state'), { recursive: true, mode: 0o700 });
@@ -72,6 +77,8 @@ export async function installCoordinator(options) {
     await chmod(join(installationHome, 'state'), 0o700);
     await copyPrivateIfMissing(artifact, join(home, 'coordinator.mjs'));
     await copyPrivateIfMissing(contractLibrary, join(home, 'lib', 'upgrade-contract.mjs'));
+    await copyPrivateIfMissing(releaseLibrary, join(home, 'lib', 'github-releases.mjs'));
+    await copyPrivateIfMissing(publicSource, join(home, 'lib', 'public-source.json'));
     await writeJsonAtomic(join(installationHome, 'installation.json'), {
         protocolVersion: 1,
         installationId,
@@ -192,7 +199,7 @@ export async function planCoordinatorBootstrap(options) {
 }
 async function runCommand(command, args, cwd) {
     return await new Promise((resolveRun) => {
-        const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
         let stdout = '';
         let stderr = '';
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -240,6 +247,119 @@ export async function loadTrustedUpgradeContracts(repoRoot, branch, releaseLine,
     }
     return contracts;
 }
+function validatePublishedPin(release) {
+    if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(release.version)
+        || release.tag !== `v${release.version}` || !/^[0-9a-f]{40}$/u.test(release.commit)) {
+        throw new Error('Invalid published release selection. Resolve a published GitHub release before updating.');
+    }
+}
+async function resolvePublishedRelease(options) {
+    const releaseModule = await import(new URL('./lib/github-releases.mjs', import.meta.url).href);
+    return await releaseModule.fetchPublishedRelease(options);
+}
+export async function publishedTargetForCoordinator(repoRoot, releaseLine, env, resolveRelease = resolvePublishedRelease) {
+    const pin = {
+        tag: env.PM_COORDINATOR_RELEASE_TAG ?? '',
+        version: env.PM_COORDINATOR_RELEASE_VERSION ?? '',
+        commit: env.PM_COORDINATOR_RELEASE_COMMIT ?? '',
+    };
+    // The v1.1.0 shell installs this new bundle after resolving its checkout but
+    // cannot export fields introduced in v1.1.1. Resolve that exact version anew
+    // from published Releases; main still verifies the tag and checkout SHA.
+    if (env.PM_COORDINATOR_SOURCE_MODE === undefined && !pin.tag && !pin.version && !pin.commit) {
+        if (env.PM_COORDINATOR_TARGET_RESOLVED !== '1') {
+            throw new Error('Legacy coordinator handoff has no resolved update target. Run the supported host updater.');
+        }
+        const pkg = await readJson(join(repoRoot, 'package.json'));
+        const version = versionFromDurableState(pkg);
+        if (!version || !hasReleaseLine(pkg, releaseLine, 'persistentMemoryReleaseLine')) {
+            throw new Error('Legacy coordinator target package does not belong to the current public release line.');
+        }
+        const published = await resolveRelease({ version });
+        validatePublishedPin(published);
+        if (published.version !== version)
+            throw new Error('Published release differs from the legacy coordinator target version.');
+        return published;
+    }
+    validatePublishedPin(pin);
+    return pin;
+}
+export async function fetchPublishedReleaseCommit(repoRoot, release, releaseLine) {
+    validatePublishedPin(release);
+    let fetched;
+    try {
+        await gitOutput(repoRoot, ['fetch', '--quiet', '--no-recurse-submodules', '--no-tags', 'origin', `refs/tags/${release.tag}`]);
+        fetched = await gitOutput(repoRoot, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
+    }
+    catch {
+        // Git tracing, proxies, and credential helpers can include secrets in diagnostics.
+        throw new Error('Published release Git fetch failed. Check repository access and connectivity, then retry.');
+    }
+    if (fetched !== release.commit)
+        throw new Error(`Published tag ${release.tag} changed while fetching. Refusing to update.`);
+    if (await versionAtCommit(repoRoot, fetched, releaseLine) !== release.version) {
+        throw new Error(`Published tag ${release.tag} does not match its package version and public release line.`);
+    }
+    return fetched;
+}
+/** Release-mode contracts come only from published, pinned tags, never branch history. */
+export async function loadPublishedUpgradeContracts(repoRoot, releaseLine, target, options = {}) {
+    const upgrade = await loadUpgradeContract(options.moduleUrl);
+    const resolveRelease = options.resolveRelease ?? resolvePublishedRelease;
+    const releases = new Map();
+    const rawContracts = new Map();
+    const queued = new Set([target.version]);
+    const pending = [target.version];
+    const signal = AbortSignal.timeout(120_000);
+    while (pending.length) {
+        if (signal.aborted)
+            throw new Error('Published release planning timed out. Retry when GitHub is reachable.');
+        const version = pending.shift();
+        if (releases.size >= 25)
+            throw new Error('Published release dependency limit exceeded.');
+        const release = version === target.version ? target : await resolveRelease({ version, signal });
+        if (release.version !== version)
+            throw new Error(`Published release resolver returned the wrong version for ${version}.`);
+        await fetchPublishedReleaseCommit(repoRoot, release, releaseLine);
+        const raw = JSON.parse(await gitOutput(repoRoot, ['show', `${release.commit}:release/upgrade.json`]));
+        if (!raw || typeof raw !== 'object' || !Array.isArray(raw.requiredStops)) {
+            throw new Error(`Published release ${version} has an invalid upgrade contract.`);
+        }
+        releases.set(version, release);
+        rawContracts.set(version, raw);
+        for (const stop of raw.requiredStops) {
+            if (!stop || typeof stop.release !== 'string' || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(stop.release)) {
+                throw new Error(`Published release ${version} has an invalid required stop.`);
+            }
+            if (!queued.has(stop.release)) {
+                queued.add(stop.release);
+                pending.push(stop.release);
+            }
+        }
+    }
+    const availableReleases = new Set(releases.keys());
+    const contracts = new Map();
+    for (const [version, raw] of rawContracts) {
+        contracts.set(version, upgrade.validateUpgradeContract(raw, { packageVersion: version, availableReleases }));
+    }
+    return { contracts, releases };
+}
+async function assertPinnedWorktree(root, commit) {
+    if (await gitOutput(root, ['rev-parse', 'HEAD']) !== commit)
+        throw new Error(`Release worktree ${root} points to a different commit.`);
+    if (await gitOutput(root, ['status', '--porcelain', '--untracked-files=no']))
+        throw new Error(`Release worktree ${root} has tracked changes. Refusing to execute modified release code.`);
+}
+export async function coordinatorPublishedReleaseWorktree(repoRoot, coordinatorHome, release) {
+    validatePublishedPin(release);
+    const worktree = join(coordinatorHome, 'worktrees', `persistent-memory-${release.version}-${release.commit.slice(0, 12)}`);
+    if (!existsSync(worktree)) {
+        await mkdir(dirname(worktree), { recursive: true, mode: 0o700 });
+        await gitOutput(repoRoot, ['worktree', 'add', '--detach', worktree, release.commit]);
+    }
+    await assertPinnedWorktree(worktree, release.commit);
+    return worktree;
+}
 export async function coordinatorReleaseWorktree(repoRoot, coordinatorHome, branch, release, releaseLine) {
     const commits = (await gitOutput(repoRoot, ['rev-list', `origin/${branch}`])).split(/\r?\n/u).filter(Boolean);
     let commit;
@@ -272,6 +392,15 @@ export async function coordinatorReleaseWorktree(repoRoot, coordinatorHome, bran
 function progressPathFor(coordinatorHome) {
     return join(coordinatorHome, 'state', 'hop-progress.json');
 }
+function validPublishedPlanPins(input) {
+    if (input.releaseCommits === undefined)
+        return true;
+    const pins = input.releaseCommits;
+    return pins !== null && typeof pins === 'object' && !Array.isArray(pins)
+        && Object.entries(pins).every(([version, commit]) => /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version) && typeof commit === 'string' && /^[0-9a-f]{40}$/u.test(commit))
+        && input.path.every(version => typeof pins[version] === 'string')
+        && pins[input.targetVersion] === input.targetRevision;
+}
 function isExecutionState(value) {
     const input = value;
     if (!input)
@@ -283,7 +412,8 @@ function isExecutionState(value) {
         && ['running', 'complete', 'failed'].includes(String(input.status))
         && Array.isArray(input.completedHops)
         && typeof input.updatedAt === 'string'
-        && (input.snapshotStatus === undefined || input.snapshotStatus === 'running' || input.snapshotStatus === 'complete');
+        && (input.snapshotStatus === undefined || input.snapshotStatus === 'running' || input.snapshotStatus === 'complete')
+        && validPublishedPlanPins(input);
 }
 function newExecutionState(plan) {
     return {
@@ -293,6 +423,7 @@ function newExecutionState(plan) {
         targetVersion: plan.targetVersion,
         path: [...plan.path],
         targetRevision: plan.targetRevision,
+        releaseCommits: plan.releaseCommits,
         status: 'running',
         completedHops: [],
         updatedAt: new Date().toISOString(),
@@ -303,7 +434,8 @@ function matchesPlan(state, plan) {
         && state.sourceVersion === plan.sourceVersion
         && state.targetVersion === plan.targetVersion
         && state.path.join('\u0000') === plan.path.join('\u0000')
-        && state.targetRevision === plan.targetRevision;
+        && state.targetRevision === plan.targetRevision
+        && JSON.stringify(state.releaseCommits ?? null) === JSON.stringify(plan.releaseCommits ?? null);
 }
 function matchesReleasePath(state, plan) {
     return state.releaseLine === plan.releaseLine
@@ -313,6 +445,7 @@ function matchesReleasePath(state, plan) {
 }
 function canRetryFailedRevision(state, plan) {
     return state.status === 'failed'
+        && !state.releaseCommits && !plan.releaseCommits
         && state.completedHops.length === 0
         && matchesReleasePath(state, plan)
         && state.targetRevision !== plan.targetRevision;
@@ -408,12 +541,19 @@ function isMissingFile(error) {
  * unfinished hop and never silently rolls database data back.
  */
 export async function executeCoordinatorPlan(options) {
+    if (!validPublishedPlanPins(options.plan))
+        throw new Error('Coordinator published release plan has invalid or missing commit pins.');
     const path = progressPathFor(options.coordinatorHome);
     let state;
     try {
         const existing = await readJson(path);
         if (!isExecutionState(existing))
             throw new Error(`Coordinator recovery state is invalid: ${path}. Restore it from a known backup before retrying.`);
+        for (const [version, commit] of Object.entries(existing.releaseCommits ?? {})) {
+            const selected = options.plan.releaseCommits?.[version];
+            if (selected && selected !== commit)
+                throw new Error(`Published release ${version} changed since the saved update plan. Refusing to replace its pinned commit.`);
+        }
         if (!matchesPlan(existing, options.plan)) {
             if (canRetryFailedRevision(existing, options.plan)) {
                 validateRecoveryState(existing, {
@@ -611,7 +751,17 @@ async function main() {
     try {
         const sourceRoot = resolve(process.env.PM_COORDINATOR_SOURCE_ROOT ?? cli.repoRoot);
         const releaseLine = await coordinatorReleaseLineFor(sourceRoot);
-        const branch = process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+        const publishedMode = process.env.PM_COORDINATOR_SOURCE_MODE !== 'branch';
+        const branch = publishedMode ? '' : process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+        const publishedTarget = publishedMode
+            ? await publishedTargetForCoordinator(cli.repoRoot, releaseLine, process.env)
+            : { tag: '', version: '', commit: '' };
+        let publishedReleases = new Map();
+        if (publishedMode) {
+            await fetchPublishedReleaseCommit(sourceRoot, publishedTarget, releaseLine);
+            await assertPinnedWorktree(cli.repoRoot, publishedTarget.commit);
+            publishedReleases.set(publishedTarget.version, publishedTarget);
+        }
         const packagePath = join(cli.repoRoot, 'package.json');
         const contractPath = join(cli.repoRoot, 'release', 'upgrade.json');
         const liveReleaseHistoryUrl = process.env.PM_DEPLOYED_RELEASE_HISTORY_URL ?? `${process.env.PM_DASHBOARD_URL ?? 'http://127.0.0.1:3200'}/release-history.md`;
@@ -619,7 +769,15 @@ async function main() {
         let legacyBridge = false;
         try {
             await access(contractPath, constants.R_OK);
-            const contracts = await loadTrustedUpgradeContracts(sourceRoot, branch, releaseLine);
+            let contracts;
+            if (publishedMode) {
+                const published = await loadPublishedUpgradeContracts(sourceRoot, releaseLine, publishedTarget);
+                contracts = published.contracts;
+                publishedReleases = published.releases;
+            }
+            else {
+                contracts = await loadTrustedUpgradeContracts(sourceRoot, branch, releaseLine);
+            }
             plan = await planCoordinatorBootstrap({
                 repoRoot: cli.repoRoot,
                 releaseLine,
@@ -643,6 +801,12 @@ async function main() {
         const targetRevision = await gitOutput(cli.repoRoot, ['rev-parse', 'HEAD']).catch(() => undefined);
         if (targetRevision)
             plan = { ...plan, targetRevision };
+        if (publishedMode) {
+            if (plan.targetVersion !== publishedTarget.version || targetRevision !== publishedTarget.commit) {
+                throw new Error('Coordinator target differs from the immutable published release selection.');
+            }
+            plan = { ...plan, releaseCommits: Object.fromEntries([...publishedReleases].sort(([a], [b]) => a.localeCompare(b)).map(([version, release]) => [version, release.commit])) };
+        }
         await writeJsonAtomic(join(coordinatorHome, 'state', 'active-plan.json'), plan);
         const executionPlan = {
             ...plan,
@@ -660,9 +824,16 @@ async function main() {
             },
             runHop: async (release) => {
                 const finalHop = release === plan.targetVersion;
+                const publishedHop = publishedReleases.get(release);
+                if (publishedMode && !publishedHop)
+                    throw new Error(`Release hop ${release} has no published commit pin.`);
                 const hopRoot = finalHop
                     ? cli.repoRoot
-                    : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release, releaseLine);
+                    : publishedHop
+                        ? await coordinatorPublishedReleaseWorktree(sourceRoot, coordinatorHome, publishedHop)
+                        : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release, releaseLine);
+                if (publishedHop)
+                    await assertPinnedWorktree(hopRoot, publishedHop.commit);
                 const handoffStateDir = handoffStateDirFor(hopRoot, coordinatorHome, legacyBridge);
                 const exitCode = await runLegacyUpdate(cli.legacyScript, cli.args, {
                     ...process.env,
@@ -681,6 +852,11 @@ async function main() {
                     PM_COORDINATOR_ENV_RUNTIME: join(sourceRoot, '.env.persistent-memory'),
                     PM_COORDINATOR_VERSIONED_WORKTREE: finalHop ? process.env.PM_COORDINATOR_VERSIONED_WORKTREE ?? '0' : '1',
                     PM_COORDINATOR_FINAL_HOP: finalHop ? '1' : '0',
+                    PM_COORDINATOR_SOURCE_MODE: publishedMode ? 'published' : 'branch',
+                    PM_COORDINATOR_RELEASE_TAG: publishedTarget.tag,
+                    PM_COORDINATOR_RELEASE_VERSION: publishedTarget.version,
+                    PM_COORDINATOR_RELEASE_COMMIT: publishedTarget.commit,
+                    PM_COORDINATOR_HOP_COMMIT: publishedHop?.commit ?? '',
                     PM_SKIP_SETUP_SNAPSHOT: '1',
                 });
                 if (exitCode !== 0)

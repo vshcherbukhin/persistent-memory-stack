@@ -17,7 +17,7 @@ nav_order: 90
 
 ## Purpose
 
-Notifications controls local Chrome or browser notifications for selected dashboard events. Public application release checks run automatically and require no source settings.
+Notifications controls local Chrome or browser notifications for selected dashboard events. Published stable GitHub Releases are checked automatically and require no source settings.
 
 ## Read the page
 

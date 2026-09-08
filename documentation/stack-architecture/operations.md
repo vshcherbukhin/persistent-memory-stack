@@ -230,7 +230,8 @@ Steps (from the script's `--help`): snapshot `.env.persistent-memory`, Compose s
 and MCP report under `.local/update-backups/<timestamp>/`
 → backfill missing env keys from the updated template and generate any missing
 machine-owned secrets while preserving existing values
-→ `git fetch` + `git merge --ff-only` on the current or selected trusted branch
+→ resolve and fetch the exact published release commit (or fast-forward an
+explicitly selected development branch)
 → `npm run setup` (install + prisma generate)
 → build and refresh `dashboard-gateway` → build the remaining images →
 `docker compose -f deploy/compose/docker-compose.yml --env-file .env.persistent-memory up -d --no-build <services>` → wait for
@@ -254,23 +255,34 @@ phase/error summary while Terminal retains full diagnostics.
 An open browser is advisory only: a missing or incompatible browser
 never delays the terminal update.
 
-By default the updater follows the current checkout branch. Development testing
-can explicitly target the integration branch with
+By default `npm run update-persistent-memory` selects the latest published stable
+GitHub Release from the built-in public repository. It validates the tag, package
+version, release line and upgrade contract at the exact tagged commit; a moving
+branch head is not the release source. Drafts, prereleases and unpublished tags
+or commits are excluded. GitHub credentials and update-source settings are not
+required. Development testing can explicitly target the integration branch with
 `npm run update-persistent-memory -- --dev`, or any trusted branch with
-`npm run update-persistent-memory -- --branch <branch>`. A branch-targeted update
+`npm run update-persistent-memory -- --branch <branch>` (`--master` explicitly
+selects the development override for `master`). A branch-targeted update
 switches the checkout before the fast-forward merge and requires a clean worktree
 so local work is not mixed into an update run.
 
 To deploy an exact release while preserving the checkout you are currently using,
 run `npm run update-persistent-memory -- --release <semver>`. The release path
-uses `origin/master` unless you add one trusted `--branch <name>`, resolves the
-commit whose root `package.json` has that version, and creates or reuses
+requires that published stable GitHub Release, resolves its tag to an exact
+commit, validates its source metadata, and creates or reuses
 `.local/release-worktrees/persistent-memory-<semver>-<commit>`. It copies the initiating
 runtime environment only when first creating the release worktree, preserves the
 existing Docker volumes, and refuses to reset or replace an existing worktree that
 points to another commit.
 
-If the current-branch update sees only generated root/dashboard `package-lock.json`
+For explicit developer testing only, `--release <semver> --branch <name>` retains
+the historical version lookup on the selected trusted branch. That override can
+select unpublished source and does not change automatic release checks. Without
+the branch override, a missing or invalid published release fails closed; the
+updater never substitutes `master` or another commit with the same version.
+
+If a developer branch update sees only generated root/dashboard `package-lock.json`
 drift before an incoming fast-forward merge, it preserves that drift in a named
 Git stash and continues. Any other tracked local changes still stop the update
 with the affected paths listed, because the updater must not mix local work into
@@ -290,11 +302,12 @@ imported sibling. It writes a same-commit marker so repeated local `npm run
 setup` calls do not create duplicate snapshots.
 
 > **Trust boundary (the committed documentation gotcha).** `update-persistent-memory` **builds and runs
-> whatever it pulls** — `npm install`, `docker compose build`, and `rls.sql` executed as
-> the Postgres superuser. It is equivalent to "execute `origin/<branch>` on this host".
-> `git merge --ff-only` refuses to clobber local commits but does **not** authenticate
-> the author — **only point it at a trusted remote.** The incoming commits are printed
-> before anything is built.
+> the selected source** — `npm install`, `docker compose build`, and `rls.sql` executed as
+> the Postgres superuser. Release validation binds that work to the published tag's
+> exact commit; it is not a security audit of the publisher's code. Developer
+> branch overrides execute the selected branch source. `git merge --ff-only`
+> refuses to clobber local commits but does **not** authenticate the author —
+> **only use a trusted source.** The selected source is reported before it is built.
 
 ### Release upgrade coordinator
 
@@ -308,8 +321,9 @@ lock and the active/completed plan, so a checked-out version cannot replace the
 update controller while it is running.
 
 Version 1.0.0 is the first public release. Its contract establishes the supported
-source baseline for future updates. The coordinator resolves the actual branch
-or exact-release target before planning. The
+source baseline for future updates. The coordinator resolves the published
+release and exact tagged commit, or an explicit developer branch target, before
+planning. The
 coordinator starts from the durable `last-successful-update.json` marker, not
 the checked-out `package.json`; this makes a manual `git pull` safe because it
 cannot be mistaken for an installed update. Older installations without a
@@ -318,9 +332,12 @@ history. If neither source is available, the updater stops before changing the
 stack and asks the operator to restore a known release state.
 
 Once installed, the coordinator executes every declared direct or bridge hop by
-handing control to the established terminal update lifecycle. It loads contracts
-only from commits reachable on the selected trusted branch and creates private
-detached worktrees for intermediate releases. It takes one durable snapshot
+handing control to the established terminal update lifecycle. In published-release
+mode, every required intermediate release must also be a published stable GitHub
+Release with a matching, validated contract at its pinned commit. Unpublished
+versions in branch history cannot become release upgrade stops. Explicit branch
+testing retains contracts from the selected trusted branch. The coordinator
+creates private detached worktrees for intermediate releases and takes one durable snapshot
 before the first hop, records each verified hop, and resumes at the first
 unfinished hop after interruption. It never performs an automatic database
 rollback; recovery remains an explicit operator restore. A malformed recovery
@@ -328,7 +345,8 @@ record fails closed instead of replaying a path. Public release targets must
 belong to the public release line and meet the published compatibility contract.
 Browser presence and browser compatibility never gate this terminal safety path.
 
-If a trusted branch publishes a corrected revision of the exact same target
+For an explicit developer branch update, if that branch contains a corrected
+revision of the exact same target
 while its first hop is still failed, the coordinator adopts that new revision
 and retries the unfinished hop using the existing completed snapshot. It never
 uses this exception after a verified hop, or when the source version, target
@@ -341,21 +359,31 @@ superusers only. Server/shared installs do not poll or show update prompts; thos
 deployments should be updated by an operator using the terminal/runtime process for
 that host. The API calls the internal `update-runner` sidecar with
 `UPDATE_RUNNER_TOKEN`; the browser never talks to the sidecar directly. Status,
-logs, and the internal start endpoint are all superuser-only because they expose
-host update state and the sidecar can mutate the stack.
+logs, and the legacy start endpoint remain superuser-only. The sidecar exposes
+metadata and status; it does not execute updates. The legacy start route returns
+HTTP 422 `terminal_update_required` before network, shell or data changes and
+directs operators to the terminal coordinator, so it cannot bypass compatibility
+planning, intermediate releases or the durable update lock.
 `/admin/update` remains available as a one-release compatibility alias.
 
-The dashboard automatically checks the application's public GitHub `master`
-branch for newer releases. No update-source settings or GitHub credentials are
+The dashboard automatically checks the application's published stable GitHub
+Releases for newer versions. No update-source settings or GitHub credentials are
 required. It shows release notes and the copyable
-`npm run update-persistent-memory -- --branch master` command; the user starts
-the update from a terminal. This explicitly selects the public release branch
-even when the local checkout is on another branch.
+`npm run update-persistent-memory -- --release <version>` command for the displayed
+version; the user starts the update from a terminal. It selects the published
+release even when the local checkout is on another branch. A version bump merged
+to `master` alone does not produce an update notification.
 
 The shared source is declared once in
-`layers/update-ops/update-flow/public-source.json`. Checks read branch metadata,
-`package.json`, and `release-history.md` at the same commit without changing the
-checkout. Successful metadata is cached for 15 minutes and concurrent requests
+`layers/update-ops/update-flow/public-source.json`. Checks use GitHub's
+`releases/latest` result, rather than sorting tags or scanning branch history.
+They resolve the canonical `v<semver>` tag to a commit and validate the package
+version, public release line and matching newest `release-history.md` entry at
+that same commit without changing the checkout. The coordinator separately
+validates `release/upgrade.json` at the pinned commit before executing the update.
+An explicit `--release <semver>` requires the corresponding published GitHub
+Release, not just an existing tag. Drafts, prereleases and invalid release metadata are not
+offered as stable updates. Successful metadata is cached for 15 minutes and concurrent requests
 share one fetch. Failed checks retry after 1, 2, 4, 8, then 15 minutes, honoring
 GitHub's longer rate-limit or Retry-After delay. The last valid release metadata
 remains available during a transient failure. If no successful check exists yet,
@@ -368,8 +396,8 @@ remotes.
 
 Operators can still explicitly run `npm run update-persistent-memory -- --dev`
 or `npm run update-persistent-memory -- --branch <branch>` for a trusted branch.
-These commands do not change automatic public-master release checks. Successful
-updates record the deployed branch and commit in
+These commands do not change automatic published-release checks. Successful
+updates record the deployed source and commit in
 `.local/update-state/last-successful-update.json`.
 
 Product-source identity belongs in the shared manifest; deployment-specific
@@ -748,10 +776,22 @@ The dashboard header info button shows release notes for the application version
 release notes with the newest entry first in `release-history.md`, and mirror the
 same content to `apps/dashboard/public/release-history.md` so the standalone dashboard image can
 serve the version modal without widening its Docker build context. Each release
-entry should include the main Persistent Memory product version plus a service
-version table (`Service`, `Version`, `Change`). The newest release renders as a
+entry must link to its exact GitHub Release at
+`https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v<version>`
+and include the main Persistent Memory product version plus a service version
+table (`Service`, `Version`, `Change`). Keep the documentation history mirror and
+published GitHub release body aligned with the same version-specific link;
+an index/latest link is not a substitute. The dashboard exposes the link in each
+release card and in Update Details. The newest release renders as a
 green latest-release card in the dashboard. For backfilled
 entries, cite the local git commits or ranges used as evidence.
+
+Validate the release-history mirrors and their exact GitHub links with
+`node scripts/release-notes.mjs --check`; this check also runs through
+`npm run validate:release-upgrade`. When publication is authorized, use
+`node scripts/release-notes.mjs <semver>` to extract that version's release body
+including its link for GitHub. Extraction only prints the notes; it does not
+publish a release or modify an existing one.
 
 Release tables list every service/layer changed by that release; unchanged
 service/layer versions are inherited from the latest prior release table entry for
@@ -769,7 +809,7 @@ that service/layer.
 | evidence/files | MinIO/file storage, document extraction, evidence lifecycle, or file cleanup behavior changes. |
 | docs | Product docs, internal plans, release policy, visual docs, or operator/user documentation changes. |
 | update/ops | Install/update scripts, Compose/runtime operations, verification scripts, backup/snapshot behavior, or safe redeploy helpers change. |
-| update-runner | Restricted update-runner sidecar API, state machine, snapshot execution, logs, or update security boundary changes. |
+| update-runner | Restricted update metadata sidecar API, published-release discovery, status/logs, or update security boundary changes. |
 | onboard installer | Guided wizard, setup detection, generated env, MCP registration, or installer UX changes. |
 
 ---
