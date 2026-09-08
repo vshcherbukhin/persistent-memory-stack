@@ -7,6 +7,10 @@ nav_order: 40
 ---
 # Dashboard — the Web QA Management App
 
+The stack documentation opens at `/docs/index.html`. The `/docs` and `/docs/`
+entry points redirect there so relative images, styles and navigation stay within
+the authenticated documentation proxy.
+
 The standalone Next.js 15 dashboard for managing persistent-memory's access entities and memory data, talking to the API only over HTTP.
 
 ## Role in the system
