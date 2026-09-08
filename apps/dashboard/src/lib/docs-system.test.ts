@@ -128,6 +128,28 @@ describe('dashboard documentation integration', () => {
     )).rejects.toThrow('asset authentication rejected')
   })
 
+  it('canonicalizes the docs landing URL so relative assets stay in the docs proxy', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET, HEAD } = await import('../app/docs/[[...path]]/route')
+    for (const method of ['GET', 'HEAD'] as const) {
+      for (const path of [undefined, []]) {
+        const request = new NextRequest('http://localhost:3200/docs?from=guide', { method })
+        const response = await ({ GET, HEAD }[method])(request, { params: Promise.resolve({ path }) })
+        expect(response.status).toBe(307)
+        expect(response.headers.get('cache-control')).toBe('private, no-store')
+        const destination = new URL(response.headers.get('location')!, request.url)
+        expect(destination.href).toBe('http://localhost:3200/docs/index.html?from=guide')
+        expect(new URL('assets/site.css', destination).pathname).toBe('/docs/assets/site.css')
+        expect(await response.text()).toBe('')
+      }
+    }
+    expect(requireSessionMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).not.toHaveBeenCalled()
+    requireSessionMock.mockRejectedValueOnce(new Error('authentication rejected'))
+    await expect(GET(new NextRequest('http://localhost/docs'), { params: Promise.resolve({}) })).rejects.toThrow('authentication rejected')
+  })
+
   it('forwards private guide screenshot caching after authenticating the docs proxy', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('png', {
       headers: {

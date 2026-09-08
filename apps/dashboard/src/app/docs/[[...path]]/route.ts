@@ -19,7 +19,15 @@ type RouteContext = {
 
 async function proxyDocumentation(request: NextRequest, context: RouteContext): Promise<Response> {
   await requireSession()
-  const path = (await context.params).path ?? ['index.html']
+  const path = (await context.params).path ?? []
+  // Next removes a trailing slash from /docs/. Use an explicit document URL
+  // so MkDocs relative links and assets stay under the authenticated proxy.
+  if (path.length === 0) {
+    return new Response(null, {
+      status: 307,
+      headers: { location: `/docs/index.html${request.nextUrl.search}`, 'cache-control': 'private, no-store' },
+    })
+  }
   const relativePath = path.join('/')
   const encodedPath = relativePath.split('/').map(encodeURIComponent).join('/')
   const target = new URL(encodedPath, `${DOCUMENTATION_BASE_URL.replace(/\/$/, '')}/`)
