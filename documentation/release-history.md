@@ -3,6 +3,19 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.1.2 - 2026-09-08
+
+[GitHub release v1.1.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.2)
+
+- Explains estimated available memory on macOS, its raw free-memory reading,
+  inactive-page caveats and conservative fallback when measurement fails.
+  Existing minimum requirements and local-model restrictions remain in force.
+- Clarifies OpenAI embedding request permissions versus project model allowlists,
+  with guidance for authentication, model access, billing and network restrictions.
+  Provider diagnostics remain bounded and never expose raw error messages or keys.
+- Documents that automated and browser checks do not establish a successful
+  installation on the affected Mac or resolution of an account-specific rejection.
+
 ## 1.1.1 - 2026-09-08
 
 [GitHub release v1.1.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.1)

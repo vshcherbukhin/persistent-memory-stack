@@ -25,9 +25,34 @@ function localProbeUrl(savedBaseUrl = 'http://127.0.0.1:11434'): string | null {
   } catch { return null }
 }
 
-/** Do not expose provider error bodies or transport errors: either may echo keys. */
-function httpFailure(status: number): string {
-  if (status === 401 || status === 403) return 'The provider rejected this API key or its permissions. Check the matching provider key and model access.'
+/** Classify bounded provider data into our own text. Never echo its message,
+ * arbitrary codes or transport errors: they may contain credentials. */
+function httpFailure(status: number, provider: string, payload?: unknown): string {
+  const error = payload && typeof payload === 'object' && 'error' in payload ? payload.error : null
+  const fields = error && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const code = typeof fields.code === 'string' ? fields.code : ''
+  const message = typeof fields.message === 'string' ? fields.message.slice(0, 8192).toLowerCase() : ''
+  if (provider === 'openai') {
+    if ([401, 403].includes(status) && (code === 'unsupported_country_region_territory' || /country,? region|unsupported (country|region|territory)/.test(message))) {
+      return 'OpenAI reports that this request comes from an unsupported country or region. Check the network location and OpenAI supported countries; changing the model allowlist will not resolve this.'
+    }
+    if ([401, 403].includes(status) && (code === 'ip_not_authorized' || /ip.*(not authorized|not allowed|allowlist)/.test(message))) {
+      return 'OpenAI reports an IP allowlist restriction. Check that this computer\'s network is permitted by the OpenAI project or organization.'
+    }
+    if (status === 403 && /missing scopes?:[^\n]*\b(?:api\.)?model\.request\b/.test(message)) {
+      return 'OpenAI reports a missing model.request permission. In the API key\'s project, allow Model capabilities → Request for the key and its user or service account. Embeddings need request access to /v1/embeddings; adding models to the project allowlist alone is not enough. Retest after the permission change takes effect.'
+    }
+    if ([403, 404].includes(status) && (code === 'model_not_found' || /(?:access to|allowed to (?:use|access)) (?:this |the )?model/.test(message))) {
+      return 'OpenAI reports that the selected model is unavailable or not accessible to this key. Check the model allowlist in the project that owns this API key and its Model capabilities → Request permission, then retest.'
+    }
+    if (status === 401) return 'OpenAI could not authenticate this API key. Use an OpenAI Platform API key from the intended project, then test again.'
+    if (status === 403) return 'OpenAI denied this embedding request. Check Model capabilities → Request permission for this API key and its user or service account, as well as the project model allowlist. Model access alone does not grant request permission. If those are correct, check project IP restrictions and the network location.'
+    if (status === 429 && ['insufficient_quota', 'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded'].includes(code)) {
+      return 'OpenAI reports an API billing, spend or usage limit. Check API credits and the project/organization limits before retrying; changing model permissions will not resolve this.'
+    }
+  }
+  if (status === 401) return 'The provider could not authenticate this API key. Check that it belongs to the selected embedding provider.'
+  if (status === 403) return 'The provider denied this embedding request. Check the API key permissions, model access and account restrictions.'
   if (status === 429) return 'The provider rate limit or account quota was reached. Check API billing/quota, then retry.'
   if (status === 404) return 'The embedding model is unavailable. For Ollama, download the selected model first.'
   return 'The provider could not complete the embedding request. Retry after checking the provider service.'
@@ -87,16 +112,18 @@ export async function testEmbeddingConnection(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')) }, timeoutMs)
   })
+  let failureStatus: number | undefined
   try {
     const operation = async (): Promise<EmbeddingTestResult> => {
       const response = await fetchImpl(url, {
-        method: 'POST', signal: controller.signal,
+        method: 'POST', signal: controller.signal, redirect: 'error',
         headers: { 'content-type': 'application/json', ...(!local ? { authorization: `Bearer ${key}` } : {}) },
         body: JSON.stringify(body),
       })
       if (!response.ok) {
-        await response.body?.cancel().catch(() => {})
-        return fail(`Embedding test failed with HTTP ${response.status}.`, httpFailure(response.status))
+        failureStatus = response.status
+        const error = await readBoundedJson(response).catch(() => undefined)
+        return fail(`Embedding test failed with HTTP ${response.status}.`, httpFailure(response.status, input.provider, error))
       }
       const json = await readBoundedJson(response) as { embeddings?: unknown[]; data?: Array<{ index?: number; embedding?: unknown }> }
       const vector = local ? json.embeddings?.length === 1 ? json.embeddings[0] : null
@@ -108,6 +135,9 @@ export async function testEmbeddingConnection(
     }
     return await Promise.race([operation(), timeout])
   } catch {
+    // Keep the known rejection if its diagnostic body is malformed or stalls.
+    // The same overall deadline bounds success and error response bodies.
+    if (failureStatus !== undefined) return fail(`Embedding test failed with HTTP ${failureStatus}.`, httpFailure(failureStatus, input.provider))
     return fail(controller.signal.aborted ? 'Embedding test timed out. Retry when the provider is reachable.' : 'Embedding test could not complete. Check the provider connection and selected model.')
   } finally { clearTimeout(timer) }
 }

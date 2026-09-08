@@ -46,7 +46,7 @@ These are conservative **installation budgets for the whole application**, not
 model-vendor minimums or measured performance guarantees. All rows use API fact
 extraction. Values are GiB; disk figures mean **free space before installation**.
 
-| Embeddings | Host RAM minimum / recommended | Free host RAM minimum / recommended | Free installation disk minimum / recommended¹ |
+| Embeddings | Host RAM minimum / recommended | Host memory headroom minimum / recommended | Free installation disk minimum / recommended¹ |
 | --- | --- | --- | --- |
 | **OpenAI or Voyage API** — lowest local resource needs | **8 / 16** | **2 / 4** | **35 / 60** |
 | Ollama `nomic-embed-text` | 12 / 16 | 3 / 5 | 37 / 64 |
@@ -60,7 +60,10 @@ and **25 / 40 GiB free inside Docker's Linux storage** (minimum / recommended).
 Separate model or Docker disks are checked separately. Leave additional room
 for a growing memory database, documents, backups, and OS updates.
 
-**For an 8 GB M2 Mac mini, use API embeddings and API fact extraction.** Setup
+Host memory headroom means currently free RAM on Windows and estimated available
+RAM on macOS. The same minimum budgets apply to both platforms.
+
+**On computers with 8 GiB RAM, use API embeddings and API fact extraction.** Setup
 disables local models below their minimum, and blocks installation if even the
 API configuration cannot meet the minimum. Close other memory-heavy apps and
 free disk space before rechecking. Unknown Docker storage measurements are
