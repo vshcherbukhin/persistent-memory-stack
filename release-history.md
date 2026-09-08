@@ -2,6 +2,60 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.1.4 - 2026-09-08
+
+[GitHub release v1.1.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.4)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.1.4 | Current release label and release notes. |
+| onboarding | 1.1.3 | Required-runtime startup grace and visible verification diagnostics. |
+| docs | 1.1.4 | Optional Ollama monitoring, verification troubleshooting and scoped dependency-image cleanup. |
+| api | 1.0.2 | Monitor only required host Ollama, retain configured model names before first use and count unhealthy local models correctly. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- API-only installations no longer probe or display an unused host Ollama
+  service, count it as a dashboard failure, or project a historical host error.
+  Server-managed local embeddings still check the host and selected model.
+  Client-managed embeddings retain their own client-scoped health.
+- Show the configured Fact extraction and Embeddings model names before their
+  first observed request or test. Their health remains unknown until observed.
+  A reachable Ollama host with a missing required model counts as unhealthy.
+- Allow up to 120 seconds for running required containers to finish their initial
+  healthchecks during final verification. Image and runtime validation failures now include
+  their diagnostic output instead of only a generic failure summary.
+- The optional uninstall image-removal step includes exact configured downloaded
+  dependencies, owned application images and explicitly listed Alpine utility
+  images (`alpine:3.20` and `alpine:latest`). Preserve images referenced
+  by any running or stopped container, images carrying unrelated ownership or
+  extra tags, and unattributed base/cache images. Report why candidate images
+  are retained; never force-remove them or run a global Docker prune.
+
+Direct upgrades from public 1.0.0 through 1.1.3 preserve memories, data volumes,
+credentials and embedding configuration. This patch adds no database migration
+or embedding-model change.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.1.4
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.1.4`.
+For a new installation, follow the
+[v1.1.4 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.4/README.md).
+
+Regression coverage exercises API-only and local-model monitoring, startup
+readiness, diagnostic propagation, and image-cleanup ownership safeguards.
+The original Mac verification failure cannot be attributed to Ollama from the
+reported summary: its embedding check already passed, and the failing check
+was required image identity/runtime validation. A physical Mac reinstall has
+not been verified.
+
 ## 1.1.3 - 2026-09-08
 
 [GitHub release v1.1.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.3)

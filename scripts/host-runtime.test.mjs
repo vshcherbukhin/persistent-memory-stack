@@ -150,6 +150,34 @@ test('Windows Git Bash retains quoted arguments and the native host home', { ski
   assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['space & literal $x', '/workspace/data', env.HOME])
 })
 
+test('install verifier TCP probes preserve later image validation diagnostics on stderr', async () => {
+  const source = readFileSync(new URL('../deploy/scripts/verify-install.sh', import.meta.url), 'utf8').replaceAll('\r\n', '\n')
+  const start = source.indexOf('tcp_open() {')
+  const end = source.indexOf('\n# HTTP probe', start)
+  assert.ok(start >= 0 && end > start, 'extract only the actual TCP probe, never the installer or cleanup')
+  const probe = source.slice(start, end)
+  const bash = process.platform === 'win32' ? findGitBash() : 'bash'
+  const server = createServer(socket => socket.destroy())
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  const runProbe = () => spawnSync(bash, ['--noprofile', '--norc', '-c', `${probe}
+tcp_open 127.0.0.1 "$PROBE_PORT"
+probe_status=$?
+printf '%s\\n' 'Service fixture is unhealthy during image verification.' >&2
+exit "$probe_status"
+`], { env: { ...hostEnvironment({ bash }), PROBE_PORT: String(port) }, encoding: 'utf8', windowsHide: true })
+  try {
+    const reachable = runProbe()
+    assert.equal(reachable.status, 0, reachable.stderr)
+    assert.equal(reachable.stdout, '')
+    assert.equal(reachable.stderr, 'Service fixture is unhealthy during image verification.\n')
+  } finally { await new Promise(resolve => server.close(resolve)) }
+  const unreachable = runProbe()
+  assert.notEqual(unreachable.status, 0)
+  assert.equal(unreachable.stdout, '')
+  assert.equal(unreachable.stderr, 'Service fixture is unhealthy during image verification.\n')
+})
+
 for (const probe of [
   { name: 'Ollama', fn: 'http_ok', key: '', url: 'http://localhost:11434/api/tags' },
   { name: 'authenticated Qdrant', fn: 'qdrant_http_ok', key: 'fixture key & literal', url: 'http://localhost:7333/readyz' },

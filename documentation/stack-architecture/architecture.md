@@ -75,7 +75,7 @@ Defined as upstream-image services in `deploy/compose/docker-compose.yml`:
 | **MinIO** | `minio/minio:RELEASE.2025-09-07…` | **Evidence blobs** (uploaded files + extraction artifacts), S3-compatible. | `persistent-memory-minio:9000` |
 | **Redis** | `redis:8-alpine` | **BullMQ queues** (`pm.ingest`, `pm.scheduled`, `pm.memory-graph-rebuild`) and the worker liveness heartbeat. `maxmemory-policy=noeviction` (BullMQ requires it). | `persistent-memory-redis:6379` |
 
-**Ollama runs on the HOST**, not as a container, reached at `host.docker.internal:11434` (the `extra_hosts: host-gateway` mapping on the api/worker/graphiti services). It is the default embedding (and optional extraction) provider. The API health monitor treats it as a host capability: `/api/tags` must be reachable and, when Ollama is the active embedding provider, must list the configured model. It has no Docker container or Docker logs.
+**Ollama runs on the HOST**, not as a container, reached at `host.docker.internal:11434` (the `extra_hosts: host-gateway` mapping on the api/worker/graphiti services). When server-managed embeddings use Ollama, the API health monitor requires `/api/tags` reachability and the configured model's presence. API-only and client-managed embeddings omit this host monitor. Fact extraction uses Anthropic or OpenAI. Ollama has no Docker container or Docker logs.
 
 ### Application containers and how they talk
 

@@ -55,7 +55,8 @@ WHAT IT CHECKS
   - Ports:          host-mapped ports reachable (API 8090, Dashboard 3200,
                     Qdrant 7333, Graphiti 8100, FalkorDB 3100/6380,
                     Postgres 5433, Redis 6381, MinIO 9002/9003)
-  - Host Ollama:    daemon reachable + the configured EMBED_MODEL is pulled
+  - Embeddings:     host Ollama and its model only when local embeddings are selected
+  - Image runtime: current Linux image identity, initial healthchecks, restart stability
 
 EXIT CODES
   0  All checks passed (FAIL=0)
@@ -282,8 +283,9 @@ fi
 section "4. Ports"
 # tcp_open <host> <port> — pure-bash TCP probe (no curl/nc dependency).
 tcp_open() {
-    (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null && exec 3>&- 2>/dev/null && return 0
-    return 1
+    # Keep every exec/redirection inside the subshell. An exec without a
+    # command in this shell would silence stderr for every later check.
+    (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null
 }
 # HTTP probe where a real endpoint exists.
 http_ok() { curl -sf --max-time 5 "$1" >/dev/null 2>&1; }

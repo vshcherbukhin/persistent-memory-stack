@@ -88,7 +88,7 @@ function fixture(t, options = {}) {
     if (args[0] === 'volume' && args[1] === 'rm') { volumes.delete(args[2]); return success('removed') }
     throw new Error('Unexpected mock Docker operation: ' + JSON.stringify(args))
   }
-  return { root, config, owner, images, containers, volumes, calls, logs, old, readLedger, seedLedger, run, invoke: mode => imageLifecycle({ root, mode, run, env: {}, pause: async () => {}, emit: line => logs.push(line) }) }
+  return { root, config, owner, images, containers, volumes, calls, logs, old, readLedger, seedLedger, run, invoke: (mode, extra = {}) => imageLifecycle({ root, mode, run, env: {}, pause: async () => {}, emit: line => logs.push(line), ...extra }) }
 }
 
 test('serial isolated image validation precedes no-build startup; old IDs and secrets are handled safely', async t => {
@@ -193,16 +193,131 @@ test('interrupted smoke cleanup verifies all labels, no-network and no data moun
   assert.equal(f.containers.has(clean.Id), false); assert.equal(f.containers.has(dirty.Id), true)
 })
 
-test('uninstall removes only unused proven project images without force', async t => {
+test('uninstall removes owned application and exact configured dependency images without force', async t => {
   const f = fixture(t)
   await f.invoke('uninstall-images')
   assert.equal(f.images.has(f.old.Id), false)
-  assert.ok(f.images.has(id(2)), 'third-party images are not owned')
-  assert.deepEqual(f.calls.filter(call => call.args[0] === 'image' && call.args[1] === 'rm').map(call => call.args), [['image', 'rm', f.old.Id]])
+  assert.equal(f.images.has(id(2)), false, 'explicit uninstall cleanup includes the configured dependency')
+  assert.deepEqual(f.calls.filter(call => call.args[0] === 'image' && call.args[1] === 'rm').map(call => call.args), [['image', 'rm', f.old.Id], ['image', 'rm', id(2)]])
+})
+
+test('ordinary cleanup never adopts registry dependencies', async t => {
+  const f = fixture(t)
+  await f.invoke('cleanup')
+  assert.ok(f.images.has(id(2)))
+  assert.equal(f.readLedger().images.some(item => item.id === id(2)), false)
+})
+
+test('uninstall preserves dependencies referenced by another stopped container and explains why', async t => {
+  const f = fixture(t)
+  f.containers.set(cid(920), { Id: cid(920), Image: id(2), State: { Running: false }, Config: { Labels: { 'com.docker.compose.project': 'other-project' } }, Mounts: [] })
+  await f.invoke('uninstall-images')
+  assert.ok(f.images.has(id(2)))
+  assert.ok(f.logs.some(line => /postgres.*running or stopped container/.test(line)))
+})
+
+test('uninstall preserves dependency aliases, foreign ownership and unrelated Alpine', async t => {
+  const f = fixture(t)
+  f.images.get(id(2)).RepoTags.push('other-project/database:keep')
+  const alpine = { Id: id(80), Os: 'linux', RepoTags: ['alpine:latest'], Config: { Labels: {} } }
+  f.images.set(alpine.Id, alpine)
+  await f.invoke('uninstall-images')
+  assert.ok(f.images.has(id(2)))
+  assert.ok(f.images.has(alpine.Id))
+  assert.ok(f.logs.some(line => /postgres.*tags outside/.test(line)))
+  f.images.get(id(2)).RepoTags = ['fixture-postgres:17']
+  f.images.get(id(2)).Config.Labels[OWNER] = 'different-checkout'
+  await f.invoke('uninstall-images')
+  assert.ok(f.images.has(id(2)))
+  delete f.images.get(id(2)).Config.Labels[OWNER]
+  f.images.get(id(2)).Config.Labels['com.docker.compose.project'] = 'another-project'
+  await f.invoke('uninstall-images')
+  assert.ok(f.images.has(id(2)))
+})
+
+test('explicit helper cleanup removes only the two selected Alpine tags without force', async t => {
+  const f = fixture(t)
+  for (const [index, reference] of ['alpine:3.20', 'alpine:latest', 'alpine:3.21'].entries()) {
+    const image = { Id: id(80 + index), Os: 'linux', RepoTags: [reference], Config: { Labels: {} } }
+    f.images.set(image.Id, image)
+  }
+  await f.invoke('uninstall-images', { includeHelpers: true })
+  assert.equal(f.images.has(id(80)), false)
+  assert.equal(f.images.has(id(81)), false)
+  assert.ok(f.images.has(id(82)), 'other Alpine versions are outside the selected cleanup')
+  assert.deepEqual(f.calls.filter(({ args }) => args[0] === 'image' && args[1] === 'rm' && [id(80), id(81)].includes(args[2])).map(({ args }) => args), [['image', 'rm', id(80)], ['image', 'rm', id(81)]])
+  assert.match(f.logs.join('\n'), /Removed unused Alpine helper image alpine:3\.20/)
+  assert.match(f.logs.join('\n'), /Removed unused Alpine helper image alpine:latest/)
+  assert.equal(f.readLedger().images.some(item => item.reference.startsWith('alpine:')), false, 'helper permission never becomes durable ownership')
+  assert.equal(f.calls.some(({ args }) => args.includes('prune') || args.includes('--force') || args.includes('alpine:3.21')), false)
+})
+
+for (const protection of ['running', 'stopped', 'extra-tag', 'foreign-owner', 'foreign-project']) {
+  test(`explicit Alpine helper cleanup preserves ${protection} images and explains why`, async t => {
+    const f = fixture(t)
+    const helper = { Id: id(80), Os: 'linux', RepoTags: ['alpine:latest'], Config: { Labels: {} } }
+    f.images.set(helper.Id, helper)
+    if (protection === 'running' || protection === 'stopped') f.containers.set(cid(980), { Id: cid(980), Image: helper.Id, State: { Running: protection === 'running' }, Mounts: [] })
+    if (protection === 'extra-tag') helper.RepoTags.push('another-project/tool:keep')
+    if (protection === 'foreign-owner') helper.Config.Labels[OWNER] = 'different-checkout'
+    if (protection === 'foreign-project') helper.Config.Labels['com.docker.compose.project'] = 'another-project'
+    await f.invoke('uninstall-images', { includeHelpers: true })
+    assert.ok(f.images.has(helper.Id))
+    assert.equal(f.calls.some(({ args }) => args[0] === 'image' && args[1] === 'rm' && args[2] === helper.Id), false)
+    assert.match(f.logs.join('\n'), /Preserved Alpine helper image alpine:latest:/)
+    assert.equal(f.readLedger().images.some(item => item.id === helper.Id), false)
+    f.calls.length = 0
+    await f.invoke('cleanup')
+    assert.ok(f.images.has(helper.Id), 'a later ordinary cleanup cannot inherit helper permission')
+    assert.equal(f.calls.some(({ args }) => args.includes('alpine:latest') || args.includes(helper.Id)), false)
+  })
+}
+
+test('selected Alpine helper tags sharing one image ID are preserved without forced multi-tag removal', async t => {
+  const f = fixture(t)
+  const helper = { Id: id(80), Os: 'linux', RepoTags: ['alpine:3.20', 'alpine:latest'], Config: { Labels: {} } }
+  f.images.set(helper.Id, helper)
+  await f.invoke('uninstall-images', { includeHelpers: true })
+  assert.ok(f.images.has(helper.Id))
+  assert.equal(f.calls.some(({ args }) => args[0] === 'image' && args[1] === 'rm' && args[2] === helper.Id), false)
+  assert.match(f.logs.join('\n'), /Preserved Alpine helper image alpine:3\.20: it has additional tags/)
+  assert.match(f.logs.join('\n'), /Preserved Alpine helper image alpine:latest: it has additional tags/)
+})
+
+test('helper cleanup is rejected outside uninstall before any Docker operations or ledger writes', async t => {
+  const f = fixture(t)
+  for (const mode of ['cleanup', 'prepare', 'up', 'up-storage', 'start-apps', 'verify']) await assert.rejects(f.invoke(mode, { includeHelpers: true }), /only for uninstall-images/)
+  assert.equal(f.calls.length, 0)
+  assert.equal(existsSync(join(f.root, '.local')), false)
+})
+
+test('helper image deletion races fail visibly without retrying or forcing removal', async t => {
+  const f = fixture(t, { intercept: args => args[0] === 'image' && args[1] === 'rm' && args[2] === id(80) ? failed('conflict: image became referenced') : null })
+  f.images.set(id(80), { Id: id(80), Os: 'linux', RepoTags: ['alpine:latest'], Config: { Labels: {} } })
+  await assert.rejects(f.invoke('uninstall-images', { includeHelpers: true }), /Could not remove unused Alpine helper image alpine:latest/)
+  assert.ok(f.images.has(id(80)))
+  assert.deepEqual(f.calls.filter(({ args }) => args[0] === 'image' && args[1] === 'rm' && args[2] === id(80)).map(({ args }) => args), [['image', 'rm', id(80)]])
+})
+
+test('uninstall preserves old unproven dependency IDs when the configured tag changes', async t => {
+  const f = fixture(t)
+  f.images.get(id(2)).RepoTags = ['fixture-postgres:old']
+  f.seedLedger({ images: [{ id: id(2), service: 'postgres', reference: 'fixture-postgres:old' }] })
+  await f.invoke('uninstall-images')
+  assert.ok(f.images.has(id(2)))
+})
+
+test('failed dependency removal is reported and its ledger entry survives for retry', async t => {
+  const f = fixture(t, { intercept: args => args[0] === 'image' && args[1] === 'rm' && args[2] === id(2) ? failed('conflict: image became referenced') : null })
+  await assert.rejects(f.invoke('uninstall-images'), /Could not remove unused image for postgres/)
+  assert.ok(f.images.has(id(2)))
+  assert.ok(f.readLedger().images.some(item => item.id === id(2)))
+  // No data operations or force/prune fallback are allowed after Docker refuses.
+  assert.equal(f.calls.some(({ args }) => args[0] === 'volume' || args.includes('prune') || (args[0] === 'image' && args.includes('--force'))), false)
 })
 
 test('another checkout owner overrides otherwise matching legacy Compose image labels', async t => {
-  const f = fixture(t)
+  const f = fixture(t, { onlyApp: true })
   f.old.Config.Labels[OWNER] = 'different-checkout'
   await f.invoke('uninstall-images')
   assert.ok(f.images.has(f.old.Id))
@@ -246,6 +361,65 @@ test('verification rejects a restart count increase between healthy samples', as
   await f.invoke('up')
   await assert.rejects(imageLifecycle({ root: f.root, mode: 'verify', run: f.run, env: {}, emit: () => {}, pause: async () => { [...f.containers.values()][0].RestartCount = 1 } }), /restarted or became unavailable/)
 })
+
+test('API-only verification ignores inactive Compose profiles and does not require host Ollama', async t => {
+  const f = fixture(t)
+  f.config.services.neo4j = { image: 'missing-optional-neo4j:latest', profiles: ['neo4j'] }
+  f.config.services.admin = { image: 'missing-legacy-dashboard:latest', profiles: ['legacy-admin-upgrade'] }
+  await f.invoke('up')
+  f.calls.length = 0
+  const before = readFileSync(join(f.root, '.env.persistent-memory'))
+  await f.invoke('verify')
+  assert.deepEqual(f.calls.filter(call => call.args[0] === 'image').map(call => call.args[2]), ['fixture-updater:latest', 'fixture-postgres:17'])
+  assert.ok(f.calls.every(call => call.args[0] === 'ps' || call.args.includes('inspect') || call.args.includes('config')))
+  assert.deepEqual(readFileSync(join(f.root, '.env.persistent-memory')), before)
+})
+
+test('verification waits for initial healthchecks before sampling restart stability', async t => {
+  const f = fixture(t)
+  await f.invoke('up')
+  const runtime = [...f.containers.values()][0]
+  runtime.State.Health.Status = 'starting'
+  const waits = []
+  f.calls.length = 0
+  const before = readFileSync(join(f.root, '.local/install-artifacts/ledger.json'))
+  await imageLifecycle({ root: f.root, mode: 'verify', run: f.run, env: {}, emit: line => f.logs.push(line), pause: async ms => {
+    waits.push(ms)
+    if (waits.length === 2) runtime.State.Health.Status = 'healthy'
+  } })
+  assert.deepEqual(waits, [2000, 2000, 2000], 'two readiness polls followed by one stability sample')
+  assert.match(f.logs.join('\n'), /Waiting up to 120 seconds.*update-runner/)
+  assert.ok(f.calls.every(call => call.args[0] === 'ps' || call.args.includes('inspect') || call.args.includes('config')))
+  assert.deepEqual(readFileSync(join(f.root, '.local/install-artifacts/ledger.json')), before)
+})
+
+test('verification bounds initial healthcheck waiting and identifies the pending service', async t => {
+  const f = fixture(t)
+  await f.invoke('up')
+  const runtime = [...f.containers.values()][0]
+  runtime.State.Health.Status = 'starting'
+  const waits = []
+  await assert.rejects(imageLifecycle({ root: f.root, mode: 'verify', run: f.run, env: {}, emit: () => {}, pause: async ms => { waits.push(ms) } }), /still starting after 120 seconds: update-runner/)
+  assert.equal(waits.length, 60)
+  assert.equal(waits.reduce((total, ms) => total + ms, 0), 120_000)
+})
+
+for (const transition of ['unhealthy', 'restart', 'wrong-image']) {
+  test(`verification does not hide ${transition} during initial healthcheck waiting`, async t => {
+    const f = fixture(t)
+    await f.invoke('up')
+    const runtime = [...f.containers.values()][0]
+    runtime.State.Health.Status = 'starting'
+    let waits = 0
+    await assert.rejects(imageLifecycle({ root: f.root, mode: 'verify', run: f.run, env: {}, emit: () => {}, pause: async () => {
+      waits++
+      runtime.State.Health.Status = transition === 'unhealthy' ? 'unhealthy' : 'healthy'
+      if (transition === 'restart') runtime.RestartCount = 1
+      if (transition === 'wrong-image') runtime.Image = id(999)
+    } }), transition === 'unhealthy' ? /Service update-runner is unhealthy/ : /Service update-runner restarted or became unavailable/)
+    assert.equal(waits, 1)
+  })
+}
 
 test('finished attempt history is bounded and immutable image ownership is retained separately', async t => {
   const f = fixture(t)

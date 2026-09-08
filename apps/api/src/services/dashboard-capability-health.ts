@@ -1,4 +1,5 @@
 import type { EffectiveSettings } from './settings.ts'
+import { dashboardOllamaTarget, type DashboardEmbeddingSettings } from './dashboard-ollama.ts'
 import {
   modelDependencyHealth,
   type SafeModelDependencyHealthDto,
@@ -57,14 +58,16 @@ async function readSafeHealth(
  * never project another user's record as a stack-wide failure.
  */
 export async function getDashboardCapabilityHealth(
-  settings: Pick<EffectiveSettings, 'embeddingMode'>,
+  settings: DashboardEmbeddingSettings,
   userId: string,
 ): Promise<DashboardCapabilityHealth> {
   const embeddingScope = dashboardEmbeddingObserverScope(settings, userId)
   const [factExtraction, embeddings, ollamaHost] = await Promise.all([
     readSafeHealth('fact_extraction', 'server'),
     readSafeHealth('embeddings', embeddingScope),
-    readSafeHealth('ollama_host', 'host'),
+    dashboardOllamaTarget(settings)
+      ? readSafeHealth('ollama_host', 'host')
+      : unknownCapabilityHealth('ollama_host', 'host'),
   ])
   return { factExtraction, embeddings, ollamaHost }
 }

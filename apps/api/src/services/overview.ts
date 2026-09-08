@@ -12,7 +12,7 @@ export interface ServiceSummary {
 }
 
 export function isServiceUp(row: ServiceInfo): boolean {
-  return row.health === 'healthy' || row.state === 'running' || row.state === 'reachable'
+  return !isServiceFailed(row) && (row.health === 'healthy' || row.state === 'running' || row.state === 'reachable')
 }
 
 export function isServiceDown(row: ServiceInfo): boolean {

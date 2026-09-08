@@ -119,6 +119,16 @@ integrations. Secrets remain masked.
 Choose **Generate & Install** and wait for the local services, registrations,
 and dashboard readiness checks to finish.
 
+Final verification allows up to 120 seconds for already running required
+containers to finish their initial healthchecks. Stopped, unhealthy, restarting,
+or mismatched-image containers still fail verification. API embeddings do not
+require Ollama. If **Required image
+identity and runtime state** fails, read the diagnostic lines above the summary
+for the named service or image; this check is separate from the embedding check.
+After resolving that reported problem, rerun `npm run install-persistent-memory`
+to complete installation and agent registration. Preserve the existing environment
+file and data volumes when retrying.
+
 ![Installation progress](../assets/lifecycle/onboarding/installer-install.png)
 
 ## 11. Open your dashboard

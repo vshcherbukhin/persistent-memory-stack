@@ -161,4 +161,8 @@ installation. Cleanup removes unused owned artifacts after installation; images
 referenced by any container and persistent data volumes are protected. Shared
 base images and BuildKit cache whose ownership cannot be proved are retained.
 There is no global Docker prune. The uninstaller separately asks whether to
-keep or remove user data; see [uninstall and export](uninstall-memory-stack.md).
+keep or remove user data and whether to remove unused stack images. That image
+choice includes exact configured downloaded dependencies, including legacy
+installs, and lists the optional Alpine utility tags `alpine:3.20` and
+`alpine:latest`. It preserves images used by other containers or carrying unrelated
+ownership or extra tags. See [uninstall and export](uninstall-memory-stack.md).

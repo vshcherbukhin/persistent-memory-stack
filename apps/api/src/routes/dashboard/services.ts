@@ -17,7 +17,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
-import { MODEL_REGISTRY } from '@pm/shared'
 import { requireSuperuser } from '../../authz/guards.ts'
 import {
   listServices,
@@ -28,7 +27,8 @@ import {
   DockerUnavailableError,
 } from '../../services/docker.ts'
 import { listMcpClients, pruneIdleMcpClients, terminateMcpClient } from '../../services/mcp-sessions.ts'
-import { getEffectiveSettings } from '../../services/settings.ts'
+import { getEffectiveSettings, type EffectiveSettings } from '../../services/settings.ts'
+import { dashboardOllamaTarget } from '../../services/dashboard-ollama.ts'
 import { getDashboardCapabilityHealth, type DashboardCapabilityHealth } from '../../services/dashboard-capability-health.ts'
 import { DashboardCapabilityHealthSchema } from './capability-health.ts'
 
@@ -76,7 +76,10 @@ function capabilityStatusDetail(record: DashboardCapabilityHealth['factExtractio
   return record.safeMessage ?? 'This capability needs attention.'
 }
 
-export function dependencyHealthToServiceRows(health: DashboardCapabilityHealth): ServiceRowValue[] {
+export function dependencyHealthToServiceRows(
+  health: DashboardCapabilityHealth,
+  settings: Pick<EffectiveSettings, 'activeEmbedModel'> & { factExtraction: Pick<EffectiveSettings['factExtraction'], 'model'> },
+): ServiceRowValue[] {
   return [
     {
       service: 'fact-extraction',
@@ -87,7 +90,7 @@ export function dependencyHealthToServiceRows(health: DashboardCapabilityHealth)
       health: health.factExtraction.state === 'healthy' ? 'healthy' : health.factExtraction.state === 'unknown' ? null : 'unhealthy',
       controllable: false,
       logsAvailable: false,
-      ...(health.factExtraction.model ? { configuredModel: health.factExtraction.model } : {}),
+      configuredModel: settings.factExtraction.model,
     },
     {
       service: 'embeddings',
@@ -98,7 +101,7 @@ export function dependencyHealthToServiceRows(health: DashboardCapabilityHealth)
       health: health.embeddings.state === 'healthy' ? 'healthy' : health.embeddings.state === 'unknown' ? null : 'unhealthy',
       controllable: false,
       logsAvailable: false,
-      ...(health.embeddings.model ? { configuredModel: health.embeddings.model } : {}),
+      configuredModel: settings.activeEmbedModel,
     },
   ]
 }
@@ -117,14 +120,14 @@ export async function dashboardServiceRoutes(app: FastifyInstance): Promise<void
           listServices({ includeCredentials }),
           getEffectiveSettings(),
         ])
-        const provider = MODEL_REGISTRY[settings.activeEmbedModel]?.provider
+        const ollamaTarget = dashboardOllamaTarget(settings)
         const [ollama, capabilityHealth] = await Promise.all([
-          ollamaInfo({ model: settings.activeEmbedModel, provider }),
+          ollamaTarget ? ollamaInfo(ollamaTarget) : null,
           getDashboardCapabilityHealth(settings, req.identity!.userId),
         ])
         pruneIdleMcpClients(settings.mcpSessionIdleTimeoutSeconds)
         return reply.code(200).send({
-          services: [...containers, ...dependencyHealthToServiceRows(capabilityHealth), ollama],
+          services: [...containers, ...dependencyHealthToServiceRows(capabilityHealth, settings), ...(ollama ? [ollama] : [])],
           mcpClients: listMcpClients(settings.mcpSessionIdleTimeoutSeconds),
           capabilityHealth,
         })
