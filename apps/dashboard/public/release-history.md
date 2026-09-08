@@ -31,6 +31,8 @@
 - Avoid memory-list hydration errors when Docker and the browser use different
   time zones. Redact passwords embedded in installer-preview URLs and Neo4j
   credentials without changing the saved environment.
+- Fix the documentation landing redirect so its styles, images and navigation
+  remain inside the dashboard's documentation route.
 - Refresh public screenshots using generic demonstration data and document
   appearance controls. The personal installation wizard has eleven steps;
   optional connections remain a later dashboard action.

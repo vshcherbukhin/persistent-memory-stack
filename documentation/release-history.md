@@ -14,6 +14,8 @@ nav_hidden: true
   dashboard action.
 - Explains the wizard-to-dashboard appearance handoff and browser-local preferences.
   Installer review masks embedded database URL credentials as well as secret fields.
+- Corrects the `/docs` landing redirect to keep relative assets and navigation
+  under `/docs/index.html`.
 - Includes version-specific
   [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.2.0/README.md)
   and the `npm run update-persistent-memory -- --release 1.2.0` update command.
