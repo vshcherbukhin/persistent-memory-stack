@@ -50,10 +50,20 @@ the environment file remain. Choosing data deletion removes those project
 volumes and the generated environment after confirmation. Repository source
 files and exports are preserved.
 
-A separate choice removes unused, provably installer-owned application images.
-Images referenced by another container and shared base images/build cache are
-retained. No global Docker prune runs. Older screenshots below illustrate the
-terminal journey; read the current terminal choices before confirming.
+A separate choice removes unused stack images, including downloaded dependencies
+and the explicitly listed Alpine utility images `alpine:3.20` and `alpine:latest`.
+It considers owned application images and the exact dependency image references
+in the resolved Compose configuration, including older installs that did not
+record those downloads. Immutable image IDs protect against a tag changing.
+
+Images used by any running or stopped container, images carrying unrelated
+ownership labels or additional tags, and unattributed base images/build cache
+are retained. Cleanup reports why candidate images are retained and explains that
+unattributed base images and caches remain. Removal is never forced, and no global
+Docker prune runs. Alpine utility images are included only by the explicit helper
+cleanup option; ordinary install/update cleanup does not adopt them. Other Alpine
+versions and unrelated images are preserved. Older screenshots below
+illustrate the terminal journey; read the current terminal choices before confirming.
 
 ![Removal confirmation](../assets/lifecycle/uninstall/uninstall-confirm.png?v=20260713-crop)
 

@@ -143,13 +143,25 @@ are written as `.pm` files with schema `pm.secure-memory-export/1`, PBKDF2-SHA25
 and AES-GCM, matching the dashboard importer. These are personal-memory exports,
 so they omit team flags and restore into the current local personal stack.
 
-After the optional export, the script runs Compose with `.env.persistent-memory`,
-the `neo4j` profile, and the `mcp-stream` profile, then executes
-`down --remove-orphans --volumes --rmi all`. It removes persistent-memory
-containers, the project network, named and anonymous stack volumes, images used
-by the Compose stack, leftover `persistent-memory-*` image tags (including old
-`:dev` tags), and the generated `.env.persistent-memory`. Existing exports in
-the repository root are preserved.
+After the optional export, the script runs Compose with `.env.persistent-memory`
+and the selected stack profiles. Keep data is the default: remove containers and
+the project network while preserving named data volumes and the environment file.
+Explicit data deletion removes the project volumes and generated environment.
+Existing exports and repository source files are preserved.
+
+A separate opt-in removes unused stack images. It includes owned application
+images and exact downloaded dependency references in the resolved Compose
+configuration, including legacy installs without dependency ledger entries.
+The terminal choice also explicitly lists `alpine:3.20` and `alpine:latest`
+utility images. The image helper includes these exact tags only with
+`uninstall-images --include-helpers`; other modes do not adopt them.
+Cleanup tracks immutable image IDs and preserves images used by any running or
+stopped container, foreign ownership labels, additional repository tags, and
+unattributed base images/build caches. It reports why candidate images are retained
+and explains that unattributed images and caches remain.
+Docker removal is unforced; there is no global prune or wildcard deletion of
+unrelated images. Ordinary install/update cleanup does not adopt existing
+dependency images for removal.
 
 ### Shared-server validation scripts
 
@@ -630,9 +642,11 @@ containers can reach Ollama; check the dashboard's host-Ollama row after install
 For bind-address and Windows firewall troubleshooting, see
 [Ollama: host and container addresses](../installation/windows-installation.md#ollama-host-and-container-addresses).
 
-The dashboard's host-Ollama row is a separate runtime check, not a Docker-service
-row: it calls `OLLAMA_URL/api/tags`, verifies reachability, and when Ollama is the
-active embedding provider verifies that the configured model is listed. The row
+The dashboard's host-Ollama row appears only for server-managed Ollama embeddings.
+API embeddings and client-managed embeddings do not require this API host and
+omit the host row, probe, and historical host failures. The separate runtime check
+calls `OLLAMA_URL/api/tags`, verifies reachability, and checks that the configured
+model is listed. The row
 is deliberately non-loggable (`Logs unavailable`) because this host process is
 not a Compose container. A reachable host with a missing configured model is
 unhealthy; a successful later check clears the active host failure.
@@ -880,10 +894,12 @@ ownership floor across the data tables).
 - `deploy/scripts/verify-install.sh` — audits prerequisites, the env file + required keys,
   every default container Up (+ healthy where a healthcheck is defined; qdrant has none
   by design), `pm_app` login with `PM_APP_PASSWORD`, API/worker `DATABASE_URL`
-  alignment, host port reachability, and host Ollama + the embedding model. Exit
-  0 = all passed. Containers that are running while their healthchecks are still
-  starting are reported as neutral `WAIT` progress, not warnings. `update.sh` runs
-  it as its final step.
+  alignment, host port reachability, and host Ollama + the embedding model when
+  local embeddings require it. Exit 0 = all passed. Required image identity and
+  runtime validation allows 120 seconds for already running containers to finish
+  their initial healthchecks and preserves stdout/stderr diagnostics on failure. Containers that
+  are running while their healthchecks are still starting are reported as neutral
+  `WAIT` progress, not warnings. `update.sh` runs it as its final step.
 - `npm run rls:check` — the RLS floor verifier.
 - `npm test` / `npm run test:integration` — unit + live-container integration suites.
 

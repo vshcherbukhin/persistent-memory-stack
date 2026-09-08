@@ -74,6 +74,13 @@ own successful or failed local operation, but cannot choose another client's
 scope, and the dashboard reads only the current user's scope. One laptop's local
 failure therefore cannot declare every client unhealthy.
 
+Dashboard Services and Overview probe host Ollama only for server-managed
+embeddings whose active model uses Ollama. API-provider embeddings and
+client-managed embeddings omit this host row and its historical failure from
+dashboard health. Fact extraction currently uses Anthropic or OpenAI. Unreachable
+required local hosts and missing configured local models remain unhealthy. Logical service
+rows show the currently configured models even when health is still unknown.
+
 The four states are `healthy`, `degraded`, `unhealthy`, and `unknown` (no
 observation yet). The table retains only a canonical failure code, safe message,
 retryability, provider/model, count, and timestamps. It never stores an API key,

@@ -27,6 +27,16 @@ If a service is unavailable or stopped, the sidebar **Services** row also shows 
 
 **Application Services** lists each stack or host service, its state, uptime or diagnostic detail, and a live log preview. The legend distinguishes running, stopped or starting, and error or unhealthy rows.
 
+**Ollama (host)** appears only when this stack uses server-managed local Ollama
+embeddings. API-only installations do not require this service and omit its row
+and failure signal. A required host still reports an error if it is unreachable
+or the configured local model is missing. Client-managed embedding health belongs
+to the authenticated client, rather than this server's host.
+
+**Model capabilities** shows the configured Fact extraction and Embeddings model
+names even before their first request or test. **Unknown** means no health result
+has been observed yet; the selected model itself is still configured.
+
 ![MCP sessions page](../../assets/spaces/personal/mcp-sessions.png)
 
 **MCP sessions** lists the client, connection type, last activity, idle-time termination time, and session log preview. A session can disappear after the configured idle timeout and reconnect when the client next uses the MCP.
