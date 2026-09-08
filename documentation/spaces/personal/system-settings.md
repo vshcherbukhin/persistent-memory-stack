@@ -1,6 +1,6 @@
 ---
 title: System Settings
-description: Configure fact extraction, embeddings, retention, and Stream MCP session timeout safely.
+description: Configure fact extraction, embeddings, Stream MCP session timeout, and dashboard appearance.
 icon: settings
 dashboard_space: local-personal
 nav_title: System Settings
@@ -21,9 +21,14 @@ nav_order: 100
 
 System Settings changes how the local stack validates memories, builds vector search, and closes idle Stream MCP sessions. These controls affect future behavior and, for embeddings, can start substantial background work.
 
+This page is available to superusers. Appearance is also available from
+[Your profile](profile.md#appearance), including when System Settings is absent.
+
 ## Read the page
 
-The left menu selects one of four settings sections.
+The local dashboard's left menu selects **Fact extraction**, **Embeddings**,
+**Stream sessions**, or **Appearance**. A shared-server operator console also
+has a **Dashboard login** section.
 
 **Fact extraction** shows the active provider, model, and masked key source. You can choose a model, optionally replace its provider key, test the configuration, and save it. A blank key field keeps the stored key.
 
@@ -35,12 +40,22 @@ The left menu selects one of four settings sections.
 
 **Stream sessions** sets the idle timeout in minutes. Saving restarts the Stream MCP service to apply the new timeout; clients can open fresh sessions automatically.
 
+![Appearance settings with Porcelain selected](../../assets/spaces/personal/settings-appearance.png)
+
+**Appearance** offers **Obsidian** (the default dark theme), **Porcelain** (light),
+and **Match system**. Choosing one changes this browser's dashboard immediately;
+there is no save or service restart. The choice belongs to this browser profile
+and dashboard address, not the server configuration. The graph canvas remains
+dark in both themes. See [Appearance](profile.md#appearance) for persistence and
+profile access.
+
 ## Actions
 
 1. For fact extraction, choose a model, enter a replacement key only when needed, run **Test fact extraction**, then save. If you save without a successful manual test, the backend performs its seeded validation probe.
 2. For embeddings, test the proposed model and dimension. If they changed, read and select **I understand this re-embeds the corpus**, then save the pin.
 3. Follow embedding migration status on the page. Search remains on the old pin until the new corpus is ready, then flips automatically.
-5. For stream sessions, enter 1 to 1440 minutes and save the timeout.
+4. For stream sessions, enter 1 to 1440 minutes and save the timeout.
+5. For appearance, choose Obsidian, Porcelain or Match system; the change applies immediately.
 
 ## States
 

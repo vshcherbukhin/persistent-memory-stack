@@ -1,14 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useRef, useSyncExternalStore } from 'react'
 import { Icon, type IconName } from './Icon'
 import {
   DEFAULT_THEME_PREFERENCE,
-  THEME_CHANGE_EVENT,
   THEME_OPTIONS,
-  applyThemePreference,
   readThemePreference,
   storeThemePreference,
+  subscribeThemePreference,
   type ThemePreference,
 } from '@/lib/theme'
 
@@ -17,54 +16,40 @@ const OPTION_ICON: Record<ThemePreference, IconName> = {
   porcelain: 'light_mode',
   system: 'contrast',
 }
+const serverPreference = () => DEFAULT_THEME_PREFERENCE
 
 /**
  * Appearance control. Rendered in System Settings and in the profile modal, so a
  * member who cannot open superuser settings can still change their own theme.
  */
 export function ThemeSwitch({ compact = false }: { compact?: boolean }) {
-  // Server render and first client render must agree; the real preference is read
-  // in an effect. The <html> stamp already shows the right theme by then.
-  const [preference, setPreference] = useState<ThemePreference>(DEFAULT_THEME_PREFERENCE)
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    setPreference(readThemePreference())
-    setReady(true)
-    const sync = (event: Event) => {
-      const next = (event as CustomEvent<ThemePreference>).detail
-      if (next) setPreference(next)
-    }
-    window.addEventListener(THEME_CHANGE_EVENT, sync)
-    return () => window.removeEventListener(THEME_CHANGE_EVENT, sync)
-  }, [])
-
-  useEffect(() => {
-    if (!ready || preference !== 'system') return
-    // Only a "system" preference has to react to the OS changing under us.
-    const query = window.matchMedia('(prefers-color-scheme: dark)')
-    const reapply = () => applyThemePreference('system')
-    query.addEventListener('change', reapply)
-    return () => query.removeEventListener('change', reapply)
-  }, [preference, ready])
-
-  const choose = (value: ThemePreference) => {
-    setPreference(value)
-    storeThemePreference(value)
-  }
+  // A stable server snapshot keeps server markup and first hydration consistent.
+  const preference = useSyncExternalStore(subscribeThemePreference, readThemePreference, serverPreference)
+  const buttons = useRef<Partial<Record<ThemePreference, HTMLButtonElement>>>({})
 
   return (
     <div className={`theme-switch${compact ? ' compact' : ''}`} role="radiogroup" aria-label="Dashboard appearance">
-      {THEME_OPTIONS.map((option) => {
-        const selected = ready && option.value === preference
+      {THEME_OPTIONS.map((option, index) => {
+        const selected = option.value === preference
         return (
           <button
             key={option.value}
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            ref={(button) => { if (button) buttons.current[option.value] = button; else delete buttons.current[option.value] }}
             className={`theme-switch-option${selected ? ' active' : ''}`}
-            onClick={() => choose(option.value)}
+            onClick={() => storeThemePreference(option.value)}
+            onKeyDown={(event) => {
+              const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+              const target = event.key === 'Home' ? 0 : event.key === 'End' ? THEME_OPTIONS.length - 1 : direction ? (index + direction + THEME_OPTIONS.length) % THEME_OPTIONS.length : null
+              if (target === null) return
+              event.preventDefault()
+              const value = THEME_OPTIONS[target]!.value
+              storeThemePreference(value)
+              buttons.current[value]?.focus()
+            }}
           >
             <span className="theme-switch-swatch" data-variant={option.value} aria-hidden="true">
               <Icon name={OPTION_ICON[option.value]} size={compact ? 15 : 17} />

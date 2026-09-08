@@ -348,15 +348,26 @@ export function renderEnv(a: Answers, s: Secrets, existingEnv: Readonly<Record<s
 
 /** Mask secret values for the UI review (keep the first/last few chars). */
 export function maskEnv(env: string): string {
-  const SECRET_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|VOYAGE_API_KEY|TOKEN_PEPPER|POSTGRES_PASSWORD|PM_APP_PASSWORD|MINIO_ROOT_PASSWORD|FALKORDB_PASSWORD|QDRANT_API_KEY|DOCKER_CONTROL_TOKEN|UPDATE_RUNNER_TOKEN|USAGE_INGEST_TOKEN|LOCAL_USER_PASSWORD|PM_SHARED_USER_TOKEN|SMTP_PASS)=(.+)$/
+  const SECRET_KEYS = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|VOYAGE_API_KEY|TOKEN_PEPPER|POSTGRES_PASSWORD|PM_APP_PASSWORD|MINIO_ROOT_PASSWORD|FALKORDB_PASSWORD|NEO4J_PASSWORD|NEO4J_AUTH|QDRANT_API_KEY|DOCKER_CONTROL_TOKEN|UPDATE_RUNNER_TOKEN|USAGE_INGEST_TOKEN|LOCAL_USER_PASSWORD|PM_SHARED_USER_TOKEN|SMTP_PASS)=(.+)$/
   return env
     .split('\n')
     .map((line) => {
-      const m = SECRET_KEYS.exec(line)
-      if (!m) return line
+      const ending = line.endsWith('\r') ? '\r' : ''
+      const content = ending ? line.slice(0, -1) : line
+      const m = SECRET_KEYS.exec(content)
+      // Database/service URLs repeat credentials even when their dedicated
+      // password fields are masked. Preserve routing details, never userinfo passwords.
+      if (!m) return content.replace(/([a-z][a-z\d+.-]*:\/\/)([^\s/?#"']*)/gi, (_url, scheme: string, authority: string) => {
+        // A raw @ inside userinfo belongs to the password; the final @ before
+        // the path/query/fragment separates credentials from the host.
+        const boundary = authority.lastIndexOf('@')
+        const passwordStart = authority.indexOf(':')
+        if (passwordStart < 0 || boundary <= passwordStart + 1) return scheme + authority
+        return scheme + authority.slice(0, passwordStart + 1) + '••••' + authority.slice(boundary)
+      }) + ending
       const val = m[2]!
       const shown = val.length <= 8 ? '••••' : `${val.slice(0, 3)}…${val.slice(-2)}`
-      return `${m[1]}=${shown}`
+      return `${m[1]}=${shown}${ending}`
     })
     .join('\n')
 }

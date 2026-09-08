@@ -37,14 +37,14 @@
   --text: #e9f1f8;   /* title */
   --body: #b3c1cf;   /* body */
   --soft: #8d9cab;   /* soft */
-  --muted: #6d7b89;  /* muted */
-  --dim: #4d5966;    /* dim */
+  --muted: #8d9cab;  /* muted */
+  --dim: #8593a1;    /* dim */
 
   /* product accent — one plasma ramp, cyan to violet */
   --accent: #2bc5e8;
   --accent-hover: #57d8f5;
   --accent-2: #8b5cf6;
-  --on-accent: #04222c;
+  --on-accent: #010c12;
   --accent-10: rgba(43, 197, 232, .10);
   --accent-12: rgba(43, 197, 232, .12);
   --accent-15: rgba(43, 197, 232, .16);
@@ -118,11 +118,11 @@
   --text: #0a1119;
   --body: #35434f;
   --soft: #55636f;
-  --muted: #6d7b88;
-  --dim: #94a1ad;
+  --muted: #556371;
+  --dim: #596775;
 
-  --accent: #0e88ad;
-  --accent-hover: #0b6f8f;
+  --accent: #0b6884;
+  --accent-hover: #09556d;
   --accent-2: #6d3fe0;
   --on-accent: #ffffff;
   --accent-10: rgba(14, 136, 173, .09);
@@ -130,15 +130,15 @@
   --accent-15: rgba(14, 136, 173, .15);
   --accent-40: rgba(14, 136, 173, .38);
   --accent-60: rgba(14, 136, 173, .6);
-  --plasma: linear-gradient(100deg, #0e88ad 0%, #2f6fd0 46%, #6d3fe0 100%);
+  --plasma: linear-gradient(100deg, #0c7393 0%, #2c68c3 46%, #6d3fe0 100%);
   --accent-glow: 0 0 20px -12px #0e88ad;
 
-  --marigold: #a4670a;
+  --marigold: #925c09;
   --marigold-12: rgba(196, 132, 20, .13);
   --marigold-15: rgba(196, 132, 20, .17);
   --marigold-40: rgba(164, 103, 10, .38);
   --marigold-45: rgba(164, 103, 10, .45);
-  --grass: #0f8f52;
+  --grass: #0d7945;
   --grass-soft: #0b6b3e;
   --grass-12: rgba(15, 143, 82, .11);
   --coral: #cf2733;
@@ -708,7 +708,7 @@ p.muted, .muted { color: var(--muted); }
 }
 .guide-image-close {
   align-items: center;
-  background: var(--surface);
+  background: #161d25;
   border: 1px solid rgba(255, 255, 255, .22);
   border-radius: 6px;
   color: #fff;
@@ -3028,8 +3028,8 @@ button.link:hover { color: var(--accent-hover); }
   flex-shrink: 0;
   border: 1px solid rgba(46, 212, 122, .45);
   border-radius: 999px;
-  color: #8df2b8;
-  background: rgba(46, 212, 122, .12);
+  color: var(--grass-soft);
+  background: var(--grass-12);
   padding: 4px 9px;
   font-size: 11px;
   font-weight: 800;
@@ -3247,8 +3247,8 @@ button.link:hover { color: var(--accent-hover); }
   margin-top: 16px;
   border: 1px solid var(--danger);
   border-radius: var(--radius-input);
-  background: rgba(255, 94, 94, .11);
-  color: #ff9b9b;
+  background: var(--coral-12);
+  color: var(--coral-soft);
   padding: 12px;
   font-size: 13px;
   line-height: 1.45;
@@ -3337,12 +3337,12 @@ button.link:hover { color: var(--accent-hover); }
   gap: 4px;
   padding: 8px 28px;
   border-bottom: 1px solid var(--marigold-40);
-  background: rgba(254, 185, 47, .11);
-  color: #f7d894;
+  background: var(--marigold-12);
+  color: var(--marigold);
   font-size: 13px;
 }
 .temp-password-banner .link {
-  color: #ffe3a3;
+  color: var(--marigold);
   font-weight: 700;
 }
 .password-meter {
@@ -4064,9 +4064,10 @@ code, pre, .mono, .terminal, .update-version, .tokenval {
     repeating-linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px 34px),
     repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 34px);
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
 }
-.shell > * { position: relative; z-index: 1; }
+/* Keep child overlays in the shell's shared stacking context. Isolating each
+   child puts the sidebar's profile dialog behind the main content. */
 
 /* Sidebar: the active item sits on the live plasma path */
 .sidebar { border-right: 1px solid var(--border); position: relative; }
@@ -4262,6 +4263,12 @@ button.primary:hover,
   --muted: #8593a1;
   --dim: #6d7b89;
   --panel: #0f141a;
+  --elevated: #131920;
+  --surface: #161d25;
+  --inset: #070a0e;
+  --raised: #161d25;
+  --accent: #2bc5e8;
+  --on-accent: #010c12;
   --border: rgba(148, 178, 208, .16);
   background:
     radial-gradient(circle at center, rgba(43, 197, 232, .08), transparent 46%),
@@ -4270,5 +4277,8 @@ button.primary:hover,
 }
 .memory-graph-legend { background: rgba(8, 11, 15, .82); }
 .memory-graph-error { background: rgba(8, 11, 15, .92); }
-.memory-graph-legend .entity-dot { background: #8b5cf6; }
+.memory-graph-legend .entity-dot { background: #35758b; }
 .memory-graph-legend .granted-dot { background: #a985f5; }
+
+/* Keep informative counts readable over the selected facet tint. */
+.memory-graph-facet-list button.active small { color: var(--body); }

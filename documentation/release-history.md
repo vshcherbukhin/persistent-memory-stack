@@ -3,6 +3,21 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.2.0 - 2026-09-08
+
+[GitHub release v1.2.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.2.0)
+
+- Introduces Obsidian, Porcelain and Match system appearance guidance, profile
+  and settings controls, local fonts and the deliberately dark Memory Graph canvas.
+- Refreshes dashboard and eleven-step personal installation screenshots using
+  isolated demonstration data. Optional shared connections remain a later
+  dashboard action.
+- Explains the wizard-to-dashboard appearance handoff and browser-local preferences.
+  Installer review masks embedded database URL credentials as well as secret fields.
+- Includes version-specific
+  [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.2.0/README.md)
+  and the `npm run update-persistent-memory -- --release 1.2.0` update command.
+
 ## 1.1.4 - 2026-09-08
 
 [GitHub release v1.1.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.4)

@@ -7,15 +7,16 @@ nav_order: 60
 ---
 # Onboard — the one-command installer
 
-A host-only, flow-routed web wizard (`npm run install-persistent-memory`) that detects the machine, generates every secret, runs the install with live progress, registers the MCP into your agent apps, writes a top memory block into CLAUDE.md / AGENTS.md, and writes the detailed memory-usage rule.
+A host-only web wizard (`npm run install-persistent-memory`) that checks the machine, preserves existing installation credentials or generates missing ones, runs the install with live progress, registers the MCP into your agent apps, writes a top memory block into CLAUDE.md / AGENTS.md, and writes the detailed memory-usage rule. Provider API keys are supplied by the user.
 
 ## Role in the system
 
 `apps/onboard/` is the single user-facing entry point for *getting set up* — the counterpart to `update-persistent-memory` for *staying current*. It runs **before** the stack exists, so it is deliberately **standalone**: its own `package.json`, no `@pm/*` workspace deps, talking to the live API only over HTTP (`apps/onboard/package.json` — deps are just `fastify` + `@fastify/static`). It is **never containerized or shipped** to the server (`server/index.ts` header; `apps/onboard/README.md` "Security / boundaries").
 
 The wizard installs one client shape: a local **Personal Memories** stack, local
-dashboard, local embeddings, and the stream MCP service. After personal setup it
-can optionally connect **Shared Memories** with a server-issued connector token.
+dashboard, local or remote-provider embeddings, and the stream MCP service.
+Optional **Shared Memories** connections are configured later in the dashboard
+with a server-issued connector token.
 It is the only place the local stack's secrets and the per-agent MCP config are
 generated, so it is also where the security-sensitive defaults (auto-generated
 passwords, `0o600` config files, loopback-only binding) live.
@@ -31,15 +32,17 @@ The launcher and server:
 The pure, unit-tested logic (each module separates pure builders from thin IO writers):
 
 - **`server/env.ts`** — `genSecrets()` auto-generates the secrets a user must never invent (`TOKEN_PEPPER`, DB/MinIO/FalkorDB passwords, `QDRANT_API_KEY`, plus `DOCKER_CONTROL_TOKEN` and `USAGE_INGEST_TOKEN`). `renderEnv()` builds `.env.persistent-memory` deterministically, deriving `DATABASE_URL` (password = `PM_APP_PASSWORD`) and `DATABASE_MIGRATE_URL` (password = `POSTGRES_PASSWORD`) **from** the generated secrets so they can't drift, and sets `PM_HOST_BIND=127.0.0.1` for loopback-only local ports. `maskEnv()` masks secret values for the review preview.
-- **`server/detect.ts`** — `recommendModel()` (RAM tier → `qwen3-embedding:8b`/`4b`/`0.6b`, the full flow's default pin) and `detectApps()` (path-existence probes → which agent apps are installed: Claude CLI/Desktop and Codex CLI/Desktop).
-- **`server/prereq.ts`** — parsers and install-plan builders for Homebrew, Docker Desktop/Compose, Node, Ollama, and pulled-model probes. Windows provides Ollama **Install**/**Start** actions; Node, Git for Windows Bash, and a Linux Docker engine are prepared manually. On macOS, missing Homebrew is a manual prerequisite: the wizard shows the official installer command plus `brew shellenv` zsh commands, then the fixed Environment pre-check cards unlock brew-backed Node/Docker/Ollama actions after the user returns to the step. Both hosts require Node 22.12+ or a newer supported LTS version.
-- **`layers/onboarding/src/server/steps.ts`** — `buildSteps(flow)` returns the ordered `InstallStep[]`, re-exported through the app compatibility path. The visible flow always runs the proven personal-stack commands (`npm run setup` → `ollama pull` if the selected model is missing → `compose up` with `COMPOSE_PROFILES=mcp-stream` → wait-postgres → `migrate:deploy` → container-applied `rls` → `seed` → restart api+worker → wait-stream-mcp → `verify`). If Shared Memories are selected, the shared connection step runs **after** local verify so the dashboard/API exist before the connector is stored. The `compose up --build` step sets `COMPOSE_PARALLEL_LIMIT=1` to avoid concurrent npm registry/TLS failures on fresh laptops. `hostRewriteUrl()` rewrites the container DB host to `localhost:5433` for host-run Prisma/seed; RLS itself runs through `deploy/scripts/apply-rls.sh` inside the Postgres container so the host needs no `psql`.
+- **`server/detect.ts`** — legacy RAM-tier helpers and `detectApps()` (path-existence probes → which agent apps are installed: Claude CLI/Desktop and Codex CLI/Desktop). The current wizard uses the shared resource policy and measured host/Docker resources to recommend a local or remote embedding model.
+- **`server/prereq.ts`** — parsers and install-plan builders for Homebrew, Docker Desktop/Compose, Node, Ollama, and pulled-model probes. Windows provides Ollama **Install**/**Start** actions; Node, Git for Windows Bash, and a Linux Docker engine are prepared manually. On macOS, missing Homebrew is a manual prerequisite: the wizard shows the official installer command plus `brew shellenv` zsh commands, then the fixed Environment pre-check cards unlock brew-backed Node/Docker/Ollama actions after the user returns to the step. Both hosts require Node 22.12+ on the 22.x line, or Node 24.x.
+- **`layers/onboarding/src/server/steps.ts`** — `buildSteps(flow)` returns the ordered `InstallStep[]`, re-exported through the app compatibility path. The visible flow always runs the proven personal-stack commands (`npm run setup` → `ollama pull` if the selected model is missing → `compose up` with `COMPOSE_PROFILES=mcp-stream` → wait-postgres → `migrate:deploy` → container-applied `rls` → `seed` → restart api+worker → wait-stream-mcp → `verify`). The public wizard finishes the local stack first; optional Shared Memories setup belongs to the dashboard. The `compose up --build` step sets `COMPOSE_PARALLEL_LIMIT=1` to avoid concurrent npm registry/TLS failures on fresh laptops. `hostRewriteUrl()` rewrites the container DB host to `localhost:5433` for host-run Prisma/seed; RLS itself runs through `deploy/scripts/apply-rls.sh` inside the Postgres container so the host needs no `psql`.
 - **`server/install.ts`** — the orchestrator: spawns each step **without a shell** (argv arrays, no interpolation), streams stdout/stderr as NDJSON, skips the selected-model pull when Ollama already has it, and polls `docker inspect …Health.Status` for the wait step. Personal installation does not mint a bootstrap token. Stops on first failure.
 - **`server/register.ts`** — idempotent MCP-config mergers. Builds a Streamable HTTP entry (`type: "http"`, `url: PM_MCP_STREAM_URL`; Claude Code config names this transport `http`) and never writes connector secrets into agent config. Shared Memories tokens live in the local dashboard/API. Writers deep-merge `~/.claude.json` (global or `projects.<path>`) for Claude Code / Claude Desktop folder sessions, skip `claude_desktop_config.json` because standalone Claude Desktop local config is command-shaped, and surgically splice `[mcp_servers.persistent-memory]` into `~/.codex/config.toml` (preserving neighbor tables). Codex CLI and Codex Desktop are separate wizard choices but share the same Codex config target. All configs written `0o600`. Legacy command/stdio entries are migration aliases and are upgraded to the stream URL by setup/update helpers.
 - **`server/rule.ts`** — writes the editable memory-usage rule (from `templates/persistent-memory-rule.md`) to `.claude/rules/` / `.codex/rules/` and replaces/inserts a top `## Persistent Memory Usage (MANDATORY)` block under the matching `CLAUDE.md` / `AGENTS.md` title. It removes previous generated persistent-memory blocks, legacy `## Memory Save Triggers (MANDATORY)` blocks, and legacy one-line refs before insertion, and rewrites the rule reference per Claude/Codex/global/project target.
 
-The visible wizard has 12 steps. Public release checks are built in, so there is
-no update-source configuration or connection-test step.
+The visible wizard has 11 steps. Public release checks are built in, and optional
+Shared Memories connections belong to the installed dashboard, so neither needs
+a setup step. The header offers Obsidian and Porcelain appearance; the installed
+dashboard also offers Match system in the profile and System Settings.
 
 The frontend (`web/src/`) is a React + Vite SPA. `flow.ts` is the pure flow graph (`FLOW_PHASES`, `nextPhase`/`prevPhase`); `App.tsx` renders one component per phase. Legacy flow ids still exist as migration aliases, but all visible paths normalize to the personal-first sequence and generate `.env.persistent-memory` with **`deploymentMode: 'local'`**.
 
@@ -83,12 +86,9 @@ flowchart TD
   A --> A1[local embedding pin + extraction LLM]
   A1 --> A2[ecosystem + stream MCP registration + rule]
   A2 --> A3[review env: DEPLOYMENT_MODE=local]
-  A3 --> A4{Connect Shared Memories?}
-  A4 -->|No| A5[install personal stack + stream MCP]
-  A4 -->|Yes| S[collect connector token + test /config and /whoami]
-  S --> A5
-  A5 --> A6[save shared connection if selected + restart stream MCP]
-  A6 --> AD[Done: local dashboard]
+  A3 --> A5[install personal stack + stream MCP]
+  A5 --> AD[Done: local dashboard]
+  AD --> SH[Optional later: connect Shared Memories in dashboard]
 ```
 
 ## Public surface / interfaces

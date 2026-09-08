@@ -29,6 +29,16 @@ it has no Shared Memories step. Detected tools and optional choices may differ.
 
 Choose **Get started** to begin a local Personal Memories installation.
 
+The header offers **Obsidian** (dark, the default) and **Porcelain** (light).
+You can change the wizard's appearance without changing your installation
+answers. The dashboard has its own Appearance control, including **Match
+system**, available from [Your profile](../spaces/personal/profile.md#appearance).
+The completion page's **Go to dashboard** action carries the selected wizard
+theme to the dashboard. Later appearance changes remain local to each address.
+The fonts are bundled with the installer and dashboard, so displaying the UI
+does not require a font-service connection. Model APIs and installation
+downloads still require network access.
+
 ![Welcome screen](../assets/lifecycle/onboarding/installer-flow.png)
 
 ## 2. Check your environment

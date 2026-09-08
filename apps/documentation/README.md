@@ -64,13 +64,15 @@ no-cache response headers through both authenticated documentation routes.
 `npm run docs:generate` derives `mkdocs.yml` from the same frontmatter; leave
 `mkdocs.template.yml` for static MkDocs configuration only.
 
-Capture screenshots from the real dashboard at 1920 x 873. Before committing,
-blur memory content and author cells, memory view/edit content, Application
-updates owner and repository fields, and the profile email. Never commit a raw
-capture containing those values.
+Capture screenshots from the real dashboard at 1920 x 873. Prefer an isolated
+production-UI fixture containing only generic synthetic data. For live captures,
+follow the complete privacy checklist in `documentation/readme.md`: blur all
+data-derived memory values, identifiers and private profile values. Never commit
+an unredacted private capture.
 
 The Memory Graph guide keeps two Chrome-rendered references: a project-scoped 3D
 overview (`memory-graph-overview.png`) and a selected-node 2D focus state
 (`memory-graph-focus.png`). Keep the project filter visible in both captures so
-the public guide demonstrates the same corpus boundary without exposing records
-from unrelated projects.
+the public guide demonstrates the filtering workflow. A project filter is not a
+privacy boundary: related entities can still expose data-derived labels. Use
+synthetic records or redact every such value before publishing.
