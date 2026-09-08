@@ -81,10 +81,11 @@ describe('terminal update script', () => {
   })
 
   it('runs Prisma migrate from the moved schema layer', async () => {
-    const source = await readFile(new URL('../../../layers/update-ops/update-flow/update.ts', import.meta.url), 'utf8')
+    const source = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
 
-    expect(source).toContain("join(cfg.repoDir, 'layers/core/schema')")
-    expect(source).not.toContain("join(cfg.repoDir, 'prisma')")
+    expect(source).toContain('PRISMA_DIR="$REPO_ROOT/layers/core/schema"')
+    expect(source).toContain('( cd "$PRISMA_DIR" && DATABASE_MIGRATE_URL="$HOST_MIGRATE_URL" npm run --silent migrate:deploy )')
+    expect(source).not.toContain('PRISMA_DIR="$REPO_ROOT/prisma"')
   })
 
   it('supports an exact release through a named detached worktree', async () => {
@@ -175,14 +176,17 @@ describe('terminal update script', () => {
     expect(worktreeResolution).toBeGreaterThan(firstHandoff)
   })
 
-  it('uses master as the safe default source for an exact release and rejects conflicting shortcuts', async () => {
+  it('defaults to published releases and keeps explicit developer branch shortcuts separate', async () => {
     const script = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
 
     expect(script).toContain('UPDATE_RELEASE_BRANCH_EXPLICIT=0')
     expect(script).toContain('UPDATE_BRANCH_OVERRIDE="master"')
     expect(script).toContain('--release cannot be combined with --dev or --master.')
     expect(script).toContain('--release can only be combined with one explicit --branch.')
-    expect(script).toContain('Using exact release ${UPDATE_RELEASE_OVERRIDE} from origin/${UPDATE_BRANCH_OVERRIDE}.')
+    expect(script).toContain('UPDATE_SOURCE_MODE="published"')
+    expect(script).toContain('pm_resolve_published_release "$SCRIPT_REPO_ROOT" "$UPDATE_RELEASE_OVERRIDE"')
+    expect(script).toContain('pm_git_fetch_published_tag "$SOURCE_REPO_ROOT" "$PUBLISHED_RELEASE_TAG" "$PUBLISHED_RELEASE_COMMIT"')
+    expect(script).toContain('No cached branch will be used.')
     expect(script).not.toContain('--version)')
   })
 

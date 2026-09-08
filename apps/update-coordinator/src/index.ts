@@ -31,6 +31,8 @@ export interface CoordinatorPlan {
   targetVersion: string
   path: string[]
   targetRevision?: string
+  /** Immutable published tag commits for every release involved in this plan. */
+  releaseCommits?: Record<string, string>
   plannedAt: string
 }
 
@@ -41,6 +43,7 @@ export interface CoordinatorExecutionState {
   targetVersion: string
   path: string[]
   targetRevision?: string
+  releaseCommits?: Record<string, string>
   status: 'running' | 'complete' | 'failed'
   snapshotStatus?: 'running' | 'complete'
   snapshotAt?: string
@@ -131,9 +134,10 @@ async function requireReadable(path: string): Promise<void> {
   await access(path, constants.R_OK)
 }
 
-async function artifactIdFor(artifact: string, contractLibrary: string): Promise<string> {
-  const [coordinator, contract] = await Promise.all([readFile(artifact), readFile(contractLibrary)])
-  return createHash('sha256').update(coordinator).update('\0').update(contract).digest('hex').slice(0, 24)
+async function artifactIdFor(paths: string[]): Promise<string> {
+  const hash = createHash('sha256')
+  for (const bytes of await Promise.all(paths.map(path => readFile(path)))) hash.update(bytes).update('\0')
+  return hash.digest('hex').slice(0, 24)
 }
 
 export async function installCoordinator(options: InstallCoordinatorOptions): Promise<CoordinatorInstallation> {
@@ -142,8 +146,11 @@ export async function installCoordinator(options: InstallCoordinatorOptions): Pr
   const installationHome = join(resolve(options.coordinatorBaseDir), installationId)
   const artifact = join(resolve(options.artifactDir), 'coordinator.mjs')
   const contractLibrary = join(resolve(options.artifactDir), 'lib', 'upgrade-contract.mjs')
-  await Promise.all([requireReadable(artifact), requireReadable(contractLibrary)])
-  const artifactId = await artifactIdFor(artifact, contractLibrary)
+  const releaseLibrary = join(resolve(options.artifactDir), 'lib', 'github-releases.mjs')
+  const publicSource = join(resolve(options.artifactDir), 'lib', 'public-source.json')
+  const artifacts = [artifact, contractLibrary, releaseLibrary, publicSource]
+  await Promise.all(artifacts.map(requireReadable))
+  const artifactId = await artifactIdFor(artifacts)
   const home = join(installationHome, 'bundles', artifactId)
 
   await mkdir(join(home, 'lib'), { recursive: true, mode: 0o700 })
@@ -155,6 +162,8 @@ export async function installCoordinator(options: InstallCoordinatorOptions): Pr
   await chmod(join(installationHome, 'state'), 0o700)
   await copyPrivateIfMissing(artifact, join(home, 'coordinator.mjs'))
   await copyPrivateIfMissing(contractLibrary, join(home, 'lib', 'upgrade-contract.mjs'))
+  await copyPrivateIfMissing(releaseLibrary, join(home, 'lib', 'github-releases.mjs'))
+  await copyPrivateIfMissing(publicSource, join(home, 'lib', 'public-source.json'))
   await writeJsonAtomic(join(installationHome, 'installation.json'), {
     protocolVersion: 1,
     installationId,
@@ -279,7 +288,7 @@ type CommandResult = { code: number; stdout: string; stderr: string }
 
 async function runCommand(command: string, args: string[], cwd: string): Promise<CommandResult> {
   return await new Promise((resolveRun) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
@@ -327,6 +336,128 @@ export async function loadTrustedUpgradeContracts(repoRoot: string, branch: stri
   return contracts
 }
 
+export interface PublishedReleasePin { tag: string; version: string; commit: string }
+type PublishedReleaseResolver = (options: { version: string; signal?: AbortSignal }) => Promise<PublishedReleasePin>
+
+function validatePublishedPin(release: PublishedReleasePin): void {
+  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(release.version)
+    || release.tag !== `v${release.version}` || !/^[0-9a-f]{40}$/u.test(release.commit)) {
+    throw new Error('Invalid published release selection. Resolve a published GitHub release before updating.')
+  }
+}
+
+async function resolvePublishedRelease(options: { version: string; signal?: AbortSignal }): Promise<PublishedReleasePin> {
+  const releaseModule = await import(new URL('./lib/github-releases.mjs', import.meta.url).href) as { fetchPublishedRelease: PublishedReleaseResolver }
+  return await releaseModule.fetchPublishedRelease(options)
+}
+
+export async function publishedTargetForCoordinator(
+  repoRoot: string,
+  releaseLine: string,
+  env: NodeJS.ProcessEnv,
+  resolveRelease: PublishedReleaseResolver = resolvePublishedRelease,
+): Promise<PublishedReleasePin> {
+  const pin = {
+    tag: env.PM_COORDINATOR_RELEASE_TAG ?? '',
+    version: env.PM_COORDINATOR_RELEASE_VERSION ?? '',
+    commit: env.PM_COORDINATOR_RELEASE_COMMIT ?? '',
+  }
+  // The v1.1.0 shell installs this new bundle after resolving its checkout but
+  // cannot export fields introduced in v1.1.1. Resolve that exact version anew
+  // from published Releases; main still verifies the tag and checkout SHA.
+  if (env.PM_COORDINATOR_SOURCE_MODE === undefined && !pin.tag && !pin.version && !pin.commit) {
+    if (env.PM_COORDINATOR_TARGET_RESOLVED !== '1') {
+      throw new Error('Legacy coordinator handoff has no resolved update target. Run the supported host updater.')
+    }
+    const pkg = await readJson(join(repoRoot, 'package.json'))
+    const version = versionFromDurableState(pkg)
+    if (!version || !hasReleaseLine(pkg, releaseLine, 'persistentMemoryReleaseLine')) {
+      throw new Error('Legacy coordinator target package does not belong to the current public release line.')
+    }
+    const published = await resolveRelease({ version })
+    validatePublishedPin(published)
+    if (published.version !== version) throw new Error('Published release differs from the legacy coordinator target version.')
+    return published
+  }
+  validatePublishedPin(pin)
+  return pin
+}
+
+export async function fetchPublishedReleaseCommit(repoRoot: string, release: PublishedReleasePin, releaseLine: string): Promise<string> {
+  validatePublishedPin(release)
+  let fetched: string
+  try {
+    await gitOutput(repoRoot, ['fetch', '--quiet', '--no-recurse-submodules', '--no-tags', 'origin', `refs/tags/${release.tag}`])
+    fetched = await gitOutput(repoRoot, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'])
+  } catch {
+    // Git tracing, proxies, and credential helpers can include secrets in diagnostics.
+    throw new Error('Published release Git fetch failed. Check repository access and connectivity, then retry.')
+  }
+  if (fetched !== release.commit) throw new Error(`Published tag ${release.tag} changed while fetching. Refusing to update.`)
+  if (await versionAtCommit(repoRoot, fetched, releaseLine) !== release.version) {
+    throw new Error(`Published tag ${release.tag} does not match its package version and public release line.`)
+  }
+  return fetched
+}
+
+/** Release-mode contracts come only from published, pinned tags, never branch history. */
+export async function loadPublishedUpgradeContracts(
+  repoRoot: string,
+  releaseLine: string,
+  target: PublishedReleasePin,
+  options: { moduleUrl?: string; resolveRelease?: PublishedReleaseResolver } = {},
+): Promise<{ contracts: Map<string, ReleaseUpgradeContract>; releases: Map<string, PublishedReleasePin> }> {
+  const upgrade = await loadUpgradeContract(options.moduleUrl)
+  const resolveRelease = options.resolveRelease ?? resolvePublishedRelease
+  const releases = new Map<string, PublishedReleasePin>()
+  const rawContracts = new Map<string, unknown>()
+  const queued = new Set<string>([target.version])
+  const pending = [target.version]
+  const signal = AbortSignal.timeout(120_000)
+  while (pending.length) {
+    if (signal.aborted) throw new Error('Published release planning timed out. Retry when GitHub is reachable.')
+    const version = pending.shift()!
+    if (releases.size >= 25) throw new Error('Published release dependency limit exceeded.')
+    const release = version === target.version ? target : await resolveRelease({ version, signal })
+    if (release.version !== version) throw new Error(`Published release resolver returned the wrong version for ${version}.`)
+    await fetchPublishedReleaseCommit(repoRoot, release, releaseLine)
+    const raw: unknown = JSON.parse(await gitOutput(repoRoot, ['show', `${release.commit}:release/upgrade.json`]))
+    if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { requiredStops?: unknown }).requiredStops)) {
+      throw new Error(`Published release ${version} has an invalid upgrade contract.`)
+    }
+    releases.set(version, release)
+    rawContracts.set(version, raw)
+    for (const stop of (raw as { requiredStops: Array<{ release?: unknown }> }).requiredStops) {
+      if (!stop || typeof stop.release !== 'string' || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(stop.release)) {
+        throw new Error(`Published release ${version} has an invalid required stop.`)
+      }
+      if (!queued.has(stop.release)) { queued.add(stop.release); pending.push(stop.release) }
+    }
+  }
+  const availableReleases = new Set(releases.keys())
+  const contracts = new Map<string, ReleaseUpgradeContract>()
+  for (const [version, raw] of rawContracts) {
+    contracts.set(version, upgrade.validateUpgradeContract(raw, { packageVersion: version, availableReleases }))
+  }
+  return { contracts, releases }
+}
+
+async function assertPinnedWorktree(root: string, commit: string): Promise<void> {
+  if (await gitOutput(root, ['rev-parse', 'HEAD']) !== commit) throw new Error(`Release worktree ${root} points to a different commit.`)
+  if (await gitOutput(root, ['status', '--porcelain', '--untracked-files=no'])) throw new Error(`Release worktree ${root} has tracked changes. Refusing to execute modified release code.`)
+}
+
+export async function coordinatorPublishedReleaseWorktree(repoRoot: string, coordinatorHome: string, release: PublishedReleasePin): Promise<string> {
+  validatePublishedPin(release)
+  const worktree = join(coordinatorHome, 'worktrees', `persistent-memory-${release.version}-${release.commit.slice(0, 12)}`)
+  if (!existsSync(worktree)) {
+    await mkdir(dirname(worktree), { recursive: true, mode: 0o700 })
+    await gitOutput(repoRoot, ['worktree', 'add', '--detach', worktree, release.commit])
+  }
+  await assertPinnedWorktree(worktree, release.commit)
+  return worktree
+}
+
 export async function coordinatorReleaseWorktree(
   repoRoot: string,
   coordinatorHome: string,
@@ -362,6 +493,15 @@ function progressPathFor(coordinatorHome: string): string {
   return join(coordinatorHome, 'state', 'hop-progress.json')
 }
 
+function validPublishedPlanPins(input: Pick<CoordinatorPlan, 'releaseCommits' | 'path' | 'targetVersion' | 'targetRevision'>): boolean {
+  if (input.releaseCommits === undefined) return true
+  const pins = input.releaseCommits
+  return pins !== null && typeof pins === 'object' && !Array.isArray(pins)
+    && Object.entries(pins).every(([version, commit]) => /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version) && typeof commit === 'string' && /^[0-9a-f]{40}$/u.test(commit))
+    && input.path.every(version => typeof pins[version] === 'string')
+    && pins[input.targetVersion] === input.targetRevision
+}
+
 function isExecutionState(value: unknown): value is CoordinatorExecutionState {
   const input = value as Partial<CoordinatorExecutionState> | null
   if (!input) return false
@@ -373,6 +513,7 @@ function isExecutionState(value: unknown): value is CoordinatorExecutionState {
     && Array.isArray(input.completedHops)
     && typeof input.updatedAt === 'string'
     && (input.snapshotStatus === undefined || input.snapshotStatus === 'running' || input.snapshotStatus === 'complete')
+    && validPublishedPlanPins(input as CoordinatorExecutionState)
 }
 
 function newExecutionState(plan: CoordinatorPlan): CoordinatorExecutionState {
@@ -383,6 +524,7 @@ function newExecutionState(plan: CoordinatorPlan): CoordinatorExecutionState {
     targetVersion: plan.targetVersion,
     path: [...plan.path],
     targetRevision: plan.targetRevision,
+    releaseCommits: plan.releaseCommits,
     status: 'running',
     completedHops: [],
     updatedAt: new Date().toISOString(),
@@ -395,6 +537,7 @@ function matchesPlan(state: CoordinatorExecutionState, plan: CoordinatorPlan): b
     && state.targetVersion === plan.targetVersion
     && state.path.join('\u0000') === plan.path.join('\u0000')
     && state.targetRevision === plan.targetRevision
+    && JSON.stringify(state.releaseCommits ?? null) === JSON.stringify(plan.releaseCommits ?? null)
 }
 
 function matchesReleasePath(state: CoordinatorExecutionState, plan: CoordinatorPlan): boolean {
@@ -406,6 +549,7 @@ function matchesReleasePath(state: CoordinatorExecutionState, plan: CoordinatorP
 
 function canRetryFailedRevision(state: CoordinatorExecutionState, plan: CoordinatorPlan): boolean {
   return state.status === 'failed'
+    && !state.releaseCommits && !plan.releaseCommits
     && state.completedHops.length === 0
     && matchesReleasePath(state, plan)
     && state.targetRevision !== plan.targetRevision
@@ -501,11 +645,16 @@ function isMissingFile(error: unknown): boolean {
  * unfinished hop and never silently rolls database data back.
  */
 export async function executeCoordinatorPlan(options: ExecuteCoordinatorPlanOptions): Promise<CoordinatorExecutionState> {
+  if (!validPublishedPlanPins(options.plan)) throw new Error('Coordinator published release plan has invalid or missing commit pins.')
   const path = progressPathFor(options.coordinatorHome)
   let state: CoordinatorExecutionState
   try {
     const existing = await readJson(path)
     if (!isExecutionState(existing)) throw new Error(`Coordinator recovery state is invalid: ${path}. Restore it from a known backup before retrying.`)
+    for (const [version, commit] of Object.entries(existing.releaseCommits ?? {})) {
+      const selected = options.plan.releaseCommits?.[version]
+      if (selected && selected !== commit) throw new Error(`Published release ${version} changed since the saved update plan. Refusing to replace its pinned commit.`)
+    }
     if (!matchesPlan(existing, options.plan)) {
       if (canRetryFailedRevision(existing, options.plan)) {
         validateRecoveryState(existing, {
@@ -715,7 +864,17 @@ async function main(): Promise<void> {
   try {
     const sourceRoot = resolve(process.env.PM_COORDINATOR_SOURCE_ROOT ?? cli.repoRoot)
     const releaseLine = await coordinatorReleaseLineFor(sourceRoot)
-    const branch = process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const publishedMode = process.env.PM_COORDINATOR_SOURCE_MODE !== 'branch'
+    const branch = publishedMode ? '' : process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const publishedTarget: PublishedReleasePin = publishedMode
+      ? await publishedTargetForCoordinator(cli.repoRoot, releaseLine, process.env)
+      : { tag: '', version: '', commit: '' }
+    let publishedReleases = new Map<string, PublishedReleasePin>()
+    if (publishedMode) {
+      await fetchPublishedReleaseCommit(sourceRoot, publishedTarget, releaseLine)
+      await assertPinnedWorktree(cli.repoRoot, publishedTarget.commit)
+      publishedReleases.set(publishedTarget.version, publishedTarget)
+    }
     const packagePath = join(cli.repoRoot, 'package.json')
     const contractPath = join(cli.repoRoot, 'release', 'upgrade.json')
     const liveReleaseHistoryUrl = process.env.PM_DEPLOYED_RELEASE_HISTORY_URL ?? `${process.env.PM_DASHBOARD_URL ?? 'http://127.0.0.1:3200'}/release-history.md`
@@ -723,7 +882,14 @@ async function main(): Promise<void> {
     let legacyBridge = false
     try {
       await access(contractPath, constants.R_OK)
-      const contracts = await loadTrustedUpgradeContracts(sourceRoot, branch, releaseLine)
+      let contracts: Map<string, ReleaseUpgradeContract>
+      if (publishedMode) {
+        const published = await loadPublishedUpgradeContracts(sourceRoot, releaseLine, publishedTarget)
+        contracts = published.contracts
+        publishedReleases = published.releases
+      } else {
+        contracts = await loadTrustedUpgradeContracts(sourceRoot, branch, releaseLine)
+      }
       plan = await planCoordinatorBootstrap({
         repoRoot: cli.repoRoot,
         releaseLine,
@@ -744,6 +910,12 @@ async function main(): Promise<void> {
     }
     const targetRevision = await gitOutput(cli.repoRoot, ['rev-parse', 'HEAD']).catch(() => undefined)
     if (targetRevision) plan = { ...plan, targetRevision }
+    if (publishedMode) {
+      if (plan.targetVersion !== publishedTarget.version || targetRevision !== publishedTarget.commit) {
+        throw new Error('Coordinator target differs from the immutable published release selection.')
+      }
+      plan = { ...plan, releaseCommits: Object.fromEntries([...publishedReleases].sort(([a], [b]) => a.localeCompare(b)).map(([version, release]) => [version, release.commit])) }
+    }
     await writeJsonAtomic(join(coordinatorHome, 'state', 'active-plan.json'), plan)
     const executionPlan: CoordinatorPlan = {
       ...plan,
@@ -765,9 +937,14 @@ async function main(): Promise<void> {
       },
       runHop: async (release) => {
         const finalHop = release === plan.targetVersion
+        const publishedHop = publishedReleases.get(release)
+        if (publishedMode && !publishedHop) throw new Error(`Release hop ${release} has no published commit pin.`)
         const hopRoot = finalHop
           ? cli.repoRoot
-          : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release, releaseLine)
+          : publishedHop
+            ? await coordinatorPublishedReleaseWorktree(sourceRoot, coordinatorHome, publishedHop)
+            : await coordinatorReleaseWorktree(sourceRoot, coordinatorHome, branch, release, releaseLine)
+        if (publishedHop) await assertPinnedWorktree(hopRoot, publishedHop.commit)
         const handoffStateDir = handoffStateDirFor(hopRoot, coordinatorHome, legacyBridge)
         const exitCode = await runLegacyUpdate(cli.legacyScript, cli.args, {
           ...process.env,
@@ -786,6 +963,11 @@ async function main(): Promise<void> {
           PM_COORDINATOR_ENV_RUNTIME: join(sourceRoot, '.env.persistent-memory'),
           PM_COORDINATOR_VERSIONED_WORKTREE: finalHop ? process.env.PM_COORDINATOR_VERSIONED_WORKTREE ?? '0' : '1',
           PM_COORDINATOR_FINAL_HOP: finalHop ? '1' : '0',
+          PM_COORDINATOR_SOURCE_MODE: publishedMode ? 'published' : 'branch',
+          PM_COORDINATOR_RELEASE_TAG: publishedTarget.tag,
+          PM_COORDINATOR_RELEASE_VERSION: publishedTarget.version,
+          PM_COORDINATOR_RELEASE_COMMIT: publishedTarget.commit,
+          PM_COORDINATOR_HOP_COMMIT: publishedHop?.commit ?? '',
           PM_SKIP_SETUP_SNAPSHOT: '1',
         })
         if (exitCode !== 0) throw new Error(`Release hop ${release} failed with exit code ${exitCode}.`)

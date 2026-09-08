@@ -1,9 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { compareSemver, parseReleaseHistory, type ParsedRelease } from '../release-versioning/release.js'
-import { publicUpdateSource, publicUpdateMetadataCache, isPublicUpdateRepository, type PublicUpdateMetadataCache } from './github.js'
+import { publicUpdateSource, publicUpdateMetadataCache, type PublicUpdateMetadataCache } from './github.js'
 
 export interface UpdateStatus {
   releaseLine: string
@@ -11,6 +10,8 @@ export interface UpdateStatus {
   latestVersion: string | null
   updateAvailable: boolean
   updateBranch?: string
+  releaseTag?: string
+  releaseUrl?: string
   autoUpdateReady?: boolean
   currentCommit?: string
   latestCommit?: string
@@ -49,19 +50,17 @@ export interface PostUpdateSignal {
 export interface RunnerConfig {
   repoDir: string
   backupRoot: string
-  branch: string
+  /** Legacy config accepted for callers; public runner operations use releases. */
+  branch?: string
 }
 
 type ExecResult = { code: number; stdout: string; stderr: string }
-type RuntimeEnv = Record<string, string>
-function nowStamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-')
-}
+
 
 function runCommand(
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv; onLog?: (line: string) => void },
+  options: { cwd: string; env?: NodeJS.ProcessEnv; onLog?: (line: string) => void; timeoutMs?: number },
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -69,6 +68,7 @@ function runCommand(
       env: { ...process.env, ...(options.env ?? {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
     })
     let stdout = ''
     let stderr = ''
@@ -103,12 +103,6 @@ function gitArgs(repoDir: string, args: string[]): string[] {
   return ['-c', `safe.directory=${repoDir}`, ...args]
 }
 
-async function requirePublicUpdateOrigin(repoDir: string): Promise<void> {
-  const remote = await readGitRef(repoDir, ['remote', 'get-url', 'origin'])
-  if (!remote || !isPublicUpdateRepository(remote)) {
-    throw new Error('The checkout origin does not match the public Persistent Memory repository. Check the trusted checkout origin before running an update.')
-  }
-}
 async function readPackageVersion(repoDir: string): Promise<string> {
   const raw = JSON.parse(await readFile(join(repoDir, 'package.json'), 'utf8')) as { version?: string }
   return raw.version ?? '0.0.0'
@@ -161,159 +155,13 @@ async function readGitRef(repoDir: string, args: string[]): Promise<string | und
   }
 }
 
-async function writePostUpdateSignal(
-  repoDir: string,
-  version: string,
-  source: PostUpdateSignal['source'],
-  branch?: string,
-): Promise<PostUpdateSignal> {
-  const finishedAt = new Date().toISOString()
-  const commit = await readGitRef(repoDir, ['rev-parse', 'HEAD'])
-  const resolvedBranch = branch || await readGitRef(repoDir, ['rev-parse', '--abbrev-ref', 'HEAD'])
-  const signal: PostUpdateSignal = {
-    releaseLine: publicUpdateSource.releaseLine,
-    id: `${finishedAt}-${version}`,
-    source,
-    version,
-    finishedAt,
-  }
-  if (resolvedBranch && resolvedBranch !== 'HEAD') signal.branch = resolvedBranch
-  if (commit) signal.commit = commit
-  const stateDir = join(repoDir, '.local', 'update-state')
-  await mkdir(stateDir, { recursive: true })
-  await writeFile(join(stateDir, 'last-successful-update.json'), `${JSON.stringify(signal, null, 2)}\n`, { mode: 0o600 })
-  return signal
-}
-
-function parseEnv(raw: string): RuntimeEnv {
-  const out: RuntimeEnv = {}
-  for (const rawLine of raw.split(/\r?\n/u)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) continue
-    const eq = line.indexOf('=')
-    if (eq <= 0) continue
-    const key = line.slice(0, eq).trim()
-    let value = line.slice(eq + 1).trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
-    }
-    out[key] = value
-  }
-  return out
-}
-
-async function readRuntimeEnv(repoDir: string): Promise<RuntimeEnv> {
-  const envPath = join(repoDir, '.env.persistent-memory')
-  if (!existsSync(envPath)) return {}
-  return parseEnv(await readFile(envPath, 'utf8'))
-}
-
-async function fetchOrigin(repoDir: string, branch: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const result = await runCommand('git', gitArgs(repoDir, ['fetch', '--quiet', 'origin', branch]), { cwd: repoDir, env })
-  // Git tracing, credential helpers, proxies, and remote errors can echo secrets.
-  // Never stream or surface fetch output when credentials may be in use.
-  if (result.code !== 0) throw new Error('Git fetch failed for the configured update source.')
-}
-
-function composeArgs(runtimeEnv: RuntimeEnv, args: string[]): string[] {
-  const base = ['compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory']
-  if ((runtimeEnv.PM_MCP_RUNTIME ?? 'node') === 'stream') {
-    base.push('--profile', 'mcp-stream')
-  }
-  return [...base, ...args]
-}
-
-export function runtimeServices(runtimeEnv: RuntimeEnv): string[] {
-  const services = [
-    'api',
-    'dashboard',
-    'documentation',
-    'dashboard-gateway',
-    'worker',
-    'docker-control',
-    'graphiti',
-    'dlp',
-  ]
-  if ((runtimeEnv.PM_MCP_RUNTIME ?? 'node') === 'stream') {
-    services.push('mcp')
-  }
-  return services
-}
-
-async function createSnapshot(cfg: RunnerConfig, onLog: (line: string) => void): Promise<string> {
-  const backupPath = join(cfg.backupRoot, nowStamp())
-  await mkdir(backupPath, { recursive: true })
-  const manifest = {
-    createdAt: new Date().toISOString(),
-    repoDir: cfg.repoDir,
-    branch: cfg.branch,
-    includes: [
-      '.env.persistent-memory',
-      'postgres pg_dump when available',
-      'read-only mounted volume archives for qdrant, falkordb, redis, minio, postgres, neo4j when mounted',
-      'compose service inventory',
-    ],
-  }
-  await writeFile(join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
-  if (existsSync(join(cfg.repoDir, '.env.persistent-memory'))) {
-    await execChecked('cp', ['.env.persistent-memory', join(backupPath, '.env.persistent-memory')], { cwd: cfg.repoDir, onLog })
-  }
-  const ps = await runCommand('docker', ['compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory', 'ps'], {
-    cwd: cfg.repoDir,
-    onLog: (line) => onLog(`[compose ps] ${line}`),
-  })
-  await writeFile(join(backupPath, 'compose-ps.txt'), ps.stdout || ps.stderr || '', { mode: 0o600 })
-
-  const dump = await runCommand('docker', ['compose', '-f', 'deploy/compose/docker-compose.yml', '--env-file', '.env.persistent-memory', 'exec', '-T', 'postgres', 'pg_dump', '-U', 'pmuser', 'persistent_memory'], {
-    cwd: cfg.repoDir,
-    onLog: (line) => onLog(`[postgres dump] ${line}`),
-  })
-  if (dump.code === 0 && dump.stdout) {
-    await writeFile(join(backupPath, 'postgres.sql'), dump.stdout, { mode: 0o600 })
-  } else {
-    await writeFile(join(backupPath, 'postgres-dump-error.txt'), dump.stderr || dump.stdout || 'pg_dump did not return output', { mode: 0o600 })
-  }
-
-  const mounts = [
-    ['qdrant', '/snapshot/qdrant'],
-    ['falkordb', '/snapshot/falkordb'],
-    ['neo4j', '/snapshot/neo4j'],
-    ['postgres-volume', '/snapshot/postgres'],
-    ['redis', '/snapshot/redis'],
-    ['minio', '/snapshot/minio'],
-  ] as const
-  for (const [name, path] of mounts) {
-    if (!existsSync(path)) continue
-    const result = await runCommand('tar', ['-czf', join(backupPath, `${name}.tgz`), '-C', path, '.'], {
-      cwd: cfg.repoDir,
-      onLog: (line) => onLog(`[snapshot ${name}] ${line}`),
-    })
-    if (result.code !== 0) {
-      await writeFile(join(backupPath, `${name}-error.txt`), result.stderr || result.stdout, { mode: 0o600 })
-    }
-  }
-
-  await writeFile(join(backupPath, 'mcp-config-report.json'), `${JSON.stringify({
-    generatedAt: new Date().toISOString(),
-    note: 'Restart Claude/Codex when release notes or changed paths report MCP changes.',
-  }, null, 2)}\n`, { mode: 0o600 })
-  onLog(`Snapshot manifest written to ${backupPath}\n`)
-  return backupPath
-}
-
 export function createUpdateRunner(cfg: RunnerConfig, dependencies: { metadataCache?: PublicUpdateMetadataCache } = {}) {
-  let running = false
+  const running = false
   let logs: string[] = []
   let lastRun: UpdateRunSummary | undefined
 
-  const push = (line: string): void => {
-    for (const part of line.split(/\r?\n/u)) {
-      if (!part) continue
-      logs = [...logs.slice(-499), part]
-    }
-  }
-
   const metadataCache = dependencies.metadataCache ?? publicUpdateMetadataCache
+
   const status = async (): Promise<UpdateStatus> => {
     const [currentVersion, metadata, currentCommit, lastSuccessfulUpdate] = await Promise.all([
       readCurrentVersion(cfg.repoDir), metadataCache.read(),
@@ -325,7 +173,8 @@ export function createUpdateRunner(cfg: RunnerConfig, dependencies: { metadataCa
       releaseLine: publicUpdateSource.releaseLine,
       currentVersion, latestVersion,
       updateAvailable: Boolean(latestVersion && compareSemver(latestVersion, currentVersion) > 0),
-      updateBranch: publicUpdateSource.branch,
+      releaseTag: metadata?.releaseTag,
+      releaseUrl: metadata?.releaseUrl,
       autoUpdateReady: false,
       currentCommit, latestCommit: metadata?.latestCommit,
       releaseNotes, mcpRestartRequired: releaseNotes?.mcpRestartRequired ?? false,
@@ -333,67 +182,14 @@ export function createUpdateRunner(cfg: RunnerConfig, dependencies: { metadataCa
     }
   }
   const start = async (): Promise<{ ok: boolean }> => {
-    if (running) return { ok: false }
-    running = true
-    logs = []
-    lastRun = { ok: false, startedAt: new Date().toISOString() }
-    void (async () => {
-      try {
-        const runtimeEnv = await readRuntimeEnv(cfg.repoDir)
-        await requirePublicUpdateOrigin(cfg.repoDir)
-        push('Starting snapshot-safe update')
-        const backupPath = await createSnapshot(cfg, push)
-        const databaseMigrateUrl = runtimeEnv.DATABASE_MIGRATE_URL ?? process.env.DATABASE_MIGRATE_URL ?? ''
-        if (!databaseMigrateUrl) {
-          throw new Error('DATABASE_MIGRATE_URL is missing in .env.persistent-memory; cannot run migrations safely')
-        }
-        lastRun = { ...lastRun!, backupPath }
-        const updateBranch = cfg.branch || publicUpdateSource.branch
-        try {
-          await fetchOrigin(cfg.repoDir, updateBranch, { GIT_TERMINAL_PROMPT: '0' })
-        } catch (err) {
-          push(`git fetch failed; using cached origin/${updateBranch} if available.`)
-          await execChecked('git', gitArgs(cfg.repoDir, ['rev-parse', `origin/${updateBranch}`]), { cwd: cfg.repoDir, onLog: push })
-        }
-        let targetPackage: { persistentMemoryReleaseLine?: unknown }
-        try {
-          targetPackage = JSON.parse(await execChecked('git', gitArgs(cfg.repoDir, ['show', `origin/${updateBranch}:package.json`]), { cwd: cfg.repoDir })) as typeof targetPackage
-        } catch {
-          throw new Error('Cannot verify the target public release line. The checkout has not been changed.')
-        }
-        if (targetPackage?.persistentMemoryReleaseLine !== publicUpdateSource.releaseLine) {
-          throw new Error('The selected branch does not contain the public release line yet. The checkout has not been changed.')
-        }
-        await execChecked('git', gitArgs(cfg.repoDir, ['merge', '--ff-only', `origin/${updateBranch}`]), { cwd: cfg.repoDir, onLog: push })
-        const services = runtimeServices(runtimeEnv)
-        await execChecked('docker', composeArgs(runtimeEnv, ['up', '-d', '--build', ...services]), {
-          cwd: cfg.repoDir,
-          env: { COMPOSE_PARALLEL_LIMIT: process.env.COMPOSE_PARALLEL_LIMIT ?? '1' },
-          onLog: push,
-        })
-        await execChecked(process.env.PRISMA_BIN ?? '/app/node_modules/.bin/prisma', ['migrate', 'deploy'], {
-          cwd: join(cfg.repoDir, 'layers/core/schema'),
-          env: {
-            DATABASE_MIGRATE_URL: databaseMigrateUrl,
-            NODE_PATH: process.env.NODE_PATH ? `${process.env.NODE_PATH}:/app/node_modules` : '/app/node_modules',
-          },
-          onLog: push,
-        })
-        await execChecked('bash', ['deploy/scripts/apply-rls.sh'], { cwd: cfg.repoDir, onLog: push })
-        await execChecked('bash', ['deploy/scripts/verify-install.sh'], { cwd: cfg.repoDir, onLog: push })
-        await writePostUpdateSignal(cfg.repoDir, await readPackageVersion(cfg.repoDir), 'update-runner', updateBranch)
-        lastRun = { ...lastRun!, ok: true, finishedAt: new Date().toISOString() }
-        push('Update complete')
-      } catch (err) {
-        lastRun = { ...lastRun!, ok: false, finishedAt: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) }
-        push(`Update failed: ${lastRun.error}`)
-      } finally {
-        running = false
-      }
-    })()
-    return { ok: true }
+    // Installation must use the host coordinator so required intermediate
+    // releases, snapshots, checkpoints and recovery cannot be bypassed.
+    const error = 'Run npm run update-persistent-memory from the repository terminal. The coordinator validates published releases and required upgrade steps.'
+    const finishedAt = new Date().toISOString()
+    logs = [error]
+    lastRun = { ok: false, startedAt: finishedAt, finishedAt, error }
+    return { ok: false }
   }
-
   const logState = async (): Promise<UpdateLogState> => ({ running, logs, lastRun })
 
   return { status, start, logs: logState }

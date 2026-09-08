@@ -1,3 +1,5 @@
+import publicSource from '../../../update-ops/update-flow/public-source.json' with { type: 'json' }
+
 export const PUBLIC_RELEASE_LINE = 'public-v1'
 // Keep pre-public browser state intact, but never compare its version numbers with public releases.
 export const POST_UPDATE_RELEASE_NOTES_KEY = `pm:${PUBLIC_RELEASE_LINE}:post-update-release-notes-version`
@@ -92,11 +94,25 @@ function quoteShellArg(value: string): string {
 }
 
 export function updateCommandForBranch(branch: string | null | undefined): string {
-  // The shell's omitted-branch default follows the checkout, which may be a
-  // development branch. Public release commands must select master explicitly.
+  // Explicit operator overrides only. Public update notices use release commands.
   const cleanBranch = branch?.trim() || 'master'
   if (cleanBranch === 'dev') return 'npm run update-persistent-memory -- --dev'
   return `npm run update-persistent-memory -- --branch ${quoteShellArg(cleanBranch)}`
+}
+
+export function updateCommandForRelease(version: string | null | undefined): string {
+  const value = version?.trim()
+  return value && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(value)
+    ? `npm run update-persistent-memory -- --release ${value}`
+    : 'npm run update-persistent-memory'
+}
+
+export function githubReleaseUrl(version: string | null | undefined): string {
+  const base = `https://github.com/${publicSource.owner}/${publicSource.repo}/releases`
+  const value = version?.trim()
+  return value && /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(value)
+    ? `${base}/tag/v${value}`
+    : base
 }
 
 export function isUpdateHandoffBlocking(state: UpdateHandoffState | null | undefined): boolean {

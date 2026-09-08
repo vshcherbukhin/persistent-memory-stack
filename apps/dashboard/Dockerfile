@@ -43,6 +43,7 @@ WORKDIR /app
 COPY --from=deps /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
 COPY apps/dashboard ./apps/dashboard
 COPY layers/dashboard ./layers/dashboard
+COPY layers/update-ops/update-flow/public-source.json ./layers/update-ops/update-flow/public-source.json
 WORKDIR /app/apps/dashboard
 ARG NEXT_PUBLIC_API_URL=http://localhost:8090
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL

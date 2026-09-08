@@ -1,12 +1,10 @@
 import { spawn } from 'node:child_process'
-import { EventEmitter } from 'node:events'
-import { PassThrough } from 'node:stream'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createUpdateRunner, runtimeServices } from '../src/update.ts'
+import { createUpdateRunner } from '../src/update.ts'
 import { createPublicUpdateMetadataCache, fetchPublicUpdateMetadata, isPublicUpdateRepository, publicUpdateSource } from '../../../layers/update-ops/update-flow/github.ts'
 
 vi.mock('node:child_process', async importOriginal => {
@@ -17,9 +15,11 @@ vi.mock('node:child_process', async importOriginal => {
 const sha = 'a'.repeat(40)
 const baseUrl = 'https://api.github.com/repos/vshcherbukhin/persistent-memory-stack/'
 const history = (version: string) => `<!-- persistent-memory-release-line: public-v1 -->\n# Release History\n\n## ${version} - 2026-09-06\n\n- [mcp-restart] Updated memory tools.\n`
+const published = (version = '1.1.0') => ({ tag_name: `v${version}`, draft: false, prerelease: false, published_at: '2026-09-07T12:00:00Z', target_commitish: 'master', html_url: `https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v${version}` })
 const metadataFetch = (version = '1.1.0') => vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
   const url = String(input)
-  if (url.includes('/branches/')) return new Response(JSON.stringify({ commit: { sha } }))
+  if (url.includes('/releases/')) return new Response(JSON.stringify(published(version)))
+  if (url.includes('/git/ref/tags/')) return new Response(JSON.stringify({ ref: `refs/tags/v${version}`, object: { type: 'commit', sha } }))
   if (url.includes('/contents/package.json')) return new Response(JSON.stringify({ version, persistentMemoryReleaseLine: publicUpdateSource.releaseLine }))
   if (url.includes('/contents/release-history.md')) return new Response(history(version))
   throw new Error('Unexpected fixture request')
@@ -30,22 +30,22 @@ afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.mocked(spawn).mo
 
 describe('public release source', () => {
   it('uses the committed canonical manifest and supports Node strip-types execution', async () => {
-    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', releaseLine: 'public-v1' })
+    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', channel: 'releases', releaseLine: 'public-v1' })
     for (const file of ['update.ts', 'github.ts']) {
       const source = await readFile(new URL(`../../../layers/update-ops/update-flow/${file}`, import.meta.url), 'utf8')
       expect(source).not.toMatch(/constructor\(\s*\n?\s*(?:public |private |protected |readonly )/u)
     }
   })
 
-  it('always requests public master without authentication and reads both files at its immutable commit', async () => {
+  it('requests the latest published release anonymously and reads both files at its exact tag commit', async () => {
     vi.stubEnv('UPDATE_GITHUB_OWNER', 'untrusted-owner')
     vi.stubEnv('UPDATE_GITHUB_REPO', 'another-repo')
     vi.stubEnv('UPDATE_GITHUB_BRANCH', 'dev')
     vi.stubEnv('UPDATE_GITHUB_TOKEN', 'fixture-private-token')
     const fetchMock = metadataFetch()
-    await expect(fetchPublicUpdateMetadata(fetchMock)).resolves.toEqual({ latestCommit: sha, latestVersion: '1.1.0', releaseHistory: history('1.1.0') })
+    await expect(fetchPublicUpdateMetadata(fetchMock)).resolves.toEqual({ latestCommit: sha, latestVersion: '1.1.0', releaseHistory: history('1.1.0'), releaseTag: 'v1.1.0', releaseUrl: published().html_url })
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      `${baseUrl}branches/master`, `${baseUrl}contents/package.json?ref=${sha}`, `${baseUrl}contents/release-history.md?ref=${sha}`,
+      `${baseUrl}releases/latest`, `${baseUrl}git/ref/tags/v1.1.0`, `${baseUrl}contents/package.json?ref=${sha}`, `${baseUrl}contents/release-history.md?ref=${sha}`,
     ])
     const signals = new Set(fetchMock.mock.calls.map(([, init]) => init?.signal))
     expect(signals.size).toBe(1)
@@ -65,7 +65,7 @@ describe('public release source', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps network and malformed commit errors safe', async () => {
+  it('keeps network and malformed release errors safe', async () => {
     await expect(fetchPublicUpdateMetadata(vi.fn(async () => { throw new Error('private network details') }))).rejects.not.toThrow('private network details')
     for (const body of ['not json', '{}', '{"commit":{"sha":"master"}}']) {
       const fetchMock = vi.fn(async () => new Response(body))
@@ -74,19 +74,21 @@ describe('public release source', () => {
     }
   })
 
-  it.each([undefined, 'private-v0'])('refuses old master4.x metadata with release line %s before fetching history', async releaseLine => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/branches/')
-      ? new Response(JSON.stringify({ commit: { sha } }))
-      : new Response(JSON.stringify({ version: '4.0.37', persistentMemoryReleaseLine: releaseLine })))
+  it.each([undefined, 'private-v0'])('refuses old unmarked release metadata with release line %s before fetching history', async releaseLine => {
+    const original = metadataFetch('4.0.37')
+    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/contents/package.json')
+      ? new Response(JSON.stringify({ version: '4.0.37', persistentMemoryReleaseLine: releaseLine }))
+      : original(input))
     await expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('public release line is not available')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     const cache = createPublicUpdateMetadataCache({ fetchImpl: fetchMock })
     await expect(cache.read()).resolves.toBeNull()
   })
 
   it.each(['{}', '{"version":"text"}', '{"version":"1.2.3-dev"}', '{"version":123}', '{"version":"01.2.3"}'])('rejects invalid versions before fetching history: %s', pkg => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/branches/') ? new Response(JSON.stringify({ commit: { sha } })) : new Response(pkg))
-    return expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('invalid release metadata').then(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const original = metadataFetch()
+    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/contents/package.json') ? new Response(pkg) : original(input))
+    return expect(fetchPublicUpdateMetadata(fetchMock)).rejects.toThrow('invalid release metadata').then(() => expect(fetchMock).toHaveBeenCalledTimes(3))
   })
 
   it.each([
@@ -109,13 +111,13 @@ describe('anonymous request budget', () => {
     const pending = Array.from({ length: 40 }, () => cache.read())
     expect(new Set(pending).size).toBe(1)
     await Promise.all(pending)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     now = 15 * 60_000 - 1
     await Promise.all(Array.from({ length: 100 }, () => cache.read()))
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     now++
     await cache.read()
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(8)
   })
 
   it('backs off repeated failures for one, two, four, eight, then fifteen minutes', async () => {
@@ -178,19 +180,22 @@ describe('runner status and explicit update boundary', () => {
     const repoDir = await mkdtemp(join(tmpdir(), 'pm-public-update-'))
     await writeFile(join(repoDir, 'package.json'), JSON.stringify({ version }))
     const metadataCache = createPublicUpdateMetadataCache({ fetchImpl: metadataFetch() })
-    const runner = createUpdateRunner({ repoDir, branch, backupRoot: join(repoDir, '.local', 'backups') }, { metadataCache })
+    const runner = createUpdateRunner({ repoDir, branch, backupRoot: join(repoDir, '.local', 'backups') }, {
+      metadataCache,
+    })
     return { runner, repoDir }
   }
 
-  it('checks public master without an environment file and preserves release notes and MCP restart detection', async () => {
+  it('checks published releases without an environment file and preserves release notes and MCP restart detection', async () => {
     const { runner, repoDir } = await fixture('1.0.0', 'dev')
-    await expect(runner.status()).resolves.toMatchObject({ currentVersion: '1.0.0', latestVersion: '1.1.0', updateBranch: 'master', updateAvailable: true, autoUpdateReady: false, mcpRestartRequired: true, logs: [] })
+    await expect(runner.status()).resolves.toMatchObject({ currentVersion: '1.0.0', latestVersion: '1.1.0', releaseTag: 'v1.1.0', updateAvailable: true, autoUpdateReady: false, mcpRestartRequired: true, logs: [] })
+    expect((await runner.status()).updateBranch).toBeUndefined()
     expect(existsSync(join(repoDir, '.env.persistent-memory'))).toBe(false)
   })
 
   it('uses semver for public release notices, independent of an operator branch', async () => {
     const { runner } = await fixture('1.1.0', 'dev')
-    await expect(runner.status()).resolves.toMatchObject({ updateBranch: 'master', updateAvailable: false })
+    await expect(runner.status()).resolves.toMatchObject({ releaseTag: 'v1.1.0', updateAvailable: false })
   })
 
   it('compares against the deployed dashboard and retains the post-update success signal', async () => {
@@ -219,73 +224,18 @@ describe('runner status and explicit update boundary', () => {
     const { repoDir } = await fixture()
     const cfg = { repoDir, branch: 'master', backupRoot: join(repoDir, '.local', 'backups') }
     await Promise.all([createUpdateRunner(cfg).status(), createUpdateRunner(cfg).status()])
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
-  it('refuses a different checkout origin before any snapshot, fetch, merge, or service change', async () => {
-    const commands: string[][] = []
-    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
-      commands.push([command, ...args])
-      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
-      queueMicrotask(() => { child.stdout.end('https://github.com/other-owner/other-repo.git\n'); child.emit('close', 0) })
-      return child
-    }) as unknown as typeof spawn)
-    const { runner, repoDir } = await fixture()
-    await runner.start()
-    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: false, error: expect.stringContaining('does not match') } }))
-    expect(commands).toEqual([['git', '-c', `safe.directory=${repoDir}`, 'remote', 'get-url', 'origin']])
+  it.each(['master', 'dev'])('refuses legacy sidecar installs with %s config before any subprocess or data change', async branch => {
+    const { runner, repoDir } = await fixture('1.0.0', branch)
+    const env = 'DATABASE_MIGRATE_URL=postgresql://fixture-only\nPM_MCP_RUNTIME=stream\n'
+    await writeFile(join(repoDir, '.env.persistent-memory'), env)
+    await expect(runner.start()).resolves.toEqual({ ok: false })
+    await expect(runner.logs()).resolves.toMatchObject({ running: false, lastRun: { ok: false, error: expect.stringContaining('coordinator') } })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
     expect(existsSync(join(repoDir, '.local', 'backups'))).toBe(false)
-  })
-
-  it('keeps an explicit operator dev update separate from public master checks', async () => {
-    const commands: string[][] = []
-    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
-      commands.push([command, ...args])
-      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
-      queueMicrotask(() => {
-        child.stdout.end(args.includes('get-url') ? 'git@github.com:vshcherbukhin/persistent-memory-stack.git\n'
-          : args.includes('show') ? JSON.stringify({ persistentMemoryReleaseLine: 'public-v1' }) : '')
-        child.emit('close', 0)
-      })
-      return child
-    }) as unknown as typeof spawn)
-    const { runner, repoDir } = await fixture('1.0.0', 'dev')
-    await writeFile(join(repoDir, '.env.persistent-memory'), 'DATABASE_MIGRATE_URL=postgresql://fixture-only\nPM_MCP_RUNTIME=stream\n')
-    await runner.start()
-    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: true } }))
-    expect(commands.find(command => command.includes('fetch'))?.slice(-4)).toEqual(['fetch', '--quiet', 'origin', 'dev'])
-    expect(commands.find(command => command.includes('merge'))?.slice(-3)).toEqual(['merge', '--ff-only', 'origin/dev'])
-    const { lastRun } = await runner.logs()
-    expect(existsSync(join(lastRun!.backupPath!, 'manifest.json'))).toBe(true)
-    expect(existsSync(join(lastRun!.backupPath!, 'update-notification-settings.json'))).toBe(false)
-    const marker = JSON.parse(await readFile(join(repoDir, '.local', 'update-state', 'last-successful-update.json'), 'utf8'))
-    expect(marker.branch).toBe('dev')
-    expect(marker.releaseLine).toBe('public-v1')
-    await expect(runner.status()).resolves.toMatchObject({ updateBranch: 'master' })
-  })
-
-  it('refuses an old unmarked branch target before merging or rebuilding services', async () => {
-    const commands: string[][] = []
-    vi.mocked(spawn).mockImplementation(((command: string, args: readonly string[]) => {
-      commands.push([command, ...args])
-      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
-      queueMicrotask(() => {
-        child.stdout.end(args.includes('get-url') ? 'https://github.com/vshcherbukhin/persistent-memory-stack.git\n'
-          : args.includes('show') ? JSON.stringify({ version: '4.0.37' }) : '')
-        child.emit('close', 0)
-      })
-      return child
-    }) as unknown as typeof spawn)
-    const { runner, repoDir } = await fixture('1.0.0')
-    await writeFile(join(repoDir, '.env.persistent-memory'), 'DATABASE_MIGRATE_URL=postgresql://fixture-only\n')
-    await runner.start()
-    await vi.waitFor(async () => expect(await runner.logs()).toMatchObject({ running: false, lastRun: { ok: false, error: expect.stringContaining('does not contain the public release line') } }))
-    expect(commands.some(command => command.includes('merge'))).toBe(false)
-    expect(commands.some(command => command[0] === 'docker' && command.includes('up'))).toBe(false)
-  })
-
-  it('keeps the canonical services for an explicitly requested snapshot-safe update', () => {
-    expect(runtimeServices({ PM_MCP_RUNTIME: 'node' })).toEqual(['api', 'dashboard', 'documentation', 'dashboard-gateway', 'worker', 'docker-control', 'graphiti', 'dlp'])
-    expect(runtimeServices({ PM_MCP_RUNTIME: 'stream' })).toContain('mcp')
+    expect(await readFile(join(repoDir, '.env.persistent-memory'), 'utf8')).toBe(env)
   })
 })

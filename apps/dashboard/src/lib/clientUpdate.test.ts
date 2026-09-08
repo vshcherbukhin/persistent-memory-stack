@@ -14,12 +14,22 @@ import {
   shouldSkipPostUpdateMarkerAfterShownVersion,
   shouldReloadForDeployedVersion,
   updateCommandForBranch,
+  updateCommandForRelease,
+  githubReleaseUrl,
   updateHandoffTitle,
   updateStatusPollMs,
   waitForUpdateReloadReady,
 } from './clientUpdate'
 
 describe('client update reload handoff', () => {
+  it('links release notes to the canonical version and never interprets a version as a URL', () => {
+    const base = 'https://github.com/vshcherbukhin/persistent-memory-stack/releases'
+    expect(githubReleaseUrl('1.1.0')).toBe(`${base}/tag/v1.1.0`)
+    expect(githubReleaseUrl(' 1.0.0 ')).toBe(`${base}/tag/v1.0.0`)
+    for (const value of [null, undefined, 'javascript:alert(1)', 'https://example.org', '1.2.3/../../other', '1.0.0-beta']) {
+      expect(githubReleaseUrl(value)).toBe(base)
+    }
+  })
   it('reloads only when the deployed dashboard is newer than the loaded bundle', () => {
     expect(shouldReloadForDeployedVersion('3.7.2', '3.7.3')).toBe(true)
     expect(shouldReloadForDeployedVersion('3.7.2', '3.7.2')).toBe(false)
@@ -72,8 +82,16 @@ describe('client update reload handoff', () => {
     expect(shouldPollUpdateHandoff(false)).toBe(false)
   })
 
-  it.each([undefined, null, '', '   ', 'master', ' master '])('targets public master explicitly instead of following the checkout (%s)', (branch) => {
+  it.each([undefined, null, '', '   ', 'master', ' master '])('keeps explicit operator branch helper separate from public notices (%s)', (branch) => {
     expect(updateCommandForBranch(branch)).toBe('npm run update-persistent-memory -- --branch master')
+  })
+
+  it('pins public notices to the published version instead of the checkout branch', () => {
+    expect(updateCommandForRelease('1.1.0')).toBe('npm run update-persistent-memory -- --release 1.1.0')
+    expect(updateCommandForRelease(' 1.2.3 ')).toBe('npm run update-persistent-memory -- --release 1.2.3')
+    for (const version of [undefined, null, '', 'master', '1.2.3-rc.1', '1.2.3; echo injected', '01.2.3']) {
+      expect(updateCommandForRelease(version)).toBe('npm run update-persistent-memory')
+    }
   })
 
   it('preserves intentional development and custom branch update commands', () => {

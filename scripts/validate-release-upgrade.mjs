@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { validateReleaseNoteFiles } from './release-notes.mjs'
 
 const contractUrl = new URL('../release/upgrade.json', import.meta.url)
 const packageUrl = new URL('../package.json', import.meta.url)
@@ -21,6 +22,7 @@ function readJsonAtRevision(revision, path) {
 
 const currentContract = JSON.parse(readFileSync(contractUrl, 'utf8'))
 const currentPackage = JSON.parse(readFileSync(packageUrl, 'utf8'))
+validateReleaseNoteFiles(repoRoot)
 if (currentPackage.persistentMemoryReleaseLine !== releaseSource.releaseLine) {
   throw new Error('The package release line does not match the public source manifest.')
 }

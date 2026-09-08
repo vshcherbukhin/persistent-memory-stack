@@ -13,7 +13,7 @@ const okJson = (body: unknown): Response => new Response(JSON.stringify(body), {
 const status = {
   releaseLine: 'public-v1',
   lastSuccessfulUpdate: { releaseLine: 'public-v1', id: 'public-marker', source: 'update-runner', version: '4.0.35', finishedAt: '2026-09-06T00:00:00Z' },
-  currentVersion: '4.0.35', latestVersion: '4.0.36', updateAvailable: true, updateBranch: 'master', running: false, logs: [],
+  currentVersion: '4.0.35', latestVersion: '4.0.36', updateAvailable: true, releaseTag: 'v4.0.36', releaseUrl: 'https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v4.0.36', running: false, logs: [],
 }
 
 afterEach(() => vi.unstubAllGlobals())
@@ -60,7 +60,7 @@ async function routeApp(adminLevel?: 'admin' | 'superuser') {
 }
 
 describe('automatic update API contract', () => {
-  it('returns the public master release status without requiring a settings or connection-test call', async () => {
+  it('preserves published release tag and URL without requiring a settings or connection-test call', async () => {
     const fetchMock = vi.fn(async () => okJson(status))
     vi.stubGlobal('fetch', fetchMock)
     const app = await routeApp('superuser')
