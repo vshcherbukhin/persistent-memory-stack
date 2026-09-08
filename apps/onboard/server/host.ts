@@ -1,7 +1,7 @@
 /** Native host commands. Windows never resolves `bash` through the WSL alias or
  * launches npm.cmd through a shell; arguments and credentials stay in argv/env. */
 import { existsSync } from 'node:fs'
-import { win32 } from 'node:path'
+import { posix, win32 } from 'node:path'
 
 export interface HostOptions {
   platform?: NodeJS.Platform
@@ -16,7 +16,13 @@ export function nativeWindowsPath(value: string): string {
 
 export function hostEnvironment(options: HostOptions = {}): NodeJS.ProcessEnv {
   const env = { ...(options.env ?? process.env) }
-  if ((options.platform ?? process.platform) !== 'win32') return env
+  if ((options.platform ?? process.platform) !== 'win32') {
+    // npm's shebang and npm script children must use the same Node as precheck,
+    // even after Homebrew's shellenv prepends an unversioned Node installation.
+    const runtimeDir = posix.dirname(options.execPath ?? process.execPath)
+    env.PATH = [runtimeDir, ...(env.PATH ?? '').split(':').filter(path => path && path !== runtimeDir)].join(':')
+    return env
+  }
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path')
   const currentPath = pathKey ? env[pathKey] ?? '' : ''
   for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key]
@@ -59,7 +65,7 @@ export function gitBashPath(options: HostOptions = {}): string | null {
 export function hostCommand(cmd: string, args: string[], options: HostOptions = {}): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
   const platform = options.platform ?? process.platform
   const env = hostEnvironment(options)
-  if (platform !== 'win32') return { command: cmd, args, env }
+  if (platform !== 'win32') return { command: cmd === 'node' ? options.execPath ?? process.execPath : cmd, args, env }
   const execPath = options.execPath ?? process.execPath
   if (cmd === 'node') return { command: execPath, args, env }
   if (cmd === 'npm' || cmd === 'npx') {
@@ -71,7 +77,7 @@ export function hostCommand(cmd: string, args: string[], options: HostOptions = 
       ...(env.APPDATA ? [win32.join(env.APPDATA, 'npm', 'node_modules', 'npm', 'bin', name)] : []),
     ]
     const cli = candidates.find((path) => exists(path))
-    if (!cli) throw new Error('npm CLI was not found. Install Node.js 22.12+ with npm, then reopen PowerShell and restart the installer.')
+    if (!cli) throw new Error('npm CLI was not found. Install Node.js 24 LTS or Node 22.12+ within 22.x with npm, then reopen PowerShell and restart the installer.')
     return { command: execPath, args: [cli, ...args], env }
   }
   if (cmd === 'bash') {

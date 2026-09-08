@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findGitBash, hostEnvironment, run, runNpm, supportedNode } from './host-runtime.mjs'
+import { assertSupportedNode, findGitBash, hostEnvironment, run, runNpm } from './host-runtime.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const commands = { update: 'update.sh', uninstall: 'uninstall.sh', start: 'start.sh', stop: 'stop.sh', verify: 'verify-install.sh' }
@@ -115,11 +115,11 @@ async function onboard(env) {
 
 export async function main([action, ...args] = process.argv.slice(2)) {
   if (args.includes('--help') || args.includes('-h') || action === '--help') {
-    console.log('Persistent Memory host commands: check, install, start, stop, verify, update, uninstall.\nRun npm run <action>-persistent-memory (or npm run check:host).\nWindows: native Node 22.12+, Git for Windows Bash, Docker Desktop Linux engine, and Ollama.\nThe uninstall command retains its interactive export and deletion confirmations.')
+    console.log('Persistent Memory host commands: check, install, start, stop, verify, update, uninstall.\nRun npm run <action>-persistent-memory (or npm run check:host).\nUse Node 24 LTS (24.x) or Node 22.12+ within 22.x. Windows also requires Git for Windows Bash and the Docker Desktop Linux engine. Ollama is only needed for local embeddings.\nThe uninstall command retains its interactive export and deletion confirmations.')
     return
   }
   if (!['install', 'check', ...Object.keys(commands)].includes(action)) throw new Error(`Unknown host command: ${action}`)
-  if (!supportedNode()) throw new Error('Node 22.12+ is required. Node 24 LTS is recommended.')
+  assertSupportedNode()
   const bash = process.platform === 'win32' ? findGitBash() : 'bash'
   const env = hostEnvironment({ bash })
   if (action === 'check') return preflight(env, bash)

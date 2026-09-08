@@ -1,9 +1,8 @@
 /**
  * persistent-memory onboarding wizard — personal-first.
  *
- * The legacy flow ids remain as migration aliases, but the visible install is one
- * local personal memory stack plus stream MCP, with an optional Shared Memories
- * connection after personal setup.
+ * The visible install creates one local personal memory stack plus stream MCP.
+ * Legacy flow ids retain their existing optional server connector separately.
  *
  * Layout: a 60px header + a 2-column body (left step rail | scrollable content
  * card over a pinned footer). Back/Next live in ONE shared footer in App; each
@@ -19,7 +18,7 @@ import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress
 import { EmbeddingSetup, embeddingTestSignature } from './EmbeddingSetup'
 import { ResourceSummary } from './ResourceSummary'
 import { RESOURCE_MODELS, evaluateResources, recommendResources, type ResourceSnapshot } from '../../shared/resource-policy'
-import { type Flow, type Phase, phasesFor, nextPhase, prevPhase, prereqsBlocked, modelPresence, extractionNextBlocked } from './flow'
+import { type Flow, type Phase, phasesFor, nextPhase, prevPhase, prereqsBlocked, modelPresence, extractionNextBlocked, memorySettingsForFlow } from './flow'
 
 const LOCAL_DASHBOARD_URL = 'http://localhost:3200'
 
@@ -328,7 +327,7 @@ export default function App() {
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
               {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} />}
-              {phase === 'shared' && <SharedConnect {...shared} />}
+              {flow !== 'full' && phase === 'shared' && <SharedConnect {...shared} />}
               {phase === 'install' && (
                 <Install
                   flow={flow}
@@ -382,7 +381,7 @@ interface InstallBody {
 }
 
 function installBody(flow: Flow, a: Answers, apps: Apps, pin: ServerPin | null): InstallBody {
-  const base: InstallBody = {
+  return {
     flow,
     mcpRuntime: 'stream',
     apps,
@@ -390,24 +389,13 @@ function installBody(flow: Flow, a: Answers, apps: Apps, pin: ServerPin | null):
     projectPaths: a.projectPaths,
     ruleBody: a.ruleText,
     memoryBlock: a.memoryBlock,
-    personalMemoryEnabled: a.personalMemoryEnabled,
-    memoryInstallMode: a.memoryInstallMode,
-    defaultMemorySurface: a.defaultMemorySurface,
+    ...memorySettingsForFlow(flow, a, pin?.model),
     personalApiUrl: 'http://localhost:8090',
     teamName: a.teamName,
     userEmail: a.userEmail,
     userName: a.userName,
     userPassword: a.userPassword,
     resourceAcknowledged: a.resourceAcknowledged,
-  }
-  return {
-    ...base,
-    remoteApiUrl: a.remoteApiUrl,
-    remoteOllamaUrl: a.remoteOllamaUrl,
-    remoteToken: a.remoteToken,
-    pullModel: a.memoryInstallMode === 'personal-and-shared' ? pin?.model : undefined,
-    sharedApiUrl: a.memoryInstallMode === 'personal-and-shared' ? a.remoteApiUrl : undefined,
-    sharedUserToken: a.memoryInstallMode === 'personal-and-shared' ? a.remoteToken : undefined,
   }
 }
 
@@ -436,7 +424,7 @@ function FlowRouter({ onPick }: { onPick: (f: Flow, personalMemoryEnabled: boole
     <section className="welcome-step">
       <h2>Welcome to Persistent Memory</h2>
       <p>Persistent Memory gives Claude and Codex a durable local memory system for project context, decisions, fixes, and long-running work.</p>
-      <p className="welcome-copy">The installer starts with Personal Memories on this computer, then supports sharing memories by connecting this local dashboard to a Shared Memories server later or during setup.</p>
+      <p className="welcome-copy">Install your private memory stack, dashboard, and Claude/Codex integration on this computer.</p>
       <div className="row welcome-actions">
         <button type="button" className="primary" onClick={() => onPick('full', true)}>Get started</button>
       </div>
@@ -474,7 +462,7 @@ type PrereqKey = 'node' | 'docker' | 'compose' | 'ollama'
 type PrecheckStatus = 'pending' | 'verifying' | 'installing' | 'ok' | 'warn'
 
 const PREREQ_ITEMS: { key: PrereqKey; label: string }[] = [
-  { key: 'node', label: 'Node 22.12+' },
+  { key: 'node', label: 'Node 24 LTS / 22.12+ (22.x)' },
   { key: 'docker', label: 'Docker daemon' },
   { key: 'compose', label: 'Docker Compose v2' },
   { key: 'ollama', label: 'Ollama (host)' },
@@ -552,6 +540,7 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
   const [progress, setProgress] = useState<PrereqProgressState | null>(null)
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [restartRequired, setRestartRequired] = useState(false)
   const check = async () => {
     setP(null)
     setCompletedChecks(0)
@@ -559,6 +548,7 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
     try {
       const [result] = await Promise.all([getJSON<PrereqResult>('/api/prereqs'), refreshResources()])
       setP(result)
+      if (result.node.ok) setRestartRequired(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -579,12 +569,14 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
     setInstalling(component); setLog([]); setError(null)
     setProgress({ label: p && prereqAction(p, component) === 'Start' ? 'Starting' : 'Preparing installation' })
     let failed: string | null = null
+    let needsRestart = false
     try {
       await streamNDJSON('/api/prereqs/install', { component }, (e) => {
         const update = prereqProgressEvent(e)
         if (update) setProgress(update)
         if (e.type === 'stdout') setLog((l) => [...l.slice(-300), String(e.chunk)])
         if (e.type === 'error' && e.message) failed = String(e.message)
+        if (component === 'node' && e.type === 'done' && e.ok === true && e.restartRequired === true) needsRestart = true
       })
     } catch (e) {
       failed = e instanceof Error ? e.message : String(e)
@@ -594,6 +586,10 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
     }
     if (failed) {
       setError(failed)
+      return
+    }
+    if (needsRestart) {
+      setRestartRequired(true)
       return
     }
     await check()
@@ -631,7 +627,7 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
               status={probe.ok ? 'ok' : 'warn'}
               label={item.label}
               detail={detail}
-              action={prereqAction(p, item.key)}
+              action={item.key === 'node' && restartRequired ? undefined : prereqAction(p, item.key)}
               onInstall={installing ? undefined : () => void install(item.key)}
             />
           )
@@ -645,7 +641,10 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
       {brewMissing && p?.homebrew?.manualInstall ? (
         <HomebrewManualCard detail={p.homebrew.detail} manual={p.homebrew.manualInstall} />
       ) : null}
-      {!installing && ((blocked && p) || error) ? (
+      {restartRequired && !installing ? (
+        <p className="notice warn">Node 24 is installed. This wizard is still using the previous Node process. Stop it with Ctrl+C in its terminal, open a terminal where <code>node -v</code> reports v24.x, then run <code>npm run install-persistent-memory</code> again.</p>
+      ) : null}
+      {!installing && ((!restartRequired && blocked && p) || error) ? (
         <p className="notice bad prereq-error">{error ?? 'A required check failed. Use the matching install/start action or follow its instructions, then check again.'}</p>
       ) : null}
       {(p || error) && !installing ? <button type="button" onClick={() => void check()}>Check again</button> : null}
@@ -1221,7 +1220,7 @@ function Review({ flow, answers, serverPin, setNextDisabled, embeddingTested, on
     if (needsEmbeddingTest) { setNextDisabled(true); return }
     void (async () => {
       setNextDisabled(true)
-      const personalAndShared = answers.memoryInstallMode === 'personal-and-shared'
+      const memorySettings = memorySettingsForFlow(flow, answers, serverPin?.model)
       const embedModel = answers.embedModel
       const embedDim = answers.embedDim
       const envAnswers = {
@@ -1236,12 +1235,12 @@ function Review({ flow, answers, serverPin, setNextDisabled, embeddingTested, on
         teamName: answers.teamName, userEmail: answers.userEmail, userName: answers.userName,
         userPassword: answers.userPassword,
         mcpRuntime: 'stream' as const,
-        personalMemoryEnabled: answers.personalMemoryEnabled,
-        memoryInstallMode: answers.memoryInstallMode,
-        defaultMemorySurface: answers.defaultMemorySurface,
+        personalMemoryEnabled: memorySettings.personalMemoryEnabled,
+        memoryInstallMode: memorySettings.memoryInstallMode,
+        defaultMemorySurface: memorySettings.defaultMemorySurface,
         personalApiUrl: 'http://localhost:8090',
-        sharedApiUrl: personalAndShared ? answers.remoteApiUrl : '',
-        sharedUserToken: personalAndShared ? answers.remoteToken : '',
+        sharedApiUrl: memorySettings.sharedApiUrl ?? '',
+        sharedUserToken: memorySettings.sharedUserToken ?? '',
       }
       try {
         const r = await postJSON<{ preview: string; issues: { key: string; message: string }[] }>('/api/env', { answers: envAnswers })

@@ -1,7 +1,7 @@
 /**
  * Wizard flow graph — pure (no React) so it's unit-testable in a node env.
- * V1 keeps legacy flow ids as migration aliases, but every path is personal-first:
- * configure the local stack, optionally connect Shared Memories, then install.
+ * The public full flow installs Personal Memories only. Legacy flow ids retain
+ * their existing optional server-connection step for operator compatibility.
  */
 export type Flow = 'full' | 'engine' | 'mcp'
 
@@ -22,7 +22,7 @@ export type Phase =
   | 'done'
 
 export const FLOW_PHASES: Record<Flow, Phase[]> = {
-  full: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
+  full: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'install', 'done'],
   engine: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
   mcp: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
 }
@@ -45,6 +45,33 @@ export function prevPhase(cur: Phase, flow: Flow, options: FlowOptions = {}): Ph
   const seq = phasesFor(flow, options)
   const i = seq.indexOf(cur)
   return i <= 0 ? null : seq[i - 1]!
+}
+
+interface MemorySettings {
+  personalMemoryEnabled: boolean
+  memoryInstallMode: 'shared-only' | 'personal-only' | 'personal-and-shared'
+  defaultMemorySurface: 'personal' | 'shared'
+  remoteApiUrl: string
+  remoteOllamaUrl: string
+  remoteToken: string
+}
+
+/** Normalize both env review and install submissions, so stale connector state
+ * cannot activate a server connection in the public personal-only wizard. */
+export function memorySettingsForFlow(flow: Flow, answers: MemorySettings, serverModel?: string) {
+  const personalOnly = flow === 'full'
+  const shared = !personalOnly && answers.memoryInstallMode === 'personal-and-shared'
+  return {
+    personalMemoryEnabled: personalOnly ? true : answers.personalMemoryEnabled,
+    memoryInstallMode: personalOnly ? 'personal-only' as const : answers.memoryInstallMode,
+    defaultMemorySurface: personalOnly ? 'personal' as const : answers.defaultMemorySurface,
+    remoteApiUrl: personalOnly ? '' : answers.remoteApiUrl,
+    remoteOllamaUrl: personalOnly ? '' : answers.remoteOllamaUrl,
+    remoteToken: personalOnly ? '' : answers.remoteToken,
+    sharedApiUrl: shared ? answers.remoteApiUrl : undefined,
+    sharedUserToken: shared ? answers.remoteToken : undefined,
+    pullModel: shared ? serverModel : undefined,
+  }
 }
 
 export interface PrereqGateState {

@@ -686,10 +686,10 @@ describe('refreshAgentInstall (update-script agent config migration)', () => {
   })
 })
 
-import { nextPhase, prevPhase } from '../web/src/flow.ts'
+import { nextPhase, prevPhase, phasesFor, memorySettingsForFlow } from '../web/src/flow.ts'
 
 describe('nextPhase / prevPhase (per flow)', () => {
-  it('personal-first: get started → prereqs → account → embedding → extraction → ecosystem → … → review → shared → install', () => {
+  it('the public personal wizard proceeds directly from review to install', () => {
     expect(nextPhase('flow', 'full')).toBe('prereqs')
     expect(nextPhase('prereqs', 'full')).toBe('account')
     expect(nextPhase('account', 'full')).toBe('embedding')
@@ -697,10 +697,14 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(nextPhase('extraction', 'full')).toBe('ecosystem')
     expect(prevPhase('ecosystem', 'full')).toBe('extraction')
     expect(nextPhase('rule', 'full')).toBe('review')
-    expect(nextPhase('review', 'full')).toBe('shared')
-    expect(nextPhase('shared', 'full')).toBe('install')
+    expect(nextPhase('review', 'full')).toBe('install')
+    expect(prevPhase('install', 'full')).toBe('review')
+    expect(phasesFor('full')).toHaveLength(11)
+    expect(phasesFor('full')).not.toContain('shared')
+    expect(phasesFor('full')).not.toContain('remote')
+    expect(nextPhase('shared', 'full')).toBeNull()
   })
-  it('legacy engine flow aliases to the same personal-first phase sequence', () => {
+  it('legacy engine flow retains its optional server-connection sequence', () => {
     expect(nextPhase('flow', 'engine')).toBe('prereqs')
     expect(nextPhase('prereqs', 'engine')).toBe('account')
     expect(nextPhase('account', 'engine')).toBe('embedding')
@@ -715,7 +719,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(nextPhase('review', 'engine', personal)).toBe('shared')
     expect(nextPhase('shared', 'engine', personal)).toBe('install')
   })
-  it('legacy mcp flow aliases to the same personal-first phase sequence', () => {
+  it('legacy mcp flow retains its optional server-connection sequence', () => {
     expect(nextPhase('flow', 'mcp')).toBe('prereqs')
     expect(nextPhase('prereqs', 'mcp')).toBe('account')
     expect(nextPhase('review', 'mcp')).toBe('shared')
@@ -730,7 +734,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(nextPhase('rule', 'mcp', personal)).toBe('review')
     expect(nextPhase('review', 'mcp', personal)).toBe('shared')
   })
-  it('shared connection happens after personal setup and uses the connector token identity', () => {
+  it('legacy shared connection is absent from the full personal wizard', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
 
     expect(app).toContain('interface RemoteIdentity')
@@ -738,6 +742,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).toContain("serverPin?.dashboardLoginMode === 'sso'")
     expect(app).toContain('Connect Shared Memories')
     expect(app).toContain('sharedConnectEnabled')
+    expect(app).toContain("flow !== 'full' && phase === 'shared'")
   })
   it('remote server config maps the API active embedding pin into the wizard pin', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
@@ -760,7 +765,8 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).toContain("flow: 'Get started'")
     expect(app).toContain("const RAIL_HEADING = 'INSTALLATION STEPS'")
     expect(app).toContain('Welcome to Persistent Memory')
-    expect(app).toContain('supports sharing memories')
+    expect(app).toContain('Install your private memory stack')
+    expect(app).not.toContain('server later or during setup')
     expect(app).not.toContain('Personal-first')
     expect(app).not.toContain('flowcard-pill')
     expect(app).toContain("setPhaseAndResetGate('prereqs')")
@@ -774,7 +780,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
 
     expect(app).toContain("prereqs: 'Environment pre-check'")
     expect(app).toContain('const PREREQ_ITEMS')
-    expect(app).toContain("key: 'node', label: 'Node 22.12+'")
+    expect(app).toContain("key: 'node', label: 'Node 24 LTS / 22.12+ (22.x)'")
     expect(app).toContain("key: 'docker', label: 'Docker daemon'")
     expect(app).toContain("key: 'compose', label: 'Docker Compose v2'")
     expect(app).toContain("key: 'ollama', label: 'Ollama (host)'")
@@ -809,5 +815,35 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(prevPhase('prereqs', 'full')).toBe('flow')
     expect(prevPhase('flow', 'full')).toBeNull()
     expect(nextPhase('done', 'full')).toBeNull()
+  })
+})
+
+describe('public wizard memory submissions', () => {
+  const stale = {
+    personalMemoryEnabled: false,
+    memoryInstallMode: 'personal-and-shared' as const,
+    defaultMemorySurface: 'shared' as const,
+    remoteApiUrl: 'https://old-connector.example.test',
+    remoteOllamaUrl: 'http://old-model.example.test:11434',
+    remoteToken: 'stale-connector-fixture',
+  }
+
+  it.each(['personal-and-shared', 'shared-only'] as const)('clears stale %s routing before full-flow env review and installation', memoryInstallMode => {
+    const settings = memorySettingsForFlow('full', { ...stale, memoryInstallMode }, 'qwen3-embedding:4b')
+    expect(settings).toMatchObject({ personalMemoryEnabled: true, memoryInstallMode: 'personal-only', defaultMemorySurface: 'personal' })
+    expect(settings.sharedApiUrl).toBeUndefined()
+    expect(settings.sharedUserToken).toBeUndefined()
+    expect(settings.pullModel).toBeUndefined()
+    expect(JSON.stringify(settings)).not.toContain(stale.remoteApiUrl)
+    expect(JSON.stringify(settings)).not.toContain(stale.remoteOllamaUrl)
+    expect(JSON.stringify(settings)).not.toContain(stale.remoteToken)
+    const steps = buildSteps({ flow: 'full', env: { DEPLOYMENT_MODE: 'local', EMBED_PROVIDER: 'openai' }, ...settings }).map(step => step.id)
+    expect(steps).not.toContain('shared-connect')
+    expect(steps).not.toContain('pull-shared-model')
+  })
+
+  it.each(['engine', 'mcp'] as const)('preserves existing %s operator connector settings', flow => {
+    const settings = memorySettingsForFlow(flow, stale, 'qwen3-embedding:4b')
+    expect(settings).toMatchObject({ ...stale, sharedApiUrl: stale.remoteApiUrl, sharedUserToken: stale.remoteToken, pullModel: 'qwen3-embedding:4b' })
   })
 })

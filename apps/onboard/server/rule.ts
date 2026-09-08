@@ -10,12 +10,15 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TextDecoder } from 'node:util'
 import { agentProfiles, normalizedProjectPaths } from './agent-profiles.js'
 
 const RULE_BASENAME = 'persistent-memory.md'
 const MEMORY_BLOCK_HEADING = '## Persistent Memory Usage (MANDATORY)'
 const MEMORY_BLOCK_BEGIN = '<!-- persistent-memory:begin -->'
 const MEMORY_BLOCK_END = '<!-- persistent-memory:end -->'
+const RECOVERED_MARKER = /^ {0,3}<!-- persistent-memory:recovered-(?:begin|end) -->[ \t]*\r?$/
+const ACTIVE_MARKER = /^( {0,3})<!-- persistent-memory:(begin|end) -->([ \t]*\r?)$/
 const RULE_REF_TOKEN = '{{RULE_REF}}'
 const RULE_REF_PATTERN = /@(?:\.(?:claude|codex)\/)?rules\/persistent-memory\.md/g
 const GENERATED_MEMORY_HEADINGS = new Set([
@@ -72,10 +75,11 @@ function markedMemoryRegions(lines: string[]): Map<number, number> {
     const previousFence = fence
     fence = nextFence(line, fence)
     if (previousFence || fence || /^ {4}|^\t/.test(line)) continue
-    if (line.trim() === MEMORY_BLOCK_BEGIN) {
+    const marker = ACTIVE_MARKER.exec(line)?.[2]
+    if (marker === 'begin') {
       if (start !== null) throw new Error('Persistent-memory instruction markers are nested; existing instructions were not changed.')
       start = i
-    } else if (line.trim() === MEMORY_BLOCK_END) {
+    } else if (marker === 'end') {
       if (start === null) throw new Error('Persistent-memory instruction markers are incomplete; existing instructions were not changed.')
       regions.set(start, i)
       start = null
@@ -100,7 +104,7 @@ function legacyGeneratedLine(line: string): boolean {
   return known.has(trimmed)
 }
 
-function stripGeneratedMemoryBlocks(md: string): string {
+function stripGeneratedMemoryBlocks(md: string, legacyCleanup = true): string {
   const lines = md.split('\n')
   const regions = markedMemoryRegions(lines)
   const kept: string[] = []
@@ -116,6 +120,7 @@ function stripGeneratedMemoryBlocks(md: string): string {
       i++
       continue
     }
+    if (!legacyCleanup) { kept.push(line); i++; continue }
     const heading = line.trim()
     if (GENERATED_MEMORY_HEADINGS.has(heading)) {
       // Old versions had no end marker. Consume only recognizable generated
@@ -162,14 +167,42 @@ function materializeMemoryBlock(block: string, ruleRef: string, kind: RuleTarget
 
 /** Replace old generated memory snippets and place the block as the first real section. */
 export function injectMemoryBlock(md: string, memoryBlock: string): string {
+  return prepareMemoryBlock(md, memoryBlock).content
+}
+
+function prepareMemoryBlock(md: string, memoryBlock: string): { content: string; repaired: boolean } {
   const newline = md.includes('\r\n') ? '\r\n' : '\n'
   const bom = md.startsWith('\uFEFF') ? '\uFEFF' : ''
   const block = [MEMORY_BLOCK_BEGIN, memoryBlock.trim().replace(/\r?\n/g, newline), MEMORY_BLOCK_END].join(newline)
   // Reject a custom block containing unbalanced reserved markers or an open
   // fence that would hide its closing marker, before writing any instructions.
-  markedMemoryRegions(block.split('\n'))
-  const cleaned = stripGeneratedMemoryBlocks(md.slice(bom.length)).replace(/(?:\r?\n[ \t]*)+$/, '')
-  if (cleaned.trim() === '') return bom + block + newline
+  const blockLines = block.split('\n')
+  const blockRegions = markedMemoryRegions(blockLines)
+  if (blockRegions.size !== 1 || blockRegions.get(0) !== blockLines.length - 1) {
+    throw new Error('Custom memory instructions contain active reserved markers; existing instructions were not changed.')
+  }
+  const original = md.slice(bom.length)
+  let repaired = false
+  try { markedMemoryRegions(original.split('\n')) } catch { repaired = true }
+  let recovered = false
+  let fence: MarkdownFence | null = null
+  const preserved = original.split('\n').map(line => {
+    const previousFence = fence
+    fence = nextFence(line, fence)
+    if (previousFence || fence) return line
+    if (RECOVERED_MARKER.test(line)) recovered = true
+    // Neutralize only reserved standalone markers. Never infer that a damaged
+    // begin marker owns the following prose, headings, examples or valid blocks.
+    return repaired ? line.replace(ACTIVE_MARKER, '$1<!-- persistent-memory:recovered-$2 -->$3') : line
+  }).join('\n')
+  if (repaired || recovered) {
+    // Rescued text remains outside our generated region forever. Skip legacy
+    // heuristics even on retries, retaining original whitespace and line endings.
+    const content = repaired ? preserved : stripGeneratedMemoryBlocks(preserved, false)
+    return { content: bom + block + newline + content, repaired }
+  }
+  const cleaned = stripGeneratedMemoryBlocks(original).replace(/(?:\r?\n[ \t]*)+$/, '')
+  if (cleaned.trim() === '') return { content: bom + block + newline, repaired: false }
 
   // Remove empty separator lines only: leading spaces can be meaningful Markdown
   // code indentation and must not become live instructions on a later pass.
@@ -179,9 +212,9 @@ export function injectMemoryBlock(md: string, memoryBlock: string): string {
   if (/^#\s+/.test(lines[0] ?? '')) {
     const title = lines[0]!.replace(/\r$/, '')
     const rest = lines.slice(1).join('\n').replace(leadingBlanks, '')
-    return bom + [title, block, rest].filter((part) => part !== '').join(newline + newline) + newline
+    return { content: bom + [title, block, rest].filter((part) => part !== '').join(newline + newline) + newline, repaired: false }
   }
-  return bom + block + newline + newline + content + newline
+  return { content: bom + block + newline + newline + content + newline, repaired: false }
 }
 
 export interface RuleTarget {
@@ -239,16 +272,51 @@ export function targetMemoryFiles(input: TargetInput): RuleTarget[] {
 
 // ── IO writers (thin) ──────────────────────────────────────────────────────────
 
-/** Write the (user-edited) rule body + replace/insert the memory block in each target. */
-export function writeRuleTargets(targets: RuleTarget[], ruleBody: string, memoryBlock?: string): void {
-  for (const t of targets) {
-    const current = existsSync(t.memoryFile) ? readFileSync(t.memoryFile, 'utf8') : ''
-    const block = materializeMemoryBlock(memoryBlock?.trim() ? memoryBlock : defaultMemoryBlock(t.ruleRef), t.ruleRef, t.kind)
-    const nextMemory = injectMemoryBlock(current, block)
-    // Validate/read both desired contents before touching either target file.
-    mkdirSync(dirname(t.ruleFile), { recursive: true })
-    mkdirSync(dirname(t.memoryFile), { recursive: true })
-    writeFileSync(t.ruleFile, ruleBody.endsWith('\n') ? ruleBody : ruleBody + '\n')
-    writeFileSync(t.memoryFile, nextMemory)
+export interface RuleRepair { memoryFile: string; backupFile: string }
+export interface RuleWriteResult { writtenTargets: number; repairs: RuleRepair[] }
+
+export function ruleRepairWarning(repair: RuleRepair): string {
+  return `WARN: Repaired incomplete or nested persistent-memory markers in ${repair.memoryFile}. Preserved all existing text; original backup: ${repair.backupFile}`
+}
+
+function backupOriginal(memoryFile: string, original: Buffer): string {
+  const prefix = `${memoryFile}.persistent-memory-backup-${Date.now()}`
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const path = `${prefix}${attempt ? `-${attempt}` : ''}.bak`
+    try { writeFileSync(path, original, { flag: 'wx', mode: 0o600 }); return path }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+      throw new Error(`Could not back up ${memoryFile}; instruction and rule files were not changed. Check permissions and free disk space, then retry.`)
+    }
   }
+  throw new Error(`Could not create a unique backup for ${memoryFile}; instruction and rule files were not changed. Existing backups were preserved.`)
+}
+
+/** Preflight every target, back up damaged originals, then write generated files. */
+export function writeRuleTargets(targets: RuleTarget[], ruleBody: string, memoryBlock?: string): RuleWriteResult {
+  const plans = targets.map(t => {
+    const original = existsSync(t.memoryFile) ? readFileSync(t.memoryFile) : Buffer.alloc(0)
+    let text: string
+    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(original) }
+    catch { throw new Error(`Could not read ${t.memoryFile} as UTF-8; instruction and rule files were not changed. Preserve the original and correct its encoding before retrying.`) }
+    const block = materializeMemoryBlock(memoryBlock?.trim() ? memoryBlock : defaultMemoryBlock(t.ruleRef), t.ruleRef, t.kind)
+    return { target: t, original, ...prepareMemoryBlock(text, block) }
+  })
+  const repairs = plans.filter(plan => plan.repaired).map(plan => ({
+    memoryFile: plan.target.memoryFile,
+    backupFile: backupOriginal(plan.target.memoryFile, plan.original),
+  }))
+  for (const { target: t, content } of plans) {
+    try {
+      mkdirSync(dirname(t.ruleFile), { recursive: true })
+      mkdirSync(dirname(t.memoryFile), { recursive: true })
+      writeFileSync(t.ruleFile, ruleBody.endsWith('\n') ? ruleBody : ruleBody + '\n')
+      writeFileSync(t.memoryFile, content)
+    } catch (error) {
+      const backup = repairs.find(repair => repair.memoryFile === t.memoryFile)?.backupFile
+      if (backup) throw new Error(`Could not write repaired instructions for ${t.memoryFile}. Original backup: ${backup}. Check permissions and disk space before retrying.`)
+      throw error
+    }
+  }
+  return { writtenTargets: targets.length, repairs }
 }
