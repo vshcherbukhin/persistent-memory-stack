@@ -40,6 +40,12 @@ Ollama is optional here; it is required only when you choose local embeddings.
 See [machine requirements](machine-requirements.md) before preparing a small Mac
 or Windows laptop.
 
+On macOS, **Estimated available RAM** includes free, speculative, and inactive
+pages that the system may reclaim. This can exceed currently free RAM;
+reclamation may require compression or disk writeback. If that estimate cannot
+be measured, setup falls back to free RAM with a warning. The minimum budgets
+remain unchanged.
+
 ![Environment pre-check](../assets/lifecycle/onboarding/installer-prereqs.png)
 
 ## 3. Set up the local dashboard
@@ -56,6 +62,11 @@ embeddings or OpenAI/Voyage for API embeddings. Local choices below minimum are
 blocked; warnings require acknowledgement. API choices require a key and a
 successful **Test embedding connection**. If you select a local model, use
 **Install / start Ollama** here if needed; its model downloads during installation.
+
+For an OpenAI test failure, check both the project's model allowlist and the
+key's request permissions. The HTTP status alone does not identify the cause;
+see [OpenAI embedding access troubleshooting](machine-requirements.md#openai-embedding-access-troubleshooting).
+Keep API keys private when sharing diagnostic details.
 
 ![Embedding selection](../assets/lifecycle/onboarding/installer-embedding.png)
 

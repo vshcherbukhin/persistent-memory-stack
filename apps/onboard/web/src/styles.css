@@ -245,6 +245,8 @@ button.primary:disabled { background: var(--elevated); color: var(--dim); border
 .field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; max-width: 640px; }
 .field-label { color: var(--soft); font-weight: 600; font-size: 12px; }
 .field-hint { color: var(--dim); font-size: 12px; }
+.embedding-key-help { color: var(--muted); font-size: 13px; }
+.embedding-key-help a { color: var(--accent); text-underline-offset: 3px; }
 .password-meter {
   position: relative;
   width: 100%;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { dockerDataPathFromSettings, dockerEndpointLocation, parseDockerResources, parseDockerStorageBytes, parseWindowsPhysicalMemoryBytes, readFilesystemResources, readHostResources, readResources, type ResourceProbeIO } from '../server/resources.ts'
+import { dockerDataPathFromSettings, dockerEndpointLocation, parseDockerResources, parseDockerStorageBytes, parseMacosAvailableMemoryBytes, parseWindowsPhysicalMemoryBytes, readFilesystemResources, readHostResources, readResources, type ResourceProbeIO } from '../server/resources.ts'
 import { evaluateResources, GiB } from '../shared/resource-policy.ts'
 
 const stats = { bsize: 4096n, blocks: BigInt(200 * GiB / 4096), bavail: BigInt(100 * GiB / 4096) }
@@ -10,6 +10,19 @@ const io = (): ResourceProbeIO => ({
   readText: vi.fn(async () => { throw missing() }), capture: vi.fn(async (_command, args) => args[0] === 'context' ? { code: 0, stdout: JSON.stringify('unix:///var/run/docker.sock') } : docker()),
 })
 const host = { platform: 'win32', arch: 'x64', cpuCount: 8, totalMemoryBytes: 16 * GiB, freeMemoryBytes: 6 * GiB }
+const vmStat = (pageSize = 16384, free = GiB / 4, inactive = 2 * GiB, speculative = GiB / 4) => ({
+  code: 0,
+  stdout: `Mach Virtual Memory Statistics: (page size of ${pageSize} bytes)
+Pages free:                      ${free / pageSize}.
+Pages active:                    ${2 * GiB / pageSize}.
+Pages inactive:                  ${inactive / pageSize}.
+Pages speculative:               ${speculative / pageSize}.
+Pages wired down:                ${GiB / pageSize}.
+Pages purgeable:                 ${GiB / pageSize}.
+File-backed pages:               ${2 * GiB / pageSize}.
+Pages occupied by compressor:    ${GiB / pageSize}.
+`,
+})
 
 describe('read-only host resource detection', () => {
   it('uses installed Windows modules for a 16 GiB machine while preserving its exact usable and free RAM', async () => {
@@ -60,11 +73,41 @@ describe('read-only host resource detection', () => {
     const measured = await readHostResources('win32', () => new Promise(() => {}), 10, host)
     expect(measured).toMatchObject({ totalMemoryBytes: host.totalMemoryBytes, freeMemoryBytes: host.freeMemoryBytes, memorySource: 'os-usable', memoryReason: expect.any(String) })
   })
-  it.each(['darwin', 'linux'] as const)('keeps native %s RAM detection and performs no Windows query', async platform => {
+  it('keeps native Linux RAM detection and performs no platform command', async () => {
     const capture = vi.fn()
-    const base = { ...host, platform }
-    expect(await readHostResources(platform, capture, 100, base)).toEqual(base)
+    const base = { ...host, platform: 'linux' }
+    expect(await readHostResources('linux', capture, 100, base)).toEqual(base)
     expect(capture).not.toHaveBeenCalled()
+  })
+  it('estimates available RAM on an 8 GiB Mac without replacing raw free RAM or adding purgeable pages', async () => {
+    const capture = vi.fn(async () => vmStat())
+    const base = { ...host, platform: 'darwin', arch: 'arm64', totalMemoryBytes: 8 * GiB, freeMemoryBytes: GiB / 2 }
+    expect(await readHostResources('darwin', capture, 100, base)).toEqual({
+      ...base, availableMemoryBytes: 2.5 * GiB, availableMemorySource: 'macos-vm-stat',
+    })
+    expect(capture).toHaveBeenCalledExactlyOnceWith('/usr/bin/vm_stat', [], 100)
+  })
+  it.each([
+    { code: 1, stdout: '' },
+    { ...vmStat(), timedOut: true },
+    { code: 0, stdout: 'unreadable' },
+  ])('uses a visible conservative macOS fallback on failed output: %j', async response => {
+    const base = { ...host, platform: 'darwin', totalMemoryBytes: 8 * GiB, freeMemoryBytes: GiB / 2 }
+    expect(await readHostResources('darwin', vi.fn(async () => response), 100, base)).toEqual({
+      ...base, availableMemoryBytes: GiB / 2, availableMemorySource: 'os-free', availableMemoryReason: expect.stringContaining('without assuming cached memory'),
+    })
+  })
+  it('bounds a hung macOS probe and preserves the original capacity', async () => {
+    const base = { ...host, platform: 'darwin', totalMemoryBytes: 8 * GiB, freeMemoryBytes: GiB / 2 }
+    expect(await readHostResources('darwin', () => new Promise(() => {}), 10, base)).toMatchObject({
+      ...base, availableMemoryBytes: GiB / 2, availableMemorySource: 'os-free', availableMemoryReason: expect.any(String),
+    })
+  })
+  it('falls back on command rejection and bounds invalid or excessive fallback values', async () => {
+    const capture = async () => { throw new Error('unavailable') }
+    const base = { ...host, platform: 'darwin', totalMemoryBytes: 8 * GiB }
+    expect((await readHostResources('darwin', capture, 100, { ...base, freeMemoryBytes: 9 * GiB })).availableMemoryBytes).toBeNull()
+    expect((await readHostResources('darwin', capture, 100, { ...base, freeMemoryBytes: -1 })).availableMemoryBytes).toBeNull()
   })
   it('reports native Windows host and Linux VM capacities separately, preserving Unicode paths', async () => {
     const probes = io()
@@ -153,6 +196,39 @@ describe('Windows physical memory parser', () => {
   })
   it.each(['[]', 'null', '8589934592', '[8589934592]', '["0"]', '["-1"]', '["8e9"]', '["8589934592",null]', '["9007199254740992"]'])('rejects unusable capacity output %s', stdout => {
     expect(parseWindowsPhysicalMemoryBytes({ code: 0, stdout })).toBeNull()
+  })
+})
+
+describe('macOS available memory parser', () => {
+  it.each([4096, 16384])('uses the reported %i-byte page size, excluding overlapping purgeable/file-backed counters', pageSize => {
+    expect(parseMacosAvailableMemoryBytes(vmStat(pageSize), 8 * GiB)).toBe(2.5 * GiB)
+  })
+  it('accepts CRLF output and a valid zero-memory result', () => {
+    const result = vmStat(16384, 0, 0, 0)
+    result.stdout = result.stdout.replaceAll('\n', '\r\n')
+    expect(parseMacosAvailableMemoryBytes(result, 8 * GiB)).toBe(0)
+  })
+  it('accepts the physical upper bound but never clamps impossible counters into a passing estimate', () => {
+    expect(parseMacosAvailableMemoryBytes(vmStat(16384, 4 * GiB, 4 * GiB, 0), 8 * GiB)).toBe(8 * GiB)
+    expect(parseMacosAvailableMemoryBytes(vmStat(16384, 4 * GiB, 4 * GiB, GiB), 8 * GiB)).toBeNull()
+    expect(parseMacosAvailableMemoryBytes(vmStat(16384, 9 * GiB), 8 * GiB)).toBeNull()
+  })
+  it.each([
+    ['missing header', (text: string) => text.split('\n').slice(1).join('\n')],
+    ['unsupported page size', (text: string) => text.replace('16384 bytes', '1024 bytes')],
+    ['missing required counter', (text: string) => text.replace(/^Pages inactive:.*\n/m, '')],
+    ['duplicate counter', (text: string) => `${text}Pages free: 12.\n`],
+    ['negative count', (text: string) => text.replace('Pages inactive:                  131072.', 'Pages inactive: -1.')],
+    ['fractional count', (text: string) => text.replace('Pages inactive:                  131072.', 'Pages inactive: 1.5.')],
+    ['exponent count', (text: string) => text.replace('Pages inactive:                  131072.', 'Pages inactive: 1e5.')],
+    ['overflow count', (text: string) => text.replace('Pages inactive:                  131072.', 'Pages inactive: 9007199254740992.')],
+    ['oversized output', (text: string) => text + 'x'.repeat(128 * 1024)],
+  ] as const)('rejects %s rather than inferring capacity', (_name, alter) => {
+    const result = vmStat()
+    expect(parseMacosAvailableMemoryBytes({ ...result, stdout: alter(result.stdout) }, 8 * GiB)).toBeNull()
+  })
+  it.each([null, 0, -1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('rejects an unknown or invalid physical capacity: %s', total => {
+    expect(parseMacosAvailableMemoryBytes(vmStat(), total)).toBeNull()
   })
 })
 
