@@ -1,83 +1,181 @@
-/* persistent-memory-dashboard — product-owned dark design system.
-   Dark-only (no prefers-color-scheme light block). The functional class names
-   below are the contract the screen components render against — re-themed to the
-   semantic product tokens. New reusable classes (role pills, state badges, category
-   chips, segmented controls, window pills, grant-matrix cells, usage chart, est
-   tag, read-only badge, show-once token box) are defined so screen components
-   never need to touch this file. */
+/* persistent-memory-dashboard — "Neural Obsidian" design system.
+   Two first-class themes: obsidian (dark, default) and porcelain (light), both
+   defined over the SAME variable names so every existing functional class in
+   this file re-themes without being rewritten. The theme is stamped on <html>
+   as data-theme by src/lib/theme.ts before first paint.
+   The functional class names below remain the contract screen components render
+   against. */
 
-:root {
-  /* surfaces */
-  --bg: #0A0D10;            /* page */
-  --panel: #16191d;         /* panel / card */
-  --inset: #0c0f13;         /* inset / code / rail / terminal / input bg */
-  --header-strip: #0f1216;  /* table header strip */
-  --sidebar: #0b0e12;       /* sidebar */
-  --surface: #26272B;       /* surface (avatar etc.) */
-  --elevated: #1c2024;      /* elevated (secondary button, neutral chip) */
-  --tooltip-bg: rgba(12, 15, 19, .94);
+:root,
+[data-theme='obsidian'] {
+  color-scheme: dark;
 
-  /* borders / dividers */
-  --border: rgba(71, 71, 71, .4);          /* default */
-  --border-strong: rgba(71, 71, 71, .5);   /* inputs / controls */
-  --divider: rgba(71, 71, 71, .2);         /* table row dividers */
-  --divider-head: rgba(71, 71, 71, .25);   /* header cell dividers */
-  --divider-section: rgba(71, 71, 71, .3); /* section dividers */
-  --divider-soft: rgba(71, 71, 71, .18);   /* in-row cell dividers */
+  /* surfaces — five stacked depths, near-black to raised */
+  --bg: #07090c;            /* page */
+  --bg-deep: #05070a;       /* behind the shell / canvases */
+  --panel: #0f141a;         /* panel / card */
+  --inset: #070a0e;         /* inset / code / rail / terminal / input bg */
+  --header-strip: #0b0f14;  /* table header strip */
+  --sidebar: #090c10;       /* sidebar */
+  --surface: #161d25;       /* surface (avatar etc.) */
+  --elevated: #131920;      /* elevated (secondary button, neutral chip) */
+  --raised: #161d25;        /* modal / popover */
+  --tooltip-bg: rgba(16, 22, 29, .95);
+  --header-bg: rgba(9, 12, 16, .90);
+  --hover-tint: rgba(148, 178, 208, .07);
+  --scrim: rgba(3, 5, 8, .72);
+
+  /* borders / dividers — this system is drawn with hairlines, not boxes */
+  --border: rgba(148, 178, 208, .11);
+  --border-strong: rgba(148, 178, 208, .19);
+  --divider: rgba(148, 178, 208, .08);
+  --divider-head: rgba(148, 178, 208, .12);
+  --divider-section: rgba(148, 178, 208, .14);
+  --divider-soft: rgba(148, 178, 208, .06);
 
   /* text */
-  --text: #F7F7F7;   /* title */
-  --body: #D3D3D3;   /* body */
-  --soft: #aeb2b7;   /* soft */
-  --muted: #838383;  /* muted */
-  --dim: #5b5e63;    /* dim */
+  --text: #e9f1f8;   /* title */
+  --body: #b3c1cf;   /* body */
+  --soft: #8d9cab;   /* soft */
+  --muted: #8d9cab;  /* muted */
+  --dim: #8593a1;    /* dim */
 
-  /* product accent */
-  --accent: #16A7DB;
-  --accent-hover: #1FB6EA;
-  --on-accent: #06222e;
-  --accent-10: rgba(22, 167, 219, .1);
-  --accent-12: rgba(22, 167, 219, .12);
-  --accent-15: rgba(22, 167, 219, .15);
-  --accent-40: rgba(22, 167, 219, .4);
-  --accent-60: rgba(22, 167, 219, .6);
+  /* product accent — one plasma ramp, cyan to violet */
+  --accent: #2bc5e8;
+  --accent-hover: #57d8f5;
+  --accent-2: #8b5cf6;
+  --on-accent: #010c12;
+  --accent-10: rgba(43, 197, 232, .10);
+  --accent-12: rgba(43, 197, 232, .12);
+  --accent-15: rgba(43, 197, 232, .16);
+  --accent-40: rgba(43, 197, 232, .34);
+  --accent-60: rgba(43, 197, 232, .6);
+  --plasma: linear-gradient(100deg, #2bc5e8 0%, #4aa8f0 46%, #8b5cf6 100%);
+  --accent-glow: 0 0 24px -12px #2bc5e8;
 
   /* status hues */
-  --marigold: #FEB92F;
-  --marigold-12: rgba(254, 185, 47, .12);
-  --marigold-15: rgba(254, 185, 47, .15);
-  --marigold-40: rgba(254, 185, 47, .4);
-  --marigold-45: rgba(254, 185, 47, .45);
-  --grass: #37B360;
-  --grass-soft: #9fe6b8;
-  --grass-12: rgba(55, 179, 96, .12);
-  --coral: #FF4949;
-  --coral-soft: #ff8b8b;
-  --coral-12: rgba(255, 73, 73, .12);
-  --coral-40: rgba(255, 73, 73, .4);
+  --marigold: #f5b544;
+  --marigold-12: rgba(245, 181, 68, .12);
+  --marigold-15: rgba(245, 181, 68, .16);
+  --marigold-40: rgba(245, 181, 68, .34);
+  --marigold-45: rgba(245, 181, 68, .45);
+  --grass: #3dd68c;
+  --grass-soft: #9cebc4;
+  --grass-12: rgba(61, 214, 140, .12);
+  --coral: #ff5f6a;
+  --coral-soft: #ffa4aa;
+  --coral-12: rgba(255, 95, 106, .12);
+  --coral-40: rgba(255, 95, 106, .34);
+
+  /* memory-graph semantics — canvases, legends, activity feed */
+  --node-memory: #2bc5e8;
+  --node-entity: #8b5cf6;
+  --node-fact: #3dd68c;
+  --graph-edge: rgba(148, 178, 208, .22);
+
+  /* substrate texture */
+  --grid-line: rgba(148, 178, 208, .045);
+  --halo-1: radial-gradient(900px 460px at 12% -8%, rgba(43, 197, 232, .13), transparent 62%);
+  --halo-2: radial-gradient(760px 420px at 92% 4%, rgba(139, 92, 246, .12), transparent 60%);
 
   /* legacy aliases (kept so any straggling reference still resolves) */
   --panel-2: var(--inset);
   --danger: var(--coral);
-  --danger-bg: #1c1416;
+  --danger-bg: #1a1013;
   --warn: var(--marigold);
-  --warn-bg: #1f1a10;
+  --warn-bg: #1a1409;
   --ok: var(--grass);
   --accent-strong: var(--accent);
 
+  --shadow-modal: 0 28px 70px -24px rgba(0, 0, 0, .86);
+  --shadow-card: 0 8px 24px -10px rgba(0, 0, 0, .7);
+}
+
+[data-theme='porcelain'] {
+  color-scheme: light;
+
+  --bg: #f4f6f9;
+  --bg-deep: #eaeef3;
+  --panel: #ffffff;
+  --inset: #f2f5f8;
+  --header-strip: #f7f9fb;
+  --sidebar: #ffffff;
+  --surface: #eef2f6;
+  --elevated: #f5f7fa;
+  --raised: #ffffff;
+  --tooltip-bg: rgba(255, 255, 255, .97);
+  --header-bg: rgba(255, 255, 255, .90);
+  --hover-tint: rgba(15, 39, 61, .05);
+  --scrim: rgba(16, 26, 36, .38);
+
+  --border: rgba(15, 39, 61, .13);
+  --border-strong: rgba(15, 39, 61, .22);
+  --divider: rgba(15, 39, 61, .09);
+  --divider-head: rgba(15, 39, 61, .13);
+  --divider-section: rgba(15, 39, 61, .15);
+  --divider-soft: rgba(15, 39, 61, .07);
+
+  --text: #0a1119;
+  --body: #35434f;
+  --soft: #55636f;
+  --muted: #556371;
+  --dim: #596775;
+
+  --accent: #0b6884;
+  --accent-hover: #09556d;
+  --accent-2: #6d3fe0;
+  --on-accent: #ffffff;
+  --accent-10: rgba(14, 136, 173, .09);
+  --accent-12: rgba(14, 136, 173, .11);
+  --accent-15: rgba(14, 136, 173, .15);
+  --accent-40: rgba(14, 136, 173, .38);
+  --accent-60: rgba(14, 136, 173, .6);
+  --plasma: linear-gradient(100deg, #0c7393 0%, #2c68c3 46%, #6d3fe0 100%);
+  --accent-glow: 0 0 20px -12px #0e88ad;
+
+  --marigold: #925c09;
+  --marigold-12: rgba(196, 132, 20, .13);
+  --marigold-15: rgba(196, 132, 20, .17);
+  --marigold-40: rgba(164, 103, 10, .38);
+  --marigold-45: rgba(164, 103, 10, .45);
+  --grass: #0d7945;
+  --grass-soft: #0b6b3e;
+  --grass-12: rgba(15, 143, 82, .11);
+  --coral: #cf2733;
+  --coral-soft: #a01d27;
+  --coral-12: rgba(207, 39, 51, .10);
+  --coral-40: rgba(207, 39, 51, .36);
+
+  --node-memory: #0e88ad;
+  --node-entity: #6d3fe0;
+  --node-fact: #0f8f52;
+  --graph-edge: rgba(15, 39, 61, .20);
+
+  --grid-line: rgba(15, 39, 61, .05);
+  --halo-1: radial-gradient(900px 460px at 12% -8%, rgba(14, 136, 173, .10), transparent 62%);
+  --halo-2: radial-gradient(760px 420px at 92% 4%, rgba(109, 63, 224, .09), transparent 60%);
+
+  --danger-bg: #fdf1f2;
+  --warn-bg: #fdf6e9;
+
+  --shadow-modal: 0 30px 70px -28px rgba(16, 32, 48, .34);
+  --shadow-card: 0 10px 26px -14px rgba(16, 32, 48, .26);
+}
+
+:root {
   /* shape */
   --radius: 11px;          /* cards / panels */
   --radius-modal: 14px;
   --radius-input: 8px;
   --radius-chip: 6px;
 
-  --shadow-modal: 0 24px 60px rgba(0, 0, 0, .6);
-  --shadow-card: 0 20px 50px rgba(0, 0, 0, .5);
-
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
-  --font-sans: 'Source Sans Pro', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, Menlo, monospace;
+  /* type — vendored, no CDN: see apps/dashboard/src/app/layout.tsx */
+  --font-display: 'Bricolage Grotesque Variable', 'Manrope Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  --track-caps: .14em;
 }
 
 * { box-sizing: border-box; }
@@ -266,7 +364,7 @@ p.muted, .muted { color: var(--muted); }
 .navlink::before {
   display: none;
 }
-.navlink:hover { background: rgba(71, 71, 71, .14); text-decoration: none; color: var(--body); }
+.navlink:hover { background: var(--hover-tint); text-decoration: none; color: var(--body); }
 .navlink.active {
   color: var(--accent);
   font-weight: 600;
@@ -327,7 +425,7 @@ p.muted, .muted { color: var(--muted); }
   height: 70px;
   padding: 0 28px;
   border-bottom: 1px solid var(--divider-section);
-  background: rgba(10, 13, 16, .9);
+  background: var(--header-bg);
 }
 .app-header .head-titles { line-height: 1.2; min-width: 0; }
 .app-header .head-title { color: var(--text); font-size: 17px; font-weight: 600; }
@@ -451,7 +549,7 @@ p.muted, .muted { color: var(--muted); }
   padding: 7px 10px;
 }
 .dashboard-docs-nav-link:hover {
-  background: rgba(71, 71, 71, .14);
+  background: var(--hover-tint);
   color: var(--body);
 }
 .dashboard-docs-nav-link.active {
@@ -516,14 +614,14 @@ p.muted, .muted { color: var(--muted); }
   color: var(--accent);
 }
 .visual-guide strong {
-  color: #f2f3f4;
+  color: var(--text);
   font-weight: 600;
 }
 .visual-guide code {
   background: var(--surface);
   border: 1px solid var(--divider-section);
   border-radius: 4px;
-  color: #f2f3f4;
+  color: var(--text);
   font-size: .9em;
   padding: 1px 5px;
 }
@@ -547,7 +645,7 @@ p.muted, .muted { color: var(--muted); }
 }
 .visual-guide th {
   background: var(--surface);
-  color: #f2f3f4;
+  color: var(--text);
   font-size: 12px;
   font-weight: 700;
 }
@@ -610,7 +708,7 @@ p.muted, .muted { color: var(--muted); }
 }
 .guide-image-close {
   align-items: center;
-  background: var(--surface);
+  background: #161d25;
   border: 1px solid rgba(255, 255, 255, .22);
   border-radius: 6px;
   color: #fff;
@@ -2567,7 +2665,7 @@ button.link:hover { color: var(--accent-hover); }
   color: var(--body);
   text-decoration: none;
   border-color: var(--border-strong);
-  background: #1a1e22;
+  background: var(--elevated);
   transform: translateY(-1px);
 }
 .overview-card-head {
@@ -2930,8 +3028,8 @@ button.link:hover { color: var(--accent-hover); }
   flex-shrink: 0;
   border: 1px solid rgba(46, 212, 122, .45);
   border-radius: 999px;
-  color: #8df2b8;
-  background: rgba(46, 212, 122, .12);
+  color: var(--grass-soft);
+  background: var(--grass-12);
   padding: 4px 9px;
   font-size: 11px;
   font-weight: 800;
@@ -3149,8 +3247,8 @@ button.link:hover { color: var(--accent-hover); }
   margin-top: 16px;
   border: 1px solid var(--danger);
   border-radius: var(--radius-input);
-  background: rgba(255, 94, 94, .11);
-  color: #ff9b9b;
+  background: var(--coral-12);
+  color: var(--coral-soft);
   padding: 12px;
   font-size: 13px;
   line-height: 1.45;
@@ -3188,7 +3286,7 @@ button.link:hover { color: var(--accent-hover); }
   margin-top: 10px;
   padding: 8px 10px;
   color: var(--accent);
-  background: #070a0e;
+  background: var(--inset);
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
@@ -3210,7 +3308,7 @@ button.link:hover { color: var(--accent-hover); }
   display: inline-flex;
   padding: 8px 10px;
   color: var(--accent);
-  background: #070a0e;
+  background: var(--inset);
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
@@ -3239,12 +3337,12 @@ button.link:hover { color: var(--accent-hover); }
   gap: 4px;
   padding: 8px 28px;
   border-bottom: 1px solid var(--marigold-40);
-  background: rgba(254, 185, 47, .11);
-  color: #f7d894;
+  background: var(--marigold-12);
+  color: var(--marigold);
   font-size: 13px;
 }
 .temp-password-banner .link {
-  color: #ffe3a3;
+  color: var(--marigold);
   font-weight: 700;
 }
 .password-meter {
@@ -3378,7 +3476,7 @@ button.link:hover { color: var(--accent-hover); }
 .login-card {
   width: 100%;
   background: var(--panel);
-  border: 1px solid rgba(71, 71, 71, .45);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-modal);
   padding: 28px;
   box-shadow: var(--shadow-card);
@@ -3719,7 +3817,7 @@ select:-webkit-autofill {
   background: none; border: none; padding: 5px 6px; border-radius: 9px; cursor: pointer; text-align: left;
 }
 .profile-tooltip { width: 100%; }
-.profile-btn:hover { background: rgba(71, 71, 71, .14); }
+.profile-btn:hover { background: var(--hover-tint); }
 .profile-name { color: var(--body); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
 /* ---- Control-height alignment: btnlink + select-trigger match the button height so
@@ -3914,3 +4012,273 @@ select:-webkit-autofill {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   NEURAL OBSIDIAN LAYER
+   --------------------------------------------------------------------------
+   Appended last so it refines the functional classes above without rewriting
+   them. Everything here is theme-agnostic: it only consumes tokens.
+   ========================================================================== */
+
+/* Type */
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--body);
+}
+h1, h2, h3, h4,
+.card-title,
+.head-title,
+.overview-card-value,
+.stat-value {
+  font-family: var(--font-display);
+  letter-spacing: -.02em;
+}
+.section-label,
+.eyebrow {
+  letter-spacing: var(--track-caps);
+  color: var(--muted);
+}
+code, pre, .mono, .terminal, .update-version, .tokenval {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+}
+.overview-card-value,
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Substrate: the textured ground the app sits on */
+.shell {
+  background: var(--bg);
+  position: relative;
+  isolation: isolate;
+}
+.shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    var(--halo-1),
+    var(--halo-2),
+    repeating-linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 34px);
+  pointer-events: none;
+  z-index: -1;
+}
+/* Keep child overlays in the shell's shared stacking context. Isolating each
+   child puts the sidebar's profile dialog behind the main content. */
+
+/* Sidebar: the active item sits on the live plasma path */
+.sidebar { border-right: 1px solid var(--border); position: relative; }
+.sidebar::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--accent-40) 22%, transparent 62%);
+  pointer-events: none;
+}
+.navlink { border: 1px solid transparent; font-weight: 600; }
+.navlink.active {
+  background: var(--accent-10);
+  border-color: var(--accent-40);
+  color: var(--text);
+  position: relative;
+}
+.navlink.active::before {
+  content: "";
+  display: block;
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* Top bar: a hairline signal trace marks a live system */
+.app-header {
+  border-bottom: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  position: relative;
+}
+.app-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 18%, var(--accent-2) 52%, transparent 88%);
+  opacity: .5;
+  pointer-events: none;
+}
+
+/* Cards: depth from hairlines, health from the top edge */
+.panel {
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+.overview-card {
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+.overview-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-strong);
+}
+.overview-card.accent::before { background: var(--plasma); opacity: .8; }
+.overview-card.ok::before { background: var(--grass); }
+.overview-card.warn::before { background: var(--marigold); }
+.overview-card.bad::before { background: var(--coral); }
+
+/* Primary action carries the plasma ramp */
+button.primary,
+.btn.primary,
+.button-primary {
+  background: var(--plasma);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 700;
+  box-shadow: var(--accent-glow);
+}
+button.primary:hover,
+.btn.primary:hover,
+.button-primary:hover { filter: brightness(1.08); }
+
+/* Fault: a failure must not read as a message in a different colour */
+.notice.danger,
+.notice.bad {
+  border-color: var(--coral-40);
+  border-left: 2px solid var(--coral);
+  background:
+    repeating-linear-gradient(135deg, var(--coral-12) 0 6px, transparent 6px 14px),
+    var(--coral-12);
+}
+.notice.warn { border-left: 2px solid var(--marigold); }
+.notice.ok { border-left: 2px solid var(--grass); }
+
+/* Tables */
+.gt-head {
+  background: var(--header-strip);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Memory graph */
+.memory-graph-canvas,
+.memory-graph-shell { background: var(--bg-deep); }
+
+/* Appearance switch (Settings > Appearance, and the profile modal) */
+.theme-switch {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: 10px;
+  max-width: 680px;
+}
+.theme-switch.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  max-width: none;
+}
+.theme-switch-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+  color: var(--body);
+  cursor: pointer;
+  transition: border-color .12s var(--ease), background .12s var(--ease);
+}
+.theme-switch.compact .theme-switch-option { padding: 8px 10px; gap: 8px; }
+.theme-switch-option:hover { border-color: var(--border-strong); }
+.theme-switch-option.active {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+}
+.theme-switch-swatch {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  color: var(--soft);
+}
+.theme-switch.compact .theme-switch-swatch { width: 26px; height: 26px; border-radius: 8px; }
+/* The swatches preview the actual themes, so they keep fixed colours in both. */
+.theme-switch-swatch[data-variant="obsidian"] { background: #07090c; color: #57d8f5; border-color: rgba(148, 178, 208, .25); }
+.theme-switch-swatch[data-variant="porcelain"] { background: #f4f6f9; color: #0e88ad; border-color: rgba(15, 39, 61, .2); }
+.theme-switch-swatch[data-variant="system"] { background: linear-gradient(120deg, #07090c 0 50%, #f4f6f9 50% 100%); color: var(--accent); }
+.theme-switch-option.active .theme-switch-swatch { box-shadow: 0 0 0 2px var(--accent-15); }
+.theme-switch-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.theme-switch-label { color: var(--text); font-size: 13px; font-weight: 600; }
+.theme-switch-text small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+
+@media (prefers-reduced-motion: reduce) {
+  .overview-card, .navlink, .theme-switch-option { transition: none; }
+}
+
+/* ── Memory graph: theme-correct chrome around a deliberately dark well ─────
+   The force-graph canvas keeps a dark ground in BOTH themes: node hues are
+   calibrated against it, and a light 3D field washes the edges out. That is a
+   choice, so the well declares its own dark ink island rather than inheriting
+   whatever the page theme is — every overlay sitting on top of it stays legible.
+   Everything OUTSIDE the well (rails, toolbar, inspector) follows the theme. */
+.memory-graph-filter-rail,
+.memory-graph-inspector {
+  background: var(--panel);
+}
+.memory-graph-filter-rail { border-right: 1px solid var(--border); }
+.memory-graph-inspector { border-left: 1px solid var(--border); }
+.memory-graph-stage-toolbar {
+  background: var(--header-strip);
+  border-bottom: 1px solid var(--border);
+}
+
+.memory-graph-canvas-wrap {
+  /* dark ink island — overlays inside the well read against the canvas */
+  --text: #e9f1f8;
+  --body: #b3c1cf;
+  --soft: #8d9cab;
+  --muted: #8593a1;
+  --dim: #6d7b89;
+  --panel: #0f141a;
+  --elevated: #131920;
+  --surface: #161d25;
+  --inset: #070a0e;
+  --raised: #161d25;
+  --accent: #2bc5e8;
+  --on-accent: #010c12;
+  --border: rgba(148, 178, 208, .16);
+  background:
+    radial-gradient(circle at center, rgba(43, 197, 232, .08), transparent 46%),
+    #06080b;
+  color: var(--body);
+}
+.memory-graph-legend { background: rgba(8, 11, 15, .82); }
+.memory-graph-error { background: rgba(8, 11, 15, .92); }
+.memory-graph-legend .entity-dot { background: #35758b; }
+.memory-graph-legend .granted-dot { background: #a985f5; }
+
+/* Keep informative counts readable over the selected facet tint. */
+.memory-graph-facet-list button.active small { color: var(--body); }

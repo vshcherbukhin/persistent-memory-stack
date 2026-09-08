@@ -27,6 +27,7 @@ server and its connector token.
 | **Keep personal and shared work distinct** | Use Personal Memories independently, then configure an optional Shared Memories server connection with scoped access from the local dashboard. |
 | **Choose models that fit your computer** | Setup checks RAM, disk space, and Docker resources. Use local Ollama embeddings or OpenAI/Voyage APIs, with suggested models and connection tests. Configure fact extraction separately. |
 | **See what the system is doing** | Inspect memories, service health, worker activity, security findings, and model token usage from one dashboard. |
+| **Choose a comfortable appearance** | Use the default Obsidian dark theme, Porcelain light theme, or Match system in the dashboard. Change appearance from your profile without changing anyone else's account settings. |
 | **Avoid unnecessary model work** | Unchanged memory updates skip extraction, embedding, and graph processing; meaningful edits keep the full pipeline. |
 | **Maintain memory with control** | Background workers handle processing and maintenance. Sensitive-data checks and access controls protect the memory flow; explicit updates take snapshots before rebuilding. |
 
@@ -34,6 +35,12 @@ Your memory services and databases run in Docker Linux containers. Native host
 tooling handles installation, Ollama, and agent configuration on Windows and
 macOS. Extraction uses the provider you configure; running the stack locally
 does not require every model to run locally.
+
+The dashboard and installer bundle their fonts locally, so their appearance does
+not depend on a font CDN. Cloud model requests, downloads and update checks still
+require network access. The memory graph keeps a dark canvas in both themes to
+make its nodes and connections legible; surrounding controls follow your theme.
+See [appearance and profile settings](documentation/spaces/personal/profile.md#appearance).
 
 ## Get started
 

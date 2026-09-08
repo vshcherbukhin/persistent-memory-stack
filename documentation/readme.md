@@ -127,8 +127,17 @@ the privacy-safe screenshots in `assets/spaces/personal/`. The native
 dashboard documentation page and this MkDocs site both render those files, so
 guidance does not drift between the two surfaces.
 
-When updating screenshots, capture the real dashboard at 1920 x 873 and redact
-before committing. Every data-derived value on a Memories capture must be
+The current interface offers Obsidian and Porcelain themes; the dashboard also
+offers Match system. Keep profile and settings captures current when these
+controls change. Include both light and dark appearance in visual verification,
+and retain the intentionally dark graph canvas in Porcelain captures. Fonts are
+bundled with the apps; a missing font-CDN connection should not change the UI.
+
+When updating screenshots, capture the real dashboard at 1920 x 873. Prefer a
+disposable production-UI fixture whose API serves only generic synthetic records,
+and identify those examples as demonstration data in the guide. It must have no
+access to user data, credentials or production services. For live-data captures,
+redact before committing. Every data-derived value on a live Memories capture must be
 blurred, including memory text, project/tag/badge values and counts, graph and
 tab counts, node labels, active-focus chips, accessible-node rows, details,
 timestamps, metadata, and author values. A project filter is not a privacy

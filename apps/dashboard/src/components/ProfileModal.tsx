@@ -4,6 +4,7 @@ import { useActionState, useEffect, useState } from 'react'
 import { Modal } from './ui/Modal'
 import { Avatar } from './ui/Avatar'
 import { Checkbox } from './ui/Checkbox'
+import { ThemeSwitch } from './ui/ThemeSwitch'
 import { updateProfileAction, type ProfileActionState } from '@/app/(dashboard)/profile/actions'
 import { assessPasswordStrength, generateStrongPassword } from '@/lib/passwordStrength'
 import type { Profile } from '@/lib/types'
@@ -112,6 +113,14 @@ export function ProfileModal({
             {!localMode && profile.teamName ? <span className="head-team">{profile.teamName}</span> : null}
           </div>
         ) : null}
+
+        <div className="seg-group" style={{ borderTop: '1px solid var(--divider-section)', paddingTop: 14 }}>
+          <span className="section-label">Appearance</span>
+          <p className="note" style={{ margin: '0 0 8px' }}>
+            Stored in this browser. It changes how the dashboard looks for you on this computer only.
+          </p>
+          <ThemeSwitch compact />
+        </div>
 
         <div className="seg-group" style={{ borderTop: '1px solid var(--divider-section)', paddingTop: 14 }}>
           <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}>

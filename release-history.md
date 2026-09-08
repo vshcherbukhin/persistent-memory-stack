@@ -2,6 +2,58 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.2.0 - 2026-09-08
+
+[GitHub release v1.2.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.2.0)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.2.0 | Neural Obsidian design, Obsidian and Porcelain themes, persistent appearance controls and accessible overlays. |
+| onboarding | 1.2.0 | Matching wizard design, responsive layout, keyboard theme controls and dashboard appearance handoff. |
+| docs | 1.2.0 | Refreshed interface screenshots and appearance guidance. |
+| api | 1.0.2 | Existing personal memory and provider health APIs retained. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Refresh the dashboard and installation wizard with the Neural Obsidian design:
+  cyan-to-violet accents, clearer surface hierarchy and locally bundled fonts.
+- Choose the default dark Obsidian or light Porcelain theme. The dashboard also
+  follows the operating system through Match system, including after appearance
+  controls close. Theme changes synchronize across open dashboard tabs.
+- Carry the wizard's selected appearance into the dashboard, even when browser
+  storage is unavailable. Theme controls support arrow keys, Home and End.
+- Fix profile and navigation dialogs appearing behind page content. Improve
+  light-theme notices, status badges, image-preview controls, graph retry controls
+  and small-screen wizard layout. Keep graph legend colors aligned with nodes.
+- Avoid memory-list hydration errors when Docker and the browser use different
+  time zones. Redact passwords embedded in installer-preview URLs and Neo4j
+  credentials without changing the saved environment.
+- Refresh public screenshots using generic demonstration data and document
+  appearance controls. The personal installation wizard has eleven steps;
+  optional connections remain a later dashboard action.
+
+Direct upgrades from public 1.0.0 through 1.1.4 preserve memories, data volumes,
+credentials and embedding configuration. This release adds no database migration
+or embedding-model change. The graph canvas retains its dark backdrop in both themes.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.2.0
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.2.0`.
+For a new installation, follow the
+[v1.2.0 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.2.0/README.md).
+
+Validation covers theme persistence, OS and browser-tab synchronization, keyboard
+controls, restricted browser storage, appearance handoff, dashboard interactions
+and the personal wizard flow. Physical macOS/Safari installation was not rerun
+on this Windows development machine.
+
 ## 1.1.4 - 2026-09-08
 
 [GitHub release v1.1.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.4)

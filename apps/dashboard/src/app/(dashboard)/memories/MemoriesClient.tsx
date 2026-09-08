@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { MemoryTimeCell } from '@/components/ui/MemoryTimeCell'
 import { useToast } from '@/components/ui/Toast'
 import { memoryImportNotice } from '@/lib/memoryImportResult'
 import { handleMemoryUpdateResult } from '@/lib/memoryUpdateResult'
@@ -50,27 +51,6 @@ const CATEGORY_OPTS = [
 type MemoryView = 'list' | 'graph' | 'tools'
 
 const MEMORY_TIME_WIDTH = 112
-const compactMemoryTime = new Intl.DateTimeFormat([], {
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-})
-const fullMemoryTime = new Intl.DateTimeFormat([], {
-  dateStyle: 'full',
-  timeStyle: 'long',
-})
-
-function MemoryTimeCell({ value }: { value: string }) {
-  const date = new Date(value)
-  const valid = !Number.isNaN(date.getTime())
-  return (
-    <Tooltip as="div" className="memory-time-cell" label={valid ? fullMemoryTime.format(date) : value}>
-      <time dateTime={value}>{valid ? compactMemoryTime.format(date) : 'Unknown'}</time>
-    </Tooltip>
-  )
-}
-
 const fixedMemoryColumn = (width: number) => `minmax(${width}px, ${width}px)`
 
 const estimateMemoryColumnWidth = (values: string[], min: number, extra = 28, charWidth = 6.8) => {

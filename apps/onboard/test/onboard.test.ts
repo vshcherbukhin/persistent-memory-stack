@@ -257,6 +257,31 @@ describe('maskEnv', () => {
     expect(masked).not.toContain('UPDATE_RUNNER_TOKEN=updatesecrettok12')
     expect(masked).toContain('EMBED_MODEL=qwen3-embedding:4b')
   })
+  it('masks duplicated database credentials and Neo4j auth without changing generated configuration', () => {
+    const generated = renderEnv(answers, { ...testSecrets, postgresPassword: 'owner-secret-12345', pmAppPassword: 'app-secret-67890' })
+    const preview = maskEnv(generated)
+    expect(preview).not.toContain('owner-secret-12345')
+    expect(preview).not.toContain('app-secret-67890')
+    expect(preview).toContain('DATABASE_URL=postgresql://pm_app:••••@persistent-memory-postgres:5432/persistent_memory')
+    expect(preview).toContain('DATABASE_MIGRATE_URL=postgresql://pmuser:••••@persistent-memory-postgres:5432/persistent_memory')
+    expect(preview).not.toContain('NEO4J_PASSWORD=persistentmemory')
+    expect(preview).not.toContain('NEO4J_AUTH=neo4j/persistentmemory')
+    expect(generated).toContain('postgresql://pm_app:app-secret-67890@')
+    expect(generated).toContain('POSTGRES_PASSWORD=owner-secret-12345')
+  })
+  it('preserves quoted URLs, routing, non-secret values and Windows line endings', () => {
+    const raw = 'DATABASE_URL="postgresql://demo:encoded%40secret%3Avalue@[::1]:5433/memories?sslmode=disable"\r\nREDIS_URL=redis://default:redis-secret@localhost:6381/0\r\nNEO4J_PASSWORD=private-neo4j-secret\r\nNEO4J_AUTH=neo4j/private-neo4j-secret\r\nAPI_URL=http://localhost:8090\r\nOPENAI_API_KEY=\r\n'
+    const preview = maskEnv(raw)
+    for (const secret of ['encoded%40secret%3Avalue', 'redis-secret', 'private-neo4j-secret']) expect(preview).not.toContain(secret)
+    expect(preview).toContain('DATABASE_URL="postgresql://demo:••••@[::1]:5433/memories?sslmode=disable"\r\n')
+    expect(preview).toContain('REDIS_URL=redis://default:••••@localhost:6381/0\r\n')
+    expect(preview).toContain('API_URL=http://localhost:8090\r\nOPENAI_API_KEY=\r\n')
+    expect(preview.split('\r\n')).toHaveLength(raw.split('\r\n').length)
+  })
+  it('masks through the final authority separator with raw @ passwords and empty usernames', () => {
+    const raw = "DATABASE_URL='postgresql://demo:first@middle@last@db:5433/memories?owner=demo@example.test'\nREDIS_URL=redis://:redis@password@localhost:6381/0\nAPI_URL=https://example.test/path?contact=demo@example.test\n"
+    expect(maskEnv(raw)).toBe("DATABASE_URL='postgresql://demo:••••@db:5433/memories?owner=demo@example.test'\nREDIS_URL=redis://:••••@localhost:6381/0\nAPI_URL=https://example.test/path?contact=demo@example.test\n")
+  })
 })
 
 describe('validateEnvForDeploy', () => {

@@ -9,22 +9,20 @@ describe('release history UI parsing', () => {
     const dashboardHistory = readFileSync(new URL('../../public/release-history.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const rootPackage = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')) as { version: string; persistentMemoryReleaseLine: string }
     expect(dashboardHistory).toBe(rootHistory)
-    expect(APP_VERSION).toBe('1.1.4')
+    expect(APP_VERSION).toBe('1.2.0')
     expect(rootPackage.version).toBe(APP_VERSION)
     expect(rootPackage.persistentMemoryReleaseLine).toBe('public-v1')
     expect(rootHistory).toContain('<!-- persistent-memory-release-line: public-v1 -->')
     const cards = parseReleaseHistoryForUi(dashboardHistory)
-    expect(cards).toHaveLength(6)
+    expect(cards).toHaveLength(7)
     expect(cards[0]).toMatchObject({ version: APP_VERSION, latest: true })
-    expect(cards[1]).toMatchObject({ version: '1.1.3', latest: false })
-    expect(cards[2]).toMatchObject({ version: '1.1.2', latest: false })
-    expect(cards[3]).toMatchObject({ version: '1.1.1', latest: false })
-    expect(cards[4]).toMatchObject({ version: '1.1.0', latest: false })
-    expect(cards[5]).toMatchObject({ version: '1.0.0', latest: false })
+    expect(cards.slice(1).map(card => ({version: card.version, latest: card.latest}))).toEqual(
+      ['1.1.4', '1.1.3', '1.1.2', '1.1.1', '1.1.0', '1.0.0'].map(version => ({version, latest: false})),
+    )
     expect(cards[0]!.services.length).toBeGreaterThan(0)
     expect(cards[0]!.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({ service: 'dashboard / dashboard layer', version: '1.1.4' }),
-      expect.objectContaining({ service: 'onboarding', version: '1.1.3' }),
+      expect.objectContaining({ service: 'dashboard / dashboard layer', version: '1.2.0' }),
+      expect.objectContaining({ service: 'onboarding', version: '1.2.0' }),
       expect.objectContaining({ service: 'api', version: '1.0.2' }),
     ]))
     expect(cards[0]!.body).not.toContain('persistent-memory-release-line')
