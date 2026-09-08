@@ -2,6 +2,55 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.1.2 - 2026-09-08
+
+[GitHub release v1.1.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.2)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.1.2 | Current release label and release notes. |
+| onboarding | 1.1.1 | macOS available-memory estimates and clearer, sanitized OpenAI embedding-test diagnostics. |
+| docs | 1.1.2 | Explains macOS memory estimates, conservative fallbacks, and OpenAI request permissions. |
+| api | 1.0.1 | Existing memory APIs and published-release metadata retained. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Fix false low-memory blocks on macOS by using an available-memory estimate
+  from the free, speculative and inactive page counts reported by `vm_stat`.
+  Honor its 4 KiB or 16 KiB page size and avoid adding overlapping purgeable
+  pages. Preserve the raw free-memory measurement and retain all minimum
+  requirements and local-model restrictions.
+- Explain that inactive memory may require compression or disk writeback;
+  the estimate is not a guarantee of immediately free RAM. Invalid counters,
+  unavailable commands and timeouts trigger a visible, conservative fallback.
+- Make OpenAI embedding-test failures actionable: distinguish request permission
+  from the model allowlist, and explain authentication, model access, billing,
+  IP restrictions and unsupported-region errors when the response identifies
+  them. Bound response handling and display fixed safe guidance without echoing
+  API keys or raw provider messages.
+
+Direct upgrades from public 1.0.0, 1.1.0 and 1.1.1 preserve memories, data
+volumes, credentials and embedding configuration. This patch adds no database
+migration or embedding-model change.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.1.2
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.1.2`.
+For a new installation, follow the
+[v1.1.2 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.2/README.md).
+
+Validation covers automated installer/resource/provider checks, production
+installer builds and Chrome wizard checks with controlled responses. A physical
+Mac installation and the reported account-specific OpenAI rejection have not
+been verified as resolved by this patch.
+
 ## 1.1.1 - 2026-09-08
 
 [GitHub release v1.1.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.1)

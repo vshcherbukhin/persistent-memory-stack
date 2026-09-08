@@ -28,6 +28,32 @@ describe('conservative embedding resource policy', () => {
     expect(recommendation).toMatchObject({ provider: 'openai', model: 'text-embedding-3-small', dim: 1536, allowed: true, localEnabled: false })
     expect(recommendation.options.filter(option => option.model?.location === 'local').every(option => !option.allowed)).toBe(true)
   })
+  it('uses estimated macOS headroom for API eligibility without lowering the minimum', () => {
+    const snapshot = fixture()
+    snapshot.host = { ...snapshot.host, totalMemoryBytes: 8 * GiB, freeMemoryBytes: 0.2 * GiB,
+      availableMemoryBytes: 2.3 * GiB, availableMemorySource: 'macos-vm-stat' }
+    snapshot.docker.totalMemoryBytes = 4 * GiB
+    expect(recommendResources(snapshot)).toMatchObject({ provider: 'openai', allowed: true, localEnabled: false })
+    const selection = { provider: 'openai' as const, model: 'text-embedding-3-small' }
+    expect(evaluateResources(snapshot, selection).warnings.map(item => item.message).join(' ')).toContain('disk writeback or compression')
+    snapshot.host.availableMemoryBytes = 1.9 * GiB
+    expect(evaluateResources(snapshot, selection).blockers.map(item => item.code)).toContain('estimated_available_host_ram_minimum')
+    snapshot.host.availableMemoryBytes = null
+    expect(evaluateResources(snapshot, selection).allowed).toBe(false)
+  })
+  it('keeps conservative Mac fallbacks explicit and does not revive invalid raw free RAM', () => {
+    const snapshot = fixture()
+    snapshot.host.availableMemorySource = 'os-free'
+    snapshot.host.availableMemoryBytes = null
+    snapshot.host.availableMemoryReason = 'macOS available RAM could not be measured; using only OS-reported free RAM.'
+    const selection = { provider: 'openai' as const, model: 'text-embedding-3-small' }
+    const result = evaluateResources(snapshot, selection)
+    expect(result.allowed).toBe(false)
+    expect(result.blockers.map(item => item.code)).toContain('free_host_ram_unknown')
+    expect(result.warnings.map(item => item.code)).toContain('available_memory_fallback')
+    snapshot.host.availableMemoryBytes = 3 * GiB
+    expect(evaluateResources(snapshot, selection)).toMatchObject({ allowed: true, requiresAcknowledgement: true })
+  })
   it.each([[16, 6, 'nomic-embed-text'], [24, 8, 'qwen3-embedding:0.6b'], [32, 12, 'qwen3-embedding:4b'], [64, 24, 'qwen3-embedding:8b']])('selects the largest recommended model for %s GiB with %s GiB free', (total, free, model) => {
     const snapshot = fixture()
     snapshot.host.totalMemoryBytes = Number(total) * GiB

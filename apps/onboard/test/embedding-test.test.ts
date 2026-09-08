@@ -47,6 +47,7 @@ describe('embedding connection probe', () => {
     expect(url).toBe('https://api.openai.com/v1/embeddings')
     expect(JSON.parse(init.body as string)).toEqual({ model: openai.model, input: ['Persistent Memory embedding connection check.'], encoding_format: 'float', dimensions: 1536 })
     expect(init.headers).toMatchObject({ authorization: 'Bearer test-only-key' })
+    expect(init.redirect).toBe('error')
   })
 
   it('uses Voyage input_type and output_dimension', async () => {
@@ -74,6 +75,53 @@ describe('embedding connection probe', () => {
     expect(result.ok).toBe(false)
     expect(result.message).toContain(String(status))
     expect(JSON.stringify(result)).not.toContain(openai.apiKey)
+  })
+
+  it('explains missing request permission separately from the project model allowlist', async () => {
+    const result = await testEmbeddingConnection(openai, async () => new Response(JSON.stringify({ error: {
+      message: `You have insufficient permissions. Missing scopes: model.request. Key ${openai.apiKey}`, type: 'invalid_request_error',
+    } }), { status: 403 }))
+    expect(result.details).toContain('missing model.request permission')
+    expect(result.details).toContain('/v1/embeddings')
+    expect(result.details).toContain('allowlist alone is not enough')
+    expect(JSON.stringify(result)).not.toContain(openai.apiKey)
+  })
+
+  it.each([
+    [401, 'invalid_api_key', 'could not authenticate'],
+    [403, 'unsupported_country_region_territory', 'unsupported country or region'],
+    [401, 'ip_not_authorized', 'IP allowlist restriction'],
+    [404, 'model_not_found', 'model is unavailable or not accessible'],
+    [429, 'credit_balance_exhausted', 'billing, spend or usage limit'],
+  ])('classifies HTTP %s / %s without reflecting provider fields', async (status, code, hint) => {
+    const result = await testEmbeddingConnection(openai, async () => new Response(JSON.stringify({ error: { code, message: openai.apiKey } }), { status: Number(status) }))
+    expect(result.details).toContain(hint)
+    expect(JSON.stringify(result)).not.toContain(openai.apiKey)
+  })
+
+  it.each([null, { error: null }, { error: { message: {}, code: ['invalid_api_key'] } }, { error: { message: openai.apiKey, code: openai.apiKey } }])('handles an unknown 403 without declaring the key invalid or echoing fields', async payload => {
+    const result = await testEmbeddingConnection(openai, async () => new Response(JSON.stringify(payload), { status: 403 }))
+    expect(result.details).toContain('OpenAI denied this embedding request')
+    expect(result.details).toContain('Model capabilities')
+    expect(JSON.stringify(result)).not.toContain(openai.apiKey)
+  })
+
+  it('does not apply OpenAI-specific scopes to Voyage failures', async () => {
+    const result = await testEmbeddingConnection({ ...openai, provider: 'voyage', model: 'voyage-4', dim: 1024 }, async () => new Response(JSON.stringify({ error: { message: 'Missing scopes: model.request' } }), { status: 403 }))
+    expect(result.details).toContain('provider denied')
+    expect(result.details).not.toContain('OpenAI')
+  })
+
+  it('preserves HTTP rejection when an error body exceeds the byte limit', async () => {
+    const result = await testEmbeddingConnection(openai, async () => new Response(openai.apiKey.repeat(30_000), { status: 403 }))
+    expect(result.message).toContain('HTTP 403')
+    expect(JSON.stringify(result)).not.toContain(openai.apiKey)
+  })
+
+  it('preserves HTTP rejection when its error body stalls until the deadline', async () => {
+    const result = await testEmbeddingConnection(openai, async () => new Response(new ReadableStream({ start() {} }), { status: 403 }), 20)
+    expect(result.message).toContain('HTTP 403')
+    expect(result.ok).toBe(false)
   })
 
   it('rejects wrong-sized, nonnumeric, null and all-zero vectors', async () => {
@@ -131,6 +179,22 @@ describe('embedding test route', () => {
     const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
     expect(init.headers).toMatchObject({ authorization: 'Bearer saved-key' })
     expect(result.body).not.toContain('saved-key')
+  })
+
+  it('uses the newly entered key instead of a previous saved key', async () => {
+    const { app, fetcher } = setup()
+    const result = await app.inject({ method: 'POST', url: '/api/embedding/test', payload: { ...openai, apiKey: '  replacement-key  ' } })
+    expect(result.json().ok).toBe(true)
+    const [, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.headers).toMatchObject({ authorization: 'Bearer replacement-key' })
+    expect(result.body).not.toContain('replacement-key')
+  })
+
+  it('does not use a saved OpenAI key for a Voyage request', async () => {
+    const { app, fetcher } = setup()
+    const result = await app.inject({ method: 'POST', url: '/api/embedding/test', payload: { provider: 'voyage', model: 'voyage-4', dim: 1024 } })
+    expect(result.json().ok).toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('uses a saved custom local Ollama port and ignores browser-supplied URLs', async () => {

@@ -11,10 +11,11 @@ export function ResourceSummary({ snapshot, assessment, acknowledged, onAcknowle
   const budget = assessment.budget
   if (!budget) return <p className="notice bad">Choose a supported embedding model.</p>
   const { minimum: min, recommended: rec } = budget
+  const estimatedAvailable = snapshot.host.availableMemorySource === 'macos-vm-stat'
   const sharedModelDisk = assessment.model?.location === 'local' && snapshot.installDisk.filesystemId === snapshot.ollamaDisk.filesystemId
   const rows = [
     ['Total computer RAM', capacity(snapshot.host.totalMemoryBytes), min.hostMemoryGiB, rec.hostMemoryGiB],
-    ['Currently free RAM', capacity(snapshot.host.freeMemoryBytes), min.freeHostMemoryGiB, rec.freeHostMemoryGiB],
+    [estimatedAvailable ? 'Estimated available RAM' : 'Currently free RAM', capacity(snapshot.host.availableMemorySource ? snapshot.host.availableMemoryBytes : snapshot.host.freeMemoryBytes), min.freeHostMemoryGiB, rec.freeHostMemoryGiB],
     ['RAM allocated to Docker', capacity(snapshot.docker.totalMemoryBytes), min.dockerMemoryGiB, rec.dockerMemoryGiB],
     [sharedModelDisk ? 'Free installation + model disk' : 'Free installation disk', capacity(snapshot.installDisk.freeBytes), min.installDiskGiB + (sharedModelDisk ? min.modelDiskGiB : 0), rec.installDiskGiB + (sharedModelDisk ? rec.modelDiskGiB : 0)],
     ['Free storage inside Docker', capacity(snapshot.docker.storageFreeBytes), min.dockerDiskGiB, rec.dockerDiskGiB],
@@ -29,6 +30,7 @@ export function ResourceSummary({ snapshot, assessment, acknowledged, onAcknowle
       <tbody>{rows.map(([label, actual, minimum, recommended]) => <tr key={String(label)}><th scope="row">{label}</th><td>{actual}</td><td>{minimum} GiB</td><td>{recommended} GiB</td></tr>)}</tbody>
     </table></div>
     <p className="field-hint">Conservative whole-stack planning budgets, including the operating system, Docker and build headroom. Model file size alone does not predict memory use. Actual needs grow with your data and workload.</p>
+    {estimatedAvailable ? <p className="field-hint">macOS available RAM is estimated from free, speculative and inactive pages. It includes memory the system may reclaim, so it can be higher than free RAM. Reclaiming inactive memory may require compression or disk writeback; this is not a guarantee that it is immediately free.</p> : null}
     <details><summary>Measured locations</summary><p>Installation: <code>{snapshot.installDisk.path}</code></p><p>Docker data: <code>{snapshot.dockerHostDisk?.path ?? 'Location not verified'}</code></p>{assessment.model?.location === 'local' ? <p>Ollama models: <code>{snapshot.ollamaDisk.path}</code></p> : null}</details>
     {assessment.blockers.length ? <div className="notice bad" role="alert"><b>Minimum requirements are not met.</b><ul>{assessment.blockers.map(issue => <li key={`${issue.code}-${issue.message}`}>{issue.message}</li>)}</ul><p>Free disk space, close other applications or adjust Docker resources, then check again. If you leave setup to clean up, re-run the installation afterward. Next remains unavailable until the minimum checks pass.</p></div> : null}
     {assessment.warnings.length ? <div className="notice warn"><b>Resource warnings</b><ul>{assessment.warnings.map(issue => <li key={`${issue.code}-${issue.message}`}>{issue.message}</li>)}</ul>{assessment.model?.location === 'local' && !assessment.meetsRecommended ? <p><b>This local model is strongly not recommended with the current headroom.</b> Heavy memory pressure may freeze the computer. A forced shutdown or exhausted disk can interrupt writes and damage stored data; this is not a claim that low RAM directly corrupts memory.</p> : null}</div> : null}

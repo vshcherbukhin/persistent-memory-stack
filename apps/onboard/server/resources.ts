@@ -66,10 +66,58 @@ export function parseWindowsPhysicalMemoryBytes(result: ResourceCommandResult): 
   } catch { return null }
 }
 
+/** vm_stat's printed "Pages free" excludes speculative pages, unlike Mach's
+ * free_count (and Node's os.freemem). Its inactive queue is separate from both.
+ * Sources: apple-oss-distributions/system_cmds, vm_stat/vm_stat.c:snapshot;
+ * apple-oss-distributions/xnu, osfmk/vm/vm_resident.c:vm_page_enqueue_inactive.
+ * Purgeable pages are an overlapping object property, not another page queue
+ * (xnu/osfmk/vm/vm_object.c:vm_object_purgable_control), so do not add them.
+ * This is an estimate: inactive pages may need compression or disk writeback;
+ * they are not a promise of immediately free RAM or a memory-pressure reading. */
+export function parseMacosAvailableMemoryBytes(result: ResourceCommandResult, totalMemoryBytes: number | null): number | null {
+  const total = boundedNumber(totalMemoryBytes, true)
+  if (result.code !== 0 || result.timedOut || total === null || result.stdout.length > 128 * 1024) return null
+  const lines = result.stdout.trim().split(/\r?\n/)
+  const header = /^Mach Virtual Memory Statistics: \(page size of (4096|16384) bytes\)$/.exec(lines[0]?.trim() ?? '')
+  if (!header?.[1]) return null
+  const pageSize = BigInt(header[1])
+  const totalBytes = BigInt(total)
+  let available = 0n
+  for (const label of ['Pages free', 'Pages speculative', 'Pages inactive']) {
+    const entries = lines.filter(line => line.trimStart().startsWith(`${label}:`))
+    const entry = entries[0]
+    if (entries.length !== 1 || entry === undefined) return null
+    const value = new RegExp(`^${label}:\\s+([0-9]{1,20})\\.?\\s*$`).exec(entry.trim())
+    if (!value?.[1]) return null
+    const bytes = BigInt(value[1]) * pageSize
+    if (bytes > totalBytes) return null
+    available += bytes
+  }
+  // Do not clamp an impossible sum into an apparently idle, fully available
+  // machine. Fall back conservatively and let the user recheck a bad snapshot.
+  return available <= totalBytes ? Number(available) : null
+}
+
 export async function readHostResources(
   hostPlatform: NodeJS.Platform, capture: ResourceProbeIO['capture'], timeoutMs: number,
   base: ResourceSnapshot['host'] = { platform: hostPlatform, arch: arch(), cpuCount: boundedNumber(cpus().length, true), totalMemoryBytes: boundedNumber(totalmem(), true), freeMemoryBytes: boundedNumber(freemem()) },
 ): Promise<ResourceSnapshot['host']> {
+  if (hostPlatform === 'darwin') {
+    try {
+      const available = parseMacosAvailableMemoryBytes(await bounded(
+        capture('/usr/bin/vm_stat', [], timeoutMs), timeoutMs + 100,
+      ), base.totalMemoryBytes)
+      if (available !== null) return { ...base, availableMemoryBytes: available, availableMemorySource: 'macos-vm-stat' }
+    } catch { /* Keep the conservative OS-free fallback below. */ }
+    const free = boundedNumber(base.freeMemoryBytes)
+    const total = boundedNumber(base.totalMemoryBytes, true)
+    return {
+      ...base,
+      availableMemoryBytes: free === null || (total !== null && free > total) ? null : free,
+      availableMemorySource: 'os-free',
+      availableMemoryReason: 'macOS available RAM could not be estimated. The check conservatively uses OS-reported free RAM without assuming cached memory can be reclaimed. Close memory-heavy applications and recheck resources.',
+    }
+  }
   if (hostPlatform !== 'win32') return base
   let installed: number | null = null
   try {

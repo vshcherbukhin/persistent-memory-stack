@@ -20,6 +20,10 @@ export interface ResourceSnapshot {
     cpuCount: number | null
     totalMemoryBytes: number | null
     freeMemoryBytes: number | null
+    /** Darwin estimates available RAM from disjoint vm_stat queues. Raw free RAM stays separate. */
+    availableMemoryBytes?: number | null
+    availableMemorySource?: 'macos-vm-stat' | 'os-free'
+    availableMemoryReason?: string
     /** Windows reports installed modules separately from OS-usable memory. */
     usableMemoryBytes?: number | null
     memorySource?: 'installed-physical' | 'os-usable'
@@ -118,7 +122,10 @@ export function evaluateResources(snapshot: ResourceSnapshot, selection: { provi
   }
   memory('Host RAM', snapshot.host.totalMemoryBytes, min.hostMemoryGiB, rec.hostMemoryGiB, model.location === 'local' ? 'Choose a smaller local model or a remote embedding API.' : 'Use a host with more memory.')
   if (snapshot.host.memoryReason) unknown('host_memory_fallback', snapshot.host.memoryReason)
-  memory('Free host RAM', snapshot.host.freeMemoryBytes, min.freeHostMemoryGiB, rec.freeHostMemoryGiB, 'Close memory-heavy applications and recheck; this is currently free RAM, not a promise of reclaimable cache.')
+  const estimatedAvailable = snapshot.host.availableMemorySource === 'macos-vm-stat'
+  memory(estimatedAvailable ? 'Estimated available host RAM' : 'Free host RAM', snapshot.host.availableMemorySource ? snapshot.host.availableMemoryBytes ?? null : snapshot.host.freeMemoryBytes, min.freeHostMemoryGiB, rec.freeHostMemoryGiB,
+    estimatedAvailable ? 'Close memory-heavy applications and recheck. This estimate includes inactive memory; reclaiming it may require disk writeback or compression and is not guaranteed to be immediate.' : 'Close memory-heavy applications and recheck; this is currently free RAM, not a promise of reclaimable cache.')
+  if (snapshot.host.availableMemoryReason) unknown('available_memory_fallback', snapshot.host.availableMemoryReason)
   if (!['x64', 'arm64'].includes(snapshot.host.arch)) block('host_architecture', 'This installer supports x64 and arm64 hosts. Confirm a supported native Node installation.')
   if (!known(snapshot.host.cpuCount)) block('host_cpu_unknown', 'CPU count could not be measured. Recheck host resources.')
   else if (snapshot.host.cpuCount < min.cpuCount) block('host_cpu_minimum', `At least ${min.cpuCount} logical CPUs are required by the product budget.`)
