@@ -29,7 +29,7 @@ ENV NODE_ENV=production \
     PORT=8000 \
     HOSTNAME=0.0.0.0 \
     DOCUMENTATION_SITE_DIR=/site \
-    DOCUMENTATION_VERSION=1.1.4
+    DOCUMENTATION_VERSION=1.2.0
 COPY apps/documentation/package.json ./package.json
 COPY apps/documentation/src ./src
 COPY --from=builder /site /site

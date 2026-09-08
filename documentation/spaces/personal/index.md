@@ -21,7 +21,7 @@ nav_order: 10
 
 Personal Space is the dashboard for the Persistent Memory stack running on your computer. Use it to inspect service health, manage your private memory records, review scheduled work and token usage, respond to security findings, and configure the local stack.
 
-This guide assumes no prior knowledge. Values in the screenshots are examples; your counts, models, and statuses will differ.
+This guide assumes no prior knowledge. Dashboard screenshots use a demonstration profile and synthetic records; your counts, models, and statuses will differ. Examples show both Obsidian and Porcelain themes.
 
 ## Read the page
 

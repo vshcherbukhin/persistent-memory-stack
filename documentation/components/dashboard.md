@@ -56,6 +56,14 @@ It covers the personal/local surface plus the shared/server planes:
 
 ## Key pieces
 
+**Appearance:** Obsidian is the default dark theme; Porcelain is light; Match
+system follows the computer's light/dark preference. Every user can change it
+from the profile modal; superusers also have **System Settings → Appearance**.
+The preference is browser-local and takes effect without saving account settings.
+The graph canvas stays dark in both themes. Bricolage Grotesque, Manrope and IBM
+Plex Mono are bundled with the app, so rendering its type does not call a font CDN.
+See [Profile](../spaces/personal/profile.md#appearance) for the user-facing guide.
+
 **Auth = password/SSO in server mode; optional soft lock in local mode**
 (`apps/dashboard/README.md`, `apps/dashboard/src/app/login/`).
 Server-mode human login uses email/password and stores a signed dashboard session

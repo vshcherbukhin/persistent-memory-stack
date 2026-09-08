@@ -23,11 +23,16 @@ Use the dashboard navigation to keep actions in the correct data space and to re
 
 ## Read the page
 
-The space switcher is above the page links. The sidebar below it changes to match the selected space. The highlighted row is the current page. **Documentation** stays near the bottom, while your profile row is always last. This focused view intentionally centers the navigation rather than repeating the Overview guide's page-level image.
+The space switcher is above the page links. The sidebar below it changes to match the selected space. The highlighted row is the current page. **Documentation** stays near the bottom, while your profile row is always last. The example shows these controls beside the Overview page.
 
 When something needs attention, the relevant **Security**, **Services**, or **Workers** row shows a small red **!** at the right. It is a live status signal, not a second queue: open Security findings keep the Security signal visible until the final finding is resolved; an unavailable or stopped service marks Services; an enabled failed worker or missing worker heartbeat marks Workers. A deliberately paused worker does not create an alert.
 
 The top-right book icon opens dashboard documentation. The release icon beside it opens release notes. Hovering an unfamiliar icon shows its tooltip.
+
+Choose **Your profile → Appearance** from the bottom-left profile row to switch
+between Obsidian, Porcelain and Match system. Superusers can reach the same
+control through **System Settings → Appearance**. These choices change the
+visual theme without changing the selected space or its permissions.
 
 ![Open Personal and Shared space switcher](../../assets/spaces/personal/space-switcher.png)
 
@@ -68,4 +73,5 @@ Selecting Shared Space is not a substitute for installing or configuring a share
 | A link opens the wrong space | Re-select **Personal memories**, then open the destination from the sidebar. |
 | A tooltip does not appear | Keep the pointer over the icon briefly, or use the icon's accessible label with keyboard navigation. |
 | System Settings is absent | That page is limited to users who can change local system configuration. |
+| I only want to change the theme | Open **Your profile → Appearance**; system-settings access is not required. |
 | The profile modal does not open | Close any existing modal, then select the profile row again. |

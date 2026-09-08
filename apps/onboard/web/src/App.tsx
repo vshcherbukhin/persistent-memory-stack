@@ -15,7 +15,7 @@ import { startWizardHeartbeat } from './heartbeat'
 import { ProgressBar, Field, StepList, Terminal, StatusRow, type StepState } from './components'
 import { PrereqProgress } from './PrereqProgress'
 import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
-import { applyTheme, readTheme, type ThemePreference } from './theme'
+import { applyTheme, dashboardThemeUrl, readTheme, type ThemePreference } from './theme'
 import { EmbeddingSetup, embeddingTestSignature } from './EmbeddingSetup'
 import { ResourceSummary } from './ResourceSummary'
 import { RESOURCE_MODELS, evaluateResources, recommendResources, type ResourceSnapshot } from '../../shared/resource-policy'
@@ -199,8 +199,7 @@ function HexLogo({ size = 26 }: { size?: number }) {
 }
 
 // ── Appearance toggle (header) ─────────────────────────────────────────────────
-// Setup previews the theme the dashboard will open with, using the same stored
-// preference key, so the choice survives the handoff.
+// The completion link explicitly hands this choice to the dashboard.
 function ThemeToggle() {
   const [theme, setTheme] = useState<ThemePreference>(() => readTheme())
   const choose = (next: ThemePreference) => { setTheme(next); applyTheme(next) }
@@ -212,8 +211,17 @@ function ThemeToggle() {
           type="button"
           role="radio"
           aria-checked={theme === option}
+          tabIndex={theme === option ? 0 : -1}
           className={theme === option ? 'active' : ''}
           onClick={() => choose(option)}
+          onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+            event.preventDefault()
+            const next = event.key === 'Home' ? 'obsidian' : event.key === 'End' ? 'porcelain' : option === 'obsidian' ? 'porcelain' : 'obsidian'
+            choose(next)
+            const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+            buttons?.[next === 'obsidian' ? 0 : 1]?.focus()
+          }}
         >
           {option === 'obsidian' ? 'Obsidian' : 'Porcelain'}
         </button>
@@ -1358,7 +1366,7 @@ function Done({ flow, token, apps, passwordConfigured }: { flow: Flow; token: st
   const go = async () => {
     const fin = await getJSON<{ dashboardUrl: string }>('/api/finish').catch(() => ({ dashboardUrl: LOCAL_DASHBOARD_URL }))
     void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})
-    window.location.assign(fin.dashboardUrl)
+    window.location.assign(dashboardThemeUrl(fin.dashboardUrl, readTheme()))
   }
   return (
     <section>

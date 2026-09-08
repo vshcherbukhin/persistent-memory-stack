@@ -23,13 +23,13 @@
   --text: #e9f1f8;        /* title */
   --body: #b3c1cf;
   --soft: #8d9cab;
-  --muted: #6d7b89;
-  --dim: #4d5966;
+  --muted: #8d9cab;
+  --dim: #8593a1;
   /* accents — one plasma ramp, cyan to violet */
   --accent: #2bc5e8;
   --accent-hover: #57d8f5;
   --accent-2: #8b5cf6;
-  --on-accent: #04222c;
+  --on-accent: #010c12;
   --accent-tint: rgba(43, 197, 232, .10);
   --accent-tint-12: rgba(43, 197, 232, .12);
   --accent-tint-15: rgba(43, 197, 232, .16);
@@ -70,22 +70,22 @@
   --text: #0a1119;
   --body: #35434f;
   --soft: #55636f;
-  --muted: #6d7b88;
-  --dim: #94a1ad;
-  --accent: #0e88ad;
-  --accent-hover: #0b6f8f;
+  --muted: #556371;
+  --dim: #596775;
+  --accent: #0b6884;
+  --accent-hover: #09556d;
   --accent-2: #6d3fe0;
   --on-accent: #ffffff;
   --accent-tint: rgba(14, 136, 173, .09);
   --accent-tint-12: rgba(14, 136, 173, .11);
   --accent-tint-15: rgba(14, 136, 173, .15);
   --accent-40: rgba(14, 136, 173, .38);
-  --plasma: linear-gradient(100deg, #0e88ad 0%, #2f6fd0 46%, #6d3fe0 100%);
+  --plasma: linear-gradient(100deg, #0c7393 0%, #2c68c3 46%, #6d3fe0 100%);
   --accent-glow: 0 0 20px -12px #0e88ad;
-  --warn: #a4670a;
+  --warn: #925c09;
   --warn-tint: rgba(196, 132, 20, .13);
   --warn-tint-15: rgba(196, 132, 20, .17);
-  --ok: #0f8f52;
+  --ok: #0d7945;
   --ok-soft: #0b6b3e;
   --ok-tint: rgba(15, 143, 82, .11);
   --danger: #cf2733;
@@ -387,7 +387,7 @@ textarea {
 .notice.warn b { color: var(--warn); }
 .notice.warn code { color: var(--warn); }
 .notice.ok {
-  background: #13201a;
+  background: var(--ok-tint);
   border-color: rgba(55, 179, 96, .4);
   border-left-color: var(--ok);
   color: var(--ok-soft);
@@ -447,7 +447,7 @@ textarea {
 }
 .seg:hover { border-color: var(--accent); }
 .seg-title { font-weight: 600; }
-.seg-note { font-size: 11.5px; opacity: .8; margin-top: 2px; }
+.seg-note { font-size: 11.5px; color: var(--body); margin-top: 2px; }
 .seg-badge {
   margin-left: 7px;
   font-size: 10px;
@@ -1063,3 +1063,15 @@ code, pre, .terminal, .tokenval, .modelrow-name, .manual-command { font-family: 
   border-color: var(--accent-40);
 }
 .wiz-rail .wiz-rail-item:not(:disabled):hover { background: var(--accent-tint); }
+
+@media (max-width: 480px) {
+  .wiz-header { flex-wrap: wrap; height: auto; padding-block: 12px; }
+  .wiz-brand { min-width: 0; flex: 1; }
+  .wiz-header .wiz-sub { font-size: 9px; overflow-wrap: anywhere; }
+  .wiz-theme { flex-basis: 100%; justify-content: center; margin-left: 0; }
+  .wiz-footer { gap: 8px; padding-inline: 12px; }
+  .wiz-step-count { font-size: 9px; }
+}
+
+/* Resource details remain readable inside selected model cards. */
+.modelrow.active .modelrow-note, .modelrow.active .modelrow-ram { color: var(--body); }

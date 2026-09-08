@@ -1,19 +1,16 @@
 'use client'
 
 import { useEffect } from 'react'
-import { applyThemePreference, readThemePreference } from '@/lib/theme'
+import { startThemeSynchronization } from '@/lib/theme'
 
 /**
- * Re-asserts the stored theme after hydration.
+ * Re-asserts the theme after hydration and keeps synchronization alive on every page.
  *
- * The inline boot script stamps <html data-theme> before first paint, but React
- * reconciles attributes on the <html> element it rendered, which drops a stamp it
- * did not produce. This component restores it on mount, so a full page load ends
- * on the user's theme rather than the server default.
+ * The inline script stamps <html data-theme> before page content renders. Restore
+ * that stamp after hydration and retain OS/cross-tab listeners independently of
+ * settings pages and profile dialogs.
  */
 export function ThemeBoot() {
-  useEffect(() => {
-    applyThemePreference(readThemePreference())
-  }, [])
+  useEffect(() => startThemeSynchronization(), [])
   return null
 }

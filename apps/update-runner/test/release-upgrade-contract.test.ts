@@ -20,7 +20,7 @@ describe('release upgrade contract', () => {
       release: rootPackage.version,
       minimumSupportedSource: '1.0.0',
       compatibleMajorLine: 1,
-      directFrom: '>=1.0.0 <1.1.4',
+      directFrom: `>=1.0.0 <${rootPackage.version}`,
       bridges: [],
       requiredStops: [],
       coordinator: { minimumVersion: 1, bootstrap: true },

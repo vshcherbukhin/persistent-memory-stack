@@ -15,7 +15,7 @@ nav_order: 40
 
 # Memories
 
-![Personal memory list with private values blurred](../../assets/spaces/personal/memories-page.png)
+![Personal memory list with demonstration records](../../assets/spaces/personal/memories-page.png)
 
 ## Purpose
 
@@ -31,24 +31,29 @@ The tab is enabled by default, including on a new installation with no memories.
 An operator can explicitly hide it with `PM_MEMORY_GRAPH_UI_ENABLED=false` in
 the dashboard runtime environment. An omitted setting keeps the tab available.
 
+The graph canvas stays dark in both **Obsidian** and **Porcelain**. This is
+intentional: node colours, edges and canvas overlays are designed for a dark
+background. The filter rail, toolbar and details panel follow the dashboard
+theme. Change appearance from [Your profile](profile.md#appearance).
+
 Open **Memory Graph** to see memories on the outer shell of a rotatable sphere and their entity subnodes inside it. The initial camera fits the full loaded bubble. Drag to rotate and scroll or pinch to zoom. Right-drag moves the bubble up, down, left, or right on screen; rotation keeps pivoting around the center of the sphere rather than the point you dragged to. Rotation keeps automatic framing active; when the corpus grows, automatic framing changes only camera distance and preserves the angle you chose. Zooming in changes to **Manual view**, so newly arriving memories cannot take the camera away. Zoom-out stops as soon as the complete visible graph fits. Fully zoom out or choose **Reset view** to restore **Auto overview** without resetting rotation.
 
-![Memory Graph 3D overview with private values blurred](../../assets/spaces/personal/memory-graph-overview.png)
+![Memory Graph 3D overview for Example Project](../../assets/spaces/personal/memory-graph-overview.png)
 
 The fitted overview intentionally hides labels. As you zoom, labels are chosen from the nearest nodes currently visible through the camera instead of from a fixed corpus order. A node stays clickable across its whole visible circle at every zoom level. Projects, Tags, and Badges use recent values plus search. Multiple values inside one section are alternatives, while the three sections combine together. Drag the right edge of the filter rail to resize it; the dashboard remembers that width in this browser.
 
 Selecting a node isolates that node and its directly connected memories or entities and shows that focused connection set as a flat 2D map, which is easier to read than a rotating one. The left rail shows the connected focus as an active filter. **Clear focus** or the **Details** close button returns to the 3D bubble at exactly the rotation, zoom, and position it had before the selection. **Reset view** and the rail's **Clear** instead return to the starting frame: both drop the remembered viewpoint, re-center the projection, and fit the corpus again while keeping your rotation. **Clear** does that because it also restores every filtered-out memory, so the narrowed viewport no longer applies. The right rail remains split evenly: **Live activity** stays visible above **Details**, and the accessible node list scrolls through all nodes available in the current corpus or focused connection set.
 
-![Memory Graph focused connection map with private values blurred](../../assets/spaces/personal/memory-graph-focus.png)
+![Memory Graph focused connection map in Porcelain](../../assets/spaces/personal/memory-graph-focus.png)
 
 While the tab is visible, each completed create, update, or read appears briefly in **Live activity** and then expires; cyan means read, green means created, and amber means updated. For a little over three seconds, the touched memory and entity dots emit target-like waves while their connected lines brighten and carry moving particles. This is coalesced visualization telemetry, not an audit log. Project, tag, and badge searches are independent, and **Fact history** can show all, current, or historical relationships. The graph retains its last snapshot if activity or Graphiti facts are temporarily unavailable, and a partial-state message explains renderer or server bounds. A WebGL loss keeps the flat 2D map for the rest of the session with the same data and filters.
 
-![Memory details modal with private values blurred](../../assets/spaces/personal/memory-details-modal.png)
+![Memory details modal with a demonstration record](../../assets/spaces/personal/memory-details-modal.png)
 
 Open a record to read its full text and metadata, including category, project, confidence, tier, source, shape, embedding state, and entities.
 The focused connection panel shows up to eight of that record's entity links.
 
-![Edit memory modal with private values blurred](../../assets/spaces/personal/memory-edit-modal.png)
+![Edit memory modal with a demonstration record](../../assets/spaces/personal/memory-edit-modal.png)
 
 Editing supports content, project, and category. **Save & re-embed** updates the record and rebuilds its embedding so search reflects the new text. Expected validation or conflict errors appear in a toast while the editor stays open, so the rejected fields can be corrected without losing the draft.
 
