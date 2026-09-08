@@ -9,6 +9,7 @@ COPY tsconfig.base.json ./
 COPY apps/update-runner/tsconfig.json apps/update-runner/tsconfig.build.json ./apps/update-runner/
 COPY apps/update-runner/src ./apps/update-runner/src
 COPY layers/update-ops ./layers/update-ops
+COPY scripts/github-releases.mjs scripts/github-releases.d.mts ./scripts/
 RUN npm run build -w persistent-memory-update-runner
 
 FROM node:22-alpine AS runtime-deps

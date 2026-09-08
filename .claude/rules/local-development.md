@@ -13,15 +13,21 @@
 - To test a feature branch through the updater, run:
   `npm run update-persistent-memory -- --branch <branch>`.
   Branch-targeted updates require a clean checkout before switching branches.
+- With no target option, `npm run update-persistent-memory` selects the latest
+  published stable GitHub Release and validates its exact tagged commit.
 - To test an exact published release without changing the calling checkout, run
-  `npm run update-persistent-memory -- --release <semver> [--branch <branch>]`.
+  `npm run update-persistent-memory -- --release <semver>`.
+  Adding `--branch <branch>` explicitly selects the developer path: resolve that
+  version from the trusted branch history instead of the published Releases feed.
   `--version` is not an updater option.
 - Every first-party Node service must compile TypeScript with `tsc` and execute
   emitted JavaScript. Do not use `node --experimental-strip-types`, `tsx`, or
   `ts-node` in production images, updater paths, or host-only installer paths.
-- Dashboard update cards automatically check the built-in public GitHub source
-  on `master`, without user credentials or notification settings. Explicit
-  terminal `--dev` and `--branch` options remain available for operator testing.
+- Dashboard update cards automatically check published stable GitHub Releases
+  from the built-in public repository, without user credentials or notification
+  settings. Unpublished `master` commits, drafts and prereleases are excluded.
+  The displayed command selects that exact `--release <semver>`. Explicit
+  terminal `--dev`, `--master` and `--branch` options remain developer overrides.
 - Any direct Compose command that builds, recreates, or starts services must include
   `--env-file .env.persistent-memory`.
 - Before running a redeploy helper or Compose start/rebuild, inspect the configured

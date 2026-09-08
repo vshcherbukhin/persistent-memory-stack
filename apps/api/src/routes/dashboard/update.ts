@@ -1,9 +1,9 @@
 /**
- * /dashboard/update — snapshot-safe update control plane.
+ * /dashboard/update — published-release status and terminal update guidance.
  *
  * Status can include host paths, release diffs, and operational logs, so
  * the full surface is superuser-only. The API is only a proxy/RBAC choke-point;
- * the update-runner sidecar owns git/compose work.
+ * the sidecar discovers releases; the host coordinator owns installation.
  */
 import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
@@ -50,6 +50,8 @@ const UpdateStatus = z.object({
   latestVersion: z.string().nullable(),
   updateAvailable: z.boolean(),
   updateBranch: z.string().optional(),
+  releaseTag: z.string().optional(),
+  releaseUrl: z.string().optional(),
   autoUpdateReady: z.boolean().optional(),
   currentCommit: z.string().optional(),
   latestCommit: z.string().optional(),

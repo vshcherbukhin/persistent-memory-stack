@@ -3,8 +3,8 @@ set -Eeuo pipefail
 # ============================================================
 # persistent-memory — update to the latest code (INTERNAL helper).
 #
-# Do NOT call this directly — run `npm run update-persistent-memory`. Pulls the
-# latest code, snapshots local runtime data, ensures any newly introduced local
+# Do NOT call this directly — run `npm run update-persistent-memory`. Resolves a
+# published GitHub release, snapshots local runtime data, ensures new local
 # service secrets exist, reinstalls + regenerates the Prisma client, rebuilds the
 # images, applies any new migrations (idempotent RLS), and restarts the stack.
 # Existing .env.persistent-memory values are preserved.
@@ -15,8 +15,9 @@ set -Eeuo pipefail
 # ── TRUST BOUNDARY (read this) ────────────────────────────────────────────────
 # This command BUILDS and RUNS whatever it pulls: npm install, `docker compose
 # build`, and rls.sql executed as the Postgres SUPERUSER. So running it is
-# equivalent to "execute origin/<branch> on this host as me". `git pull --ff-only`
-# refuses to clobber your local commits, but it does NOT authenticate the author —
+# equivalent to executing the verified published tag (or explicit developer
+# branch) on this host as me. Branch mode uses fast-forward-only merges but does
+# not authenticate the author —
 # only run this against a remote you trust. The incoming commits are printed below
 # before anything is built, so you can see what you're about to execute.
 # ============================================================
@@ -96,6 +97,9 @@ UPDATE_BRANCH_OVERRIDE="${PM_UPDATE_BRANCH:-}"
 UPDATE_RELEASE_OVERRIDE="${PM_UPDATE_RELEASE:-}"
 UPDATE_RELEASE_BRANCH_EXPLICIT=0
 UPDATE_RELEASE_BRANCH_SHORTCUT=0
+UPDATE_SOURCE_MODE="published"
+PUBLISHED_RELEASE_TAG=""
+PUBLISHED_RELEASE_COMMIT=""
 VERSIONED_WORKTREE="${PM_COORDINATOR_VERSIONED_WORKTREE:-0}"
 UPDATE_SHOW_HELP=0
 
@@ -110,23 +114,25 @@ USAGE  (via npm)
   npm run update-persistent-memory -- --release <semver> [--branch <branch>]
 
 BRANCH OPTIONS
-  By default, the updater fetches and fast-forwards the current checkout branch.
+  By default, deploy the latest stable published GitHub release at its tagged commit.
+  The calling checkout is unchanged; an exact detached release worktree is used.
   --dev             update from origin/dev, switching this checkout to dev first
   --branch <name>   update from origin/<name>, switching this checkout first
+  --master          developer mode: update from origin/master, including unpublished code
   PM_UPDATE_BRANCH=<name> npm run update-persistent-memory
                     env form of --branch for non-interactive use
 
 EXACT RELEASE
-  --release <semver>  deploy that exact release from origin/master by default.
+  --release <semver>  deploy that exact published GitHub release and tagged commit.
                      The updater creates or reuses
                      .local/release-worktrees/persistent-memory-<semver>-<commit>, leaving
                      the calling checkout and branch unchanged. Use --branch only
-                     when the requested version belongs to another trusted branch.
+                     for developer history lookup on a trusted branch (not a published release).
 
 WHAT IT DOES
   1. snapshot .env, Postgres, volumes, Compose state, MCP report
   2. backfill missing env defaults + generate missing service tokens
-  3. git fetch + git merge --ff-only   (current or selected trusted branch)
+  3. verify the published tag commit, or fetch/fast-forward an explicit developer branch
   4. npm run setup                    (npm install + prisma generate; reports live activity)
   5. build then refresh dashboard-gateway only
   6. build non-gateway images, then recreate them with --no-build
@@ -224,8 +230,8 @@ parse_update_args() {
         fail "--release can only be combined with one explicit --branch."
         exit 1
     fi
-    if [ -n "$UPDATE_RELEASE_OVERRIDE" ] && [ "$UPDATE_RELEASE_BRANCH_EXPLICIT" -eq 0 ]; then
-        UPDATE_BRANCH_OVERRIDE="master"
+    if [ -n "$UPDATE_BRANCH_OVERRIDE" ]; then
+        UPDATE_SOURCE_MODE="branch"
     fi
 }
 
@@ -626,17 +632,42 @@ resolve_release_commit() {
 }
 
 resolve_release_worktree() {
-    local branch commit worktree_root worktree existing_commit actual_version
-    [ -n "$UPDATE_RELEASE_OVERRIDE" ] || return 0
-
-    branch="$UPDATE_BRANCH_OVERRIDE"
-    if ! git_fetch_origin_branch "$branch"; then
-        fail "git fetch origin $branch failed while resolving release $UPDATE_RELEASE_OVERRIDE."
-        exit 1
+    local branch commit worktree_root worktree existing_commit actual_version selection fields
+    if [ "$UPDATE_SOURCE_MODE" = "published" ]; then
+        if ! selection="$(pm_resolve_published_release "$SCRIPT_REPO_ROOT" "$UPDATE_RELEASE_OVERRIDE")"; then
+            fail "Cannot resolve the published GitHub release. No cached branch will be used. Check connectivity and retry."
+            exit 1
+        fi
+        if ! fields="$(printf '%s' "$selection" | node -e '
+let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => {
+  const r=JSON.parse(raw);
+  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(r.version)
+      || r.tag !== `v${r.version}` || !/^[0-9a-f]{40}$/.test(r.commit)) throw new Error("Invalid release pin");
+  console.log(`${r.version} ${r.tag} ${r.commit}`);
+});')"; then
+            fail "Published release metadata is invalid."
+            exit 1
+        fi
+        read -r UPDATE_RELEASE_OVERRIDE PUBLISHED_RELEASE_TAG PUBLISHED_RELEASE_COMMIT <<< "$fields"
+        if ! commit="$(pm_git_fetch_published_tag "$SOURCE_REPO_ROOT" "$PUBLISHED_RELEASE_TAG" "$PUBLISHED_RELEASE_COMMIT")"; then
+            fail "Cannot fetch and verify published tag $PUBLISHED_RELEASE_TAG. No cached branch will be used."
+            exit 1
+        fi
+    else
+        [ -n "$UPDATE_RELEASE_OVERRIDE" ] || return 0
+        branch="$UPDATE_BRANCH_OVERRIDE"
+        if ! git_fetch_origin_branch "$branch"; then
+            fail "git fetch origin $branch failed while resolving release $UPDATE_RELEASE_OVERRIDE."
+            exit 1
+        fi
+        if ! commit="$(resolve_release_commit "$branch" "$UPDATE_RELEASE_OVERRIDE")"; then
+            fail "Version $UPDATE_RELEASE_OVERRIDE was not found in developer origin/$branch history."
+            exit 1
+        fi
     fi
-    if ! commit="$(resolve_release_commit "$branch" "$UPDATE_RELEASE_OVERRIDE")"; then
-        fail "Release $UPDATE_RELEASE_OVERRIDE was not found in origin/$branch."
-        echo "        Choose a released version from that branch, or pass --branch <trusted-branch>."
+    HANDOFF_TARGET_VERSION_OVERRIDE="$UPDATE_RELEASE_OVERRIDE"
+    if [ "$(release_at_commit "$commit")" != "$UPDATE_RELEASE_OVERRIDE" ]; then
+        fail "Selected commit does not match the requested version and public release line."
         exit 1
     fi
 
@@ -651,6 +682,10 @@ resolve_release_worktree() {
         if [ "$existing_commit" != "$commit" ]; then
             fail "Release worktree $worktree points to a different commit. Refusing to replace it automatically."
             echo "        Inspect it, then remove it with 'git worktree remove $worktree' only if you intend to recreate it."
+            exit 1
+        fi
+        if [ -n "$(git -C "$worktree" status --porcelain --untracked-files=no)" ]; then
+            fail "Release worktree has tracked changes. Refusing to execute modified release code: $worktree"
             exit 1
         fi
         ok "Reusing release worktree: $worktree"
@@ -674,7 +709,7 @@ resolve_release_worktree() {
         exit 1
     fi
     VERSIONED_WORKTREE=1
-    echo "  Using exact release ${UPDATE_RELEASE_OVERRIDE} from origin/${UPDATE_BRANCH_OVERRIDE}."
+    echo "  Using $UPDATE_SOURCE_MODE release $UPDATE_RELEASE_OVERRIDE at $commit."
 }
 
 compose_update_services_excluding_gateway() {
@@ -957,6 +992,14 @@ if [ "${PM_COORDINATOR_ACTIVE:-}" = "1" ] && [ "${PM_COORDINATOR_TARGET_RESOLVED
     exit 1
 fi
 
+if [ "${PM_COORDINATOR_ACTIVE:-}" = "1" ] && [ "${PM_COORDINATOR_SOURCE_MODE:-}" = "published" ]; then
+    if [ -z "${PM_COORDINATOR_HOP_COMMIT:-}" ] || [ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$PM_COORDINATOR_HOP_COMMIT" ] \
+       || [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" ]; then
+        fail "Coordinator release worktree no longer matches the verified published commit."
+        exit 1
+    fi
+fi
+
 if [ "${PM_COORDINATOR_ACTIVE:-}" != "1" ]; then
 reserve_coordinator_before_source_resolution
 PM_COORDINATOR_STATE_DIR="$COORDINATOR_INSTALLATION_HOME/state"
@@ -971,7 +1014,7 @@ resolve_release_worktree
 
 if [ "$VERSIONED_WORKTREE" = "1" ]; then
     branch="$UPDATE_BRANCH_OVERRIDE"
-    ok "Using exact release $UPDATE_RELEASE_OVERRIDE from origin/$branch."
+    ok "Using $UPDATE_SOURCE_MODE release $UPDATE_RELEASE_OVERRIDE."
 elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     current_branch=$(git rev-parse --abbrev-ref HEAD)
     if [ "$current_branch" = "HEAD" ]; then
@@ -1027,9 +1070,14 @@ PM_COORDINATOR_TARGET_RESOLVED=1
 PM_COORDINATOR_RESOLVED_ROOT="$REPO_ROOT"
 PM_COORDINATOR_SOURCE_ROOT="$SOURCE_REPO_ROOT"
 PM_COORDINATOR_VERSIONED_WORKTREE="$VERSIONED_WORKTREE"
+PM_COORDINATOR_SOURCE_MODE="$UPDATE_SOURCE_MODE"
+PM_COORDINATOR_RELEASE_TAG="$PUBLISHED_RELEASE_TAG"
+PM_COORDINATOR_RELEASE_VERSION="$UPDATE_RELEASE_OVERRIDE"
+PM_COORDINATOR_RELEASE_COMMIT="$PUBLISHED_RELEASE_COMMIT"
 PM_COORDINATOR_BRANCH="${UPDATE_BRANCH_OVERRIDE:-${branch:-$(git -C "$SOURCE_REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)}}"
 PM_HANDOFF_ID="$HANDOFF_RUN_ID"
 export PM_COORDINATOR_STATE_DIR PM_COORDINATOR_TARGET_RESOLVED PM_COORDINATOR_RESOLVED_ROOT PM_COORDINATOR_SOURCE_ROOT PM_COORDINATOR_VERSIONED_WORKTREE PM_COORDINATOR_BRANCH PM_COORDINATOR_LOCK_HELD PM_HANDOFF_ID
+export PM_COORDINATOR_SOURCE_MODE PM_COORDINATOR_RELEASE_TAG PM_COORDINATOR_RELEASE_VERSION PM_COORDINATOR_RELEASE_COMMIT
 exec node "$COORDINATOR_HOME/coordinator.mjs" \
     --repo-root "$REPO_ROOT" \
     --legacy-script "$SCRIPT_REPO_ROOT/deploy/scripts/update.sh" \

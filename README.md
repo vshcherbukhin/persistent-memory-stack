@@ -124,15 +124,17 @@ Run these from your checkout. In Windows PowerShell, use `npm.cmd` in place of
 npm run start-persistent-memory
 npm run stop-persistent-memory
 
-# Install the latest public release through the snapshot-protected updater
-npm run update-persistent-memory -- --branch master
+# Install the latest published stable release through the snapshot-protected updater
+npm run update-persistent-memory
 
 # Open the product and operator documentation
 npm run docs:serve
 ```
 
-Public release checks run automatically without GitHub credentials or source
-settings. Installing an update is an explicit action. Existing memories,
+Published stable GitHub Releases are checked automatically without GitHub
+credentials or source settings. A commit on `master` alone is not an update.
+Installing an update is an explicit action; the updater validates the release's
+exact tagged commit before building it. Existing memories,
 credentials, and Docker volumes are user data; follow the
 [operations guide](documentation/stack-architecture/operations.md) for maintenance
 and recovery.

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "release": "1.1.0",
+  "release": "1.1.1",
   "minimumSupportedSource": "1.0.0",
   "compatibleMajorLine": 1,
-  "directFrom": "=1.0.0",
+  "directFrom": ">=1.0.0 <1.1.1",
   "bridges": [],
   "requiredStops": [],
   "coordinator": {

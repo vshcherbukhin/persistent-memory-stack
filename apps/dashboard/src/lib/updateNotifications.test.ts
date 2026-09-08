@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { updateCommandForBranch, updateStatusPollMs } from './clientUpdate'
+import { updateCommandForRelease, updateStatusPollMs } from './clientUpdate'
 
 const mocks = vi.hoisted(() => ({ requireControlPlane: vi.fn(), getNotifySettings: vi.fn() }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
@@ -55,13 +55,15 @@ describe('automatic public release checks', () => {
     expect(updateStatusPollMs(null)).toBe(10_000)
     expect(updateStatusPollMs({ updateAvailable: false, running: false })).toBe(10_000)
     expect(updateStatusPollMs({ updateAvailable: true, running: false })).toBe(2_000)
-    expect(updateCommandForBranch('master')).toBe('npm run update-persistent-memory -- --branch master')
+    expect(updateCommandForRelease('1.1.0')).toBe('npm run update-persistent-memory -- --release 1.1.0')
     const header = src('../components/AppHeader.tsx')
     expect(header).toContain('const updatesEnabled = localMode && canStartUpdate')
     expect(header).toContain('void refreshUpdateStatus()')
     expect(header).toContain("fetch('/api/update/status', { cache: 'no-store' })")
     expect(header).toContain('window.setInterval(() => void refreshUpdateStatus(), updatePollMs)')
     expect(header).toContain('Run the terminal updater from this repository.')
+    expect(header).toContain('updateCommandForRelease(updateStatus?.latestVersion)')
+    expect(header).not.toContain('updateCommandForBranch')
     expect(header).not.toContain("fetch('/api/update/start'")
     expect(header).toContain("data: { url: '/overview' }")
   })

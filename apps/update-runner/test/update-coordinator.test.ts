@@ -3,18 +3,22 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   acquireCoordinatorLock,
   clearHandoffForNoopRun,
   coordinatorReleaseLineFor,
   coordinatorReleaseWorktree,
+  coordinatorPublishedReleaseWorktree,
+  fetchPublishedReleaseCommit,
+  publishedTargetForCoordinator,
   deployedStatePathFor,
   executeCoordinatorPlan,
   handoffStateDirFor,
   installCoordinator,
   loadTrustedUpgradeContracts,
+  loadPublishedUpgradeContracts,
   planLegacyBridge,
   planCoordinatorBootstrap,
   publishCoordinatorFailureForRun,
@@ -60,6 +64,8 @@ async function installFixture(): Promise<{ root: string; installation: Coordinat
   await mkdir(join(artifactDir, 'lib'), { recursive: true })
   await writeFile(join(artifactDir, 'coordinator.mjs'), 'export {}\n')
   await writeFile(join(artifactDir, 'lib', 'upgrade-contract.mjs'), 'export {}\n')
+  await writeFile(join(artifactDir, 'lib', 'github-releases.mjs'), 'export {}\n')
+  await writeFile(join(artifactDir, 'lib', 'public-source.json'), JSON.stringify({ releaseLine }))
 
   const installation = await installCoordinator({
     repoRoot,
@@ -67,6 +73,36 @@ async function installFixture(): Promise<{ root: string; installation: Coordinat
     coordinatorBaseDir: join(root, 'coordinator-home'),
   })
   return { root, installation }
+}
+
+async function publishedFixture() {
+  const root = await tempRoot()
+  const git = (...args: string[]) => execFileSync('git', ['-c', `safe.directory=${root.replace(/\\/gu, '/')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
+  git('init', '--quiet')
+  git('remote', 'add', 'origin', root)
+  await mkdir(join(root, 'release'))
+  const pins = new Map<string, { version: string; tag: string; commit: string }>()
+  for (const version of ['1.0.0', '1.1.0', '1.2.0']) {
+    await writeFile(join(root, 'package.json'), JSON.stringify({ version, persistentMemoryReleaseLine: releaseLine }))
+    await writeFile(join(root, 'release', 'upgrade.json'), JSON.stringify({
+      ...initialPublicContract, release: version,
+      directFrom: version === '1.2.0' ? '=1.1.0' : '=1.0.0',
+      requiredStops: version === '1.2.0' ? [{ when: '=1.0.0', release: '1.1.0', reason: 'Fixture intermediate migration' }] : [],
+    }))
+    git('add', '.')
+    git('commit', '--quiet', '-m', `Published fixture ${version}`)
+    const commit = git('rev-parse', 'HEAD')
+    git('tag', `v${version}`)
+    pins.set(version, { version, tag: `v${version}`, commit })
+  }
+  // A later untagged commit reuses both a published version and invalid metadata.
+  // Developer history lookup can see it; published resolution must not use it.
+  await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.1.0', persistentMemoryReleaseLine: releaseLine }))
+  await writeFile(join(root, 'release', 'upgrade.json'), '{"unpublished":true}')
+  git('add', '.')
+  git('commit', '--quiet', '-m', 'Unpublished branch work with reused version')
+  git('update-ref', 'refs/remotes/origin/master', 'HEAD')
+  return { root, git, pins }
 }
 
 describe('update coordinator bootstrap', () => {
@@ -392,6 +428,11 @@ describe('update coordinator bootstrap', () => {
     expect(existsSync(contractLibrary)).toBe(true)
     await expect(readFile(artifact, 'utf8')).resolves.toBe(await readFile(builtCoordinator, 'utf8'))
     await expect(readFile(contractLibrary, 'utf8')).resolves.toBe(await readFile(builtContract, 'utf8'))
+    const releaseLibrary = new URL('../../../deploy/update-coordinator/lib/github-releases.mjs', import.meta.url)
+    expect(existsSync(releaseLibrary)).toBe(true)
+    const imported = await import(releaseLibrary.href) as { fetchPublishedRelease: unknown }
+    expect(typeof imported.fetchPublishedRelease).toBe('function')
+    expect(JSON.parse(await readFile(new URL('../../../deploy/update-coordinator/lib/public-source.json', import.meta.url), 'utf8'))).toMatchObject({ releaseLine })
   }, 20_000)
 
   it('installs the emitted artifact for the initiating checkout without using a worktree path', async () => {
@@ -455,6 +496,8 @@ describe('update coordinator bootstrap', () => {
     await mkdir(join(artifactDir, 'lib'), { recursive: true })
     await writeFile(join(artifactDir, 'coordinator.mjs'), 'export {}\n')
     await writeFile(join(artifactDir, 'lib', 'upgrade-contract.mjs'), 'export {}\n')
+    await writeFile(join(artifactDir, 'lib', 'github-releases.mjs'), 'export {}\n')
+    await writeFile(join(artifactDir, 'lib', 'public-source.json'), JSON.stringify({ releaseLine }))
 
     const installation = await installCoordinator({
       repoRoot: worktree,
@@ -625,6 +668,161 @@ describe('update coordinator bootstrap', () => {
     const worktree = await coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '1.0.0', releaseLine)
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8', windowsHide: true }).trim()).toBe(publicCommit)
     expect(JSON.parse(await readFile(join(worktree, 'package.json'), 'utf8'))).toMatchObject({ persistentMemoryReleaseLine: releaseLine })
+  })
+
+  it('changes the immutable bundle when only its published release resolver changes', async () => {
+    const { root, installation: first } = await installFixture()
+    await writeFile(join(root, 'artifact/lib/github-releases.mjs'), 'export const revision = 2\n')
+    const next = await installCoordinator({ repoRoot: join(root, 'checkout'), artifactDir: join(root, 'artifact'), coordinatorBaseDir: join(root, 'coordinator-home') })
+    expect(next.home).not.toBe(first.home)
+    expect(await readFile(join(first.home, 'lib/github-releases.mjs'), 'utf8')).toBe('export {}\n')
+    expect(await readFile(join(next.home, 'lib/github-releases.mjs'), 'utf8')).toContain('revision = 2')
+  })
+
+  it('plans published hops from tagged contracts and never substitutes later same-version branch commits', async () => {
+    const { root, git, pins } = await publishedFixture()
+    const target = pins.get('1.2.0')!
+    const resolveRelease = vi.fn(async ({ version }: { version: string }) => {
+      const pin = pins.get(version)
+      if (!pin) throw new Error('No published release')
+      return pin
+    })
+    const catalog = await loadPublishedUpgradeContracts(root, releaseLine, target, { moduleUrl: contractModuleUrl, resolveRelease })
+    expect(resolveRelease.mock.calls.map(([request]) => request.version)).toEqual(['1.1.0'])
+    expect([...catalog.contracts.keys()]).toEqual(['1.2.0', '1.1.0'])
+    const { planUpgradePath } = await import('../../../layers/update-ops/release-versioning/upgrade-contract.ts')
+    expect(planUpgradePath('1.0.0', catalog.contracts.get('1.2.0')!, catalog.contracts)).toEqual(['1.1.0', '1.2.0'])
+    const hop = catalog.releases.get('1.1.0')!
+    const worktree = await coordinatorPublishedReleaseWorktree(root, join(root, 'coordinator'), hop)
+    expect(git('-C', worktree, 'rev-parse', 'HEAD')).toBe(pins.get('1.1.0')!.commit)
+    expect(git('rev-parse', 'HEAD')).not.toBe(hop.commit)
+    await expect(coordinatorPublishedReleaseWorktree(root, join(root, 'coordinator'), hop)).resolves.toBe(worktree)
+    await writeFile(join(worktree, 'package.json'), '{}')
+    await expect(coordinatorPublishedReleaseWorktree(root, join(root, 'coordinator'), hop)).rejects.toThrow('tracked changes')
+  })
+
+  it('fails closed when a required hop is unpublished or its lookup fails even with cached branch history', async () => {
+    const { root, pins } = await publishedFixture()
+    const resolveRelease = vi.fn(async () => { throw new Error('GitHub published release unavailable') })
+    await expect(loadPublishedUpgradeContracts(root, releaseLine, pins.get('1.2.0')!, { moduleUrl: contractModuleUrl, resolveRelease })).rejects.toThrow('GitHub published release unavailable')
+    expect(resolveRelease).toHaveBeenCalledOnce()
+    expect(existsSync(join(root, 'coordinator'))).toBe(false)
+  })
+
+  it('rejects moved or missing tags instead of using a cached commit or master', async () => {
+    const { root, git, pins } = await publishedFixture()
+    const release = pins.get('1.1.0')!
+    await expect(fetchPublishedReleaseCommit(root, release, releaseLine)).resolves.toBe(release.commit)
+    git('tag', '-f', release.tag, 'HEAD')
+    await expect(fetchPublishedReleaseCommit(root, release, releaseLine)).rejects.toThrow('changed while fetching')
+    git('tag', '-d', release.tag)
+    await expect(fetchPublishedReleaseCommit(root, release, releaseLine)).rejects.toThrow('failed')
+  })
+
+  it('resolves only an unpinned legacy handoff through published release metadata', async () => {
+    const { root, pins } = await publishedFixture()
+    const pin = pins.get('1.1.0')!
+    const resolveRelease = vi.fn(async () => pin)
+    const legacyEnv = { PM_COORDINATOR_TARGET_RESOLVED: '1', PM_COORDINATOR_BRANCH: 'master' }
+    await expect(publishedTargetForCoordinator(root, releaseLine, legacyEnv, resolveRelease)).resolves.toEqual(pin)
+    expect(resolveRelease).toHaveBeenCalledWith({ version: '1.1.0' })
+    resolveRelease.mockClear()
+    await expect(publishedTargetForCoordinator(root, releaseLine, { ...legacyEnv, PM_COORDINATOR_SOURCE_MODE: 'published' }, resolveRelease)).rejects.toThrow('Invalid published release')
+    await expect(publishedTargetForCoordinator(root, releaseLine, { ...legacyEnv, PM_COORDINATOR_RELEASE_COMMIT: pin.commit }, resolveRelease)).rejects.toThrow('Invalid published release')
+    await expect(publishedTargetForCoordinator(root, releaseLine, {}, resolveRelease)).rejects.toThrow('no resolved update target')
+    expect(resolveRelease).not.toHaveBeenCalled()
+  })
+
+  it.each(['published', 'unpublished', 'unavailable'] as const)('handles the actual v1.1.0 launcher environment with a %s target', async (kind) => {
+    const { root, git, pins } = await publishedFixture()
+    const pin = pins.get('1.1.0')!
+    if (kind !== 'unpublished') git('checkout', '--quiet', '--detach', pin.commit)
+    const local = join(root, '.local')
+    await mkdir(local, { recursive: true })
+    await mkdir(join(root, 'layers/update-ops/update-flow'), { recursive: true })
+    await writeFile(join(root, 'layers/update-ops/update-flow/public-source.json'), JSON.stringify({ releaseLine }))
+    await mkdir(join(root, 'scripts'), { recursive: true })
+    await writeFile(join(root, 'scripts/pre-update-snapshot.mjs'), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(join(local, 'snapshot-ran'))}, 'yes')`)
+    await writeFile(join(local, 'capture-hop.mjs'), `import { writeFileSync } from 'node:fs'; const fields = ['PM_COORDINATOR_SOURCE_MODE', 'PM_COORDINATOR_RELEASE_TAG', 'PM_COORDINATOR_RELEASE_VERSION', 'PM_COORDINATOR_RELEASE_COMMIT', 'PM_COORDINATOR_HOP_COMMIT']; writeFileSync(${JSON.stringify(join(local, 'hop.json'))}, JSON.stringify(Object.fromEntries(fields.map(key => [key, process.env[key]]))))`)
+    const legacyScript = join(local, 'legacy-update.sh')
+    await writeFile(legacyScript, '#!/bin/sh\nnode "$PM_COORDINATOR_SOURCE_ROOT/.local/capture-hop.mjs"\n')
+    const stateDir = join(local, 'update-state')
+    await mkdir(stateDir)
+    await writeFile(join(stateDir, 'last-successful-update.json'), JSON.stringify({ version: '1.0.0', releaseLine }))
+    const installation = await installCoordinator({
+      repoRoot: root,
+      artifactDir: fileURLToPath(new URL('../../../deploy/update-coordinator', import.meta.url)),
+      coordinatorBaseDir: join(local, 'coordinator'),
+    })
+    const preload = join(local, 'published-api-fixture.mjs')
+    const apiBase = '/repos/vshcherbukhin/persistent-memory-stack/'
+    const responses = {
+      [`${apiBase}releases/tags/${pin.tag}`]: { tag_name: pin.tag, draft: false, prerelease: false, published_at: '2026-09-07T00:00:00Z', html_url: `https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/${pin.tag}` },
+      [`${apiBase}git/ref/tags/${pin.tag}`]: { ref: `refs/tags/${pin.tag}`, object: { type: 'commit', sha: pin.commit } },
+      [`${apiBase}contents/package.json?ref=${pin.commit}`]: JSON.stringify({ version: pin.version, persistentMemoryReleaseLine: releaseLine }),
+      [`${apiBase}contents/release-history.md?ref=${pin.commit}`]: `<!-- persistent-memory-release-line: ${releaseLine} -->\n## ${pin.version} - 2026-09-07\n`,
+    }
+    await writeFile(preload, `const fixtures = ${JSON.stringify(responses)}; globalThis.fetch = async url => { if (${JSON.stringify(kind)} === 'unavailable') throw new Error('Fixture offline'); const parsed = new URL(url); const value = fixtures[parsed.pathname + parsed.search]; if (value === undefined) throw new Error('Unexpected fixture request'); return new Response(typeof value === 'string' ? value : JSON.stringify(value)); };`)
+    const { hostCommand } = await import('../../onboard/server/host.ts')
+    const env = { ...process.env }
+    for (const key of Object.keys(env)) if (key.startsWith('PM_COORDINATOR_') || key.startsWith('PM_HANDOFF_')) delete env[key]
+    // These are the fields actually exported by v1.1.0 after it resolves its
+    // checkout and installs the incoming coordinator. No new source mode/pins.
+    Object.assign(env, {
+      PM_COORDINATOR_TARGET_RESOLVED: '1', PM_COORDINATOR_RESOLVED_ROOT: root,
+      PM_COORDINATOR_SOURCE_ROOT: root, PM_COORDINATOR_VERSIONED_WORKTREE: '0',
+      PM_COORDINATOR_BRANCH: 'master', PM_GIT_BASH: hostCommand('bash', []).command,
+    })
+    const run = () => execFileSync(process.execPath, ['--import', pathToFileURL(preload).href,
+      join(installation.home, 'coordinator.mjs'), '--repo-root', root, '--legacy-script', legacyScript, '--'],
+    { cwd: root, env, encoding: 'utf8', windowsHide: true, timeout: 20_000, stdio: 'pipe' })
+    if (kind !== 'published') {
+      expect(run).toThrow(kind === 'unpublished' ? 'different commit' : 'temporarily unavailable')
+      expect(existsSync(join(local, 'snapshot-ran'))).toBe(false)
+      expect(existsSync(join(local, 'hop.json'))).toBe(false)
+    } else {
+      expect(run).not.toThrow()
+      expect(await readFile(join(local, 'snapshot-ran'), 'utf8')).toBe('yes')
+      expect(JSON.parse(await readFile(join(local, 'hop.json'), 'utf8'))).toEqual({
+        PM_COORDINATOR_SOURCE_MODE: 'published', PM_COORDINATOR_RELEASE_TAG: pin.tag,
+        PM_COORDINATOR_RELEASE_VERSION: pin.version, PM_COORDINATOR_RELEASE_COMMIT: pin.commit,
+        PM_COORDINATOR_HOP_COMMIT: pin.commit,
+      })
+      expect(JSON.parse(await readFile(join(installation.installationHome, 'state/hop-progress.json'), 'utf8'))).toMatchObject({ status: 'complete', releaseCommits: { [pin.version]: pin.commit } })
+    }
+  }, 30_000)
+
+  it('does not expose Git helper output when a published release fetch fails', async () => {
+    const { root, git, pins } = await publishedFixture()
+    const sentinel = 'FIXTURE_ONLY_GIT_HELPER_SECRET'
+    await writeFile(join(root, 'fake-ssh.sh'), `#!/bin/sh\necho invoked > "${root.replaceAll('\\', '/')}/ssh-invoked"\necho ${sentinel}\necho ${sentinel} >&2\nexit 1\n`)
+    git('config', 'core.sshCommand', `sh "${root.replaceAll('\\', '/')}/fake-ssh.sh"`)
+    git('remote', 'set-url', 'origin', 'ssh://fixture.invalid/repository')
+    const failure = await fetchPublishedReleaseCommit(root, pins.get('1.1.0')!, releaseLine).catch(error => error as Error)
+    expect(failure).toBeInstanceOf(Error)
+    expect((await readFile(join(root, 'ssh-invoked'), 'utf8')).trim()).toBe('invoked')
+    expect((failure as Error).message).toBe('Published release Git fetch failed. Check repository access and connectivity, then retry.')
+    expect(String(failure)).not.toContain(sentinel)
+  })
+
+  it('rejects tag/package mismatches and invalid pin syntax before creating a worktree', async () => {
+    const { root, git, pins } = await publishedFixture()
+    git('tag', 'v1.3.0', pins.get('1.1.0')!.commit)
+    await expect(fetchPublishedReleaseCommit(root, { ...pins.get('1.1.0')!, version: '1.3.0', tag: 'v1.3.0' }, releaseLine)).rejects.toThrow('package version and public release line')
+    await expect(fetchPublishedReleaseCommit(root, { ...pins.get('1.1.0')!, tag: '--upload-pack=bad' }, releaseLine)).rejects.toThrow('Invalid published release')
+  })
+
+  it.each(['complete', 'failed'] as const)('refuses changed published commits after a %s plan without snapshot or deployment', async (status) => {
+    const { installation } = await installFixture()
+    const plan = { protocolVersion: 1 as const, releaseLine, sourceVersion: '1.0.0', targetVersion: '1.1.0', path: ['1.1.0'], targetRevision: 'a'.repeat(40), releaseCommits: { '1.1.0': 'a'.repeat(40) }, plannedAt: '2026-09-07T00:00:00.000Z' }
+    const execution = executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan, snapshot: async () => {}, runHop: async () => { if (status === 'failed') throw new Error('fixture interruption') } })
+    if (status === 'failed') await expect(execution).rejects.toThrow('fixture interruption')
+    else await execution
+    const original = await readFile(join(installation.installationHome, 'state', 'hop-progress.json'), 'utf8')
+    const work = vi.fn(async () => {})
+    await expect(executeCoordinatorPlan({ coordinatorHome: installation.installationHome, plan: { ...plan, targetRevision: 'b'.repeat(40), releaseCommits: { '1.1.0': 'b'.repeat(40) } }, snapshot: work, runHop: work })).rejects.toThrow('changed since the saved update plan')
+    expect(work).not.toHaveBeenCalled()
+    expect(await readFile(join(installation.installationHome, 'state', 'hop-progress.json'), 'utf8')).toBe(original)
   })
 
   it('does not reuse a completed plan from an old release line with the same version numbers', async () => {

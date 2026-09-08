@@ -516,7 +516,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # persistent-memory-update-runner — restricted updater sidecar.
-  # Owns local update status metadata and the internal snapshot-safe update flow.
+  # Discovers published GitHub Releases. Installation uses the host coordinator.
   # Dashboard UI only exposes release notes + the terminal update command.
   # It is separate from docker-control so docker-control can keep its tiny
   # bounded service-control surface.
@@ -531,7 +531,6 @@ services:
       UPDATE_RUNNER_TOKEN: ${UPDATE_RUNNER_TOKEN:-}
       UPDATE_REPO_DIR: /workspace
       UPDATE_BACKUP_ROOT: /workspace/.local/update-backups
-      UPDATE_BRANCH: ${UPDATE_BRANCH:-master}
       COMPOSE_PARALLEL_LIMIT: ${COMPOSE_PARALLEL_LIMIT:-1}
     volumes:
       - "../..:/workspace"
@@ -728,7 +727,7 @@ services:
       PORT: "8000"
       HOSTNAME: "0.0.0.0"
       DOCUMENTATION_SITE_DIR: /site
-      DOCUMENTATION_VERSION: "1.1.0"
+      DOCUMENTATION_VERSION: "1.1.1"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

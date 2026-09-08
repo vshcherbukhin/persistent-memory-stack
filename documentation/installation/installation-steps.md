@@ -9,8 +9,9 @@ nav_order: 10
 
 The installer creates a local Personal Memories stack first: local storage,
 the local dashboard, and stream MCP. Shared Memories is optional and can be
-connected later from the dashboard. Public release checks are automatic after
-installation; no update-source account, token, or setup step is required.
+connected later from the dashboard. Published stable GitHub Releases are checked
+automatically after installation; no update-source account, token, or setup step
+is required. Installing an update remains an explicit action.
 
 For Windows, complete [Windows preparation](windows-installation.md) first and
 launch with `npm.cmd run install-persistent-memory` from PowerShell. On macOS,

@@ -129,8 +129,9 @@ finishes. A visible wizard tab also keeps the server active while you fill in th
 form, without changing your entries. Keep the launch terminal open. In shorter
 windows, scroll the sidebar to see the remaining steps.
 
-Follow the 12 [Installation steps](installation-steps.md). Public release checks
-work automatically after installation, with no update token or setup step. Install Personal Memories
+Follow the 12 [Installation steps](installation-steps.md). Published stable GitHub
+Releases are checked automatically after installation, with no update token or
+setup step. Installing an update remains an explicit action. Install Personal Memories
 first, select an embedding model that fits the machine, and test the extraction
 provider with your own credentials. Review the selected Windows Claude/Codex
 tools and registration level before choosing **Generate & Install**. Shared
