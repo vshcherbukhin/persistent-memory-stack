@@ -5,13 +5,13 @@
 import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
-import { MODEL_REGISTRY } from '@pm/shared'
 import { ownerPrisma, runInTenant, type Tx } from '@pm/db'
 import { DockerUnavailableError, listServices, ollamaInfo } from '../../services/docker.ts'
 import { isServiceFailed, isServiceUp, summarizeServiceRows } from '../../services/overview.ts'
 import { listScheduledJobs } from '../../services/scheduled.ts'
 import { aggregateUsage } from '../../services/usage.ts'
 import { getEffectiveSettings } from '../../services/settings.ts'
+import { dashboardOllamaTarget, type DashboardEmbeddingSettings } from '../../services/dashboard-ollama.ts'
 import { listMcpClients, pruneIdleMcpClients } from '../../services/mcp-sessions.ts'
 import { getDashboardCapabilityHealth } from '../../services/dashboard-capability-health.ts'
 import { DashboardCapabilityHealthSchema } from './capability-health.ts'
@@ -71,17 +71,18 @@ function mcpServiceStatus(rows: Awaited<ReturnType<typeof listServices>>): z.inf
   return 'stopped'
 }
 
-export async function serviceOverview(ollamaTarget: Parameters<typeof ollamaInfo>[0]): Promise<{
+export async function serviceOverview(settings: DashboardEmbeddingSettings): Promise<{
   services: z.infer<typeof ServiceSummary>
   mcpStatus: z.infer<typeof McpSessionSummary>['serviceStatus']
 }> {
   try {
+    const ollamaTarget = dashboardOllamaTarget(settings)
     const [containers, ollama] = await Promise.all([
       listServices({ includeCredentials: false }),
-      ollamaInfo(ollamaTarget),
+      ollamaTarget ? ollamaInfo(ollamaTarget) : null,
     ])
     return {
-      services: summarizeServiceRows([...containers, ollama]),
+      services: summarizeServiceRows([...containers, ...(ollama ? [ollama] : [])]),
       mcpStatus: mcpServiceStatus(containers),
     }
   } catch (err) {
@@ -120,10 +121,7 @@ export async function dashboardOverviewRoutes(app: FastifyInstance): Promise<voi
       const now = new Date()
       const settingsPromise = getEffectiveSettings()
       const serviceSummaryPromise = settingsPromise.then((settings) =>
-        serviceOverview({
-          model: settings.activeEmbedModel,
-          provider: MODEL_REGISTRY[settings.activeEmbedModel]?.provider,
-        }),
+        serviceOverview(settings),
       )
       const capabilityHealthPromise = settingsPromise.then((settings) =>
         getDashboardCapabilityHealth(settings, identity.userId),

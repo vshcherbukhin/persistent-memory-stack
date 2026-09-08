@@ -167,9 +167,11 @@ controls; mutations live in colocated `actions.ts` Server Actions, interactive b
   Graphiti link is API docs, not a graph visualization UI; graph records are stored
   in FalkorDB/Neo4j. Fact extraction and Embeddings appear alongside containers as
   logical read-only capability rows; they are intentionally non-loggable and have
-  no start/stop controls. Host Ollama is also a read-only non-container row: it
-  reports `/api/tags` reachability and, when Ollama is the active embedding
-  provider, the configured model's presence; it has no Docker logs.
+  no start/stop controls. Their selected model names come from current settings,
+  including before any health observation. Host Ollama appears as a read-only
+  non-container row only for server-managed Ollama embeddings: it reports
+  `/api/tags` reachability and the configured model's presence; it has no Docker
+  logs. API-only installs omit this optional host from service counts and alerts.
 - `/workers` — managed scheduled-job monitor with row-level schedule, status, and
   live log tails (view any-auth; run-now / pause / resume / edit-cron superuser).
 - `/usage` — Token usage metrics, org-wide read-only: per-service, per-model, and

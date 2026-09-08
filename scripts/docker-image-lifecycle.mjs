@@ -17,6 +17,7 @@ const NODE_ENTRIES = {
   'docker-control': 'dist/index.js', 'update-runner': 'dist/apps/update-runner/src/index.js',
 }
 const STORAGE_SERVICES = new Set(['postgres', 'redis', 'minio', 'qdrant', 'falkordb', 'neo4j'])
+const UNINSTALL_HELPER_IMAGES = ['alpine:3.20', 'alpine:latest']
 // Parse the real compiled import graph without evaluating application code. This catches
 // missing packaged relative modules (including update-runner artifacts) as well as bad bytes.
 // The VM parser is available in Node 22.12+ behind its existing flag; it never links/evaluates.
@@ -77,6 +78,7 @@ function failure(service, result) {
 
 /** Every Docker operation is injectable; tests never access the host Docker daemon. */
 export async function imageLifecycle(options) {
+  if (options.includeHelpers && options.mode !== 'uninstall-images') throw new Error('Alpine helper image cleanup is available only for uninstall-images.')
   const root = realpathSync(options.root)
   if (options.mode === 'verify') return runImageLifecycle({ ...options, root })
   const directory = join(root, '.local/install-artifacts')
@@ -98,7 +100,7 @@ export async function imageLifecycle(options) {
   finally { if (existsSync(lock) && readJson(lock).token === token) unlinkSync(lock) }
 }
 
-async function runImageLifecycle({ root, mode, env = process.env, run = dockerCommand, emit = console.log, allProfiles = false, pause = ms => new Promise(resolvePause => setTimeout(resolvePause, ms)) }) {
+async function runImageLifecycle({ root, mode, env = process.env, run = dockerCommand, emit = console.log, allProfiles = false, includeHelpers = false, pause = ms => new Promise(resolvePause => setTimeout(resolvePause, ms)) }) {
   root = realpathSync(root)
   if (!['up', 'up-storage', 'start-apps', 'prepare', 'verify', 'cleanup', 'uninstall-images'].includes(mode)) throw new Error('Unsupported image lifecycle mode.')
   if (!existsSync(join(root, '.env.persistent-memory'))) throw new Error('The existing .env.persistent-memory is required; image checks never generate it.')
@@ -144,6 +146,19 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
     if (!ledger.images.some(item => item.id === image.Id && item.reference === reference)) ledger.images.push({ id: image.Id, service, reference })
     save()
   }
+  // The optional uninstall image step explicitly includes the exact configured
+  // dependency tags. Registry images have no installer/Compose build labels.
+  // Keep this authorization local to uninstall; ordinary retry cleanup must
+  // never adopt or delete a shared dependency simply because it is unused.
+  const uninstallDependencies = new Map()
+  const dependencyCandidate = (image, name, reference) => {
+    const service = config.services[name]
+    const labels = image?.Config?.Labels ?? {}
+    return image && service && !service.build && service.image === reference
+      && (image.RepoTags ?? []).includes(reference)
+      && (!Object.hasOwn(labels, OWNER) || labels[OWNER] === owner)
+      && (!labels['com.docker.compose.project'] || labels['com.docker.compose.project'] === config.name)
+  }
   const allContainers = async () => {
     const listed = await execute(['ps', '-aq', '--no-trunc'])
     if (listed.code !== 0) throw failure('container ownership', listed)
@@ -175,15 +190,51 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
     const referencedVolumes = new Set(containers.flatMap(container => (container.Mounts ?? []).filter(mount => mount.Type === 'volume').map(mount => mount.Name)))
     const persistentVolumes = new Set(Object.values(config.volumes ?? {}).map(volume => volume.name).filter(Boolean))
     for (const item of [...ledger.images]) {
-      if (!IMAGE_ID.test(item.id) || referencedImages.has(item.id) || currentIds.has(item.id)) continue
+      if (!IMAGE_ID.test(item.id) || currentIds.has(item.id)) continue
+      if (referencedImages.has(item.id)) {
+        if (removeCurrent) emit(`Preserved image for ${item.service}: still used by a running or stopped container.`)
+        continue
+      }
       const image = await inspectImage(item.id)
       if (!image) { ledger.images = ledger.images.filter(candidate => candidate !== item); continue }
-      if (!ownedImage(image, item.service)) continue
+      const dependency = uninstallDependencies.get(item.service)
+      if (!ownedImage(image, item.service) && !(removeCurrent && dependency?.id === item.id && dependency.reference === item.reference && dependencyCandidate(image, item.service, item.reference))) continue
       const allowedReferences = new Set(ledger.images.filter(candidate => candidate.id === item.id).map(candidate => candidate.reference))
-      if ((image.RepoTags ?? []).some(tag => tag !== '<none>:<none>' && !allowedReferences.has(tag))) continue
+      if ((image.RepoTags ?? []).some(tag => tag !== '<none>:<none>' && !allowedReferences.has(tag))) {
+        if (removeCurrent) emit(`Preserved image for ${item.service}: it has tags outside this installation.`)
+        continue
+      }
       // Never force removal: Docker independently refuses referenced images/races.
       const removed = await execute(['image', 'rm', item.id])
-      if (removed.code === 0) { ledger.images = ledger.images.filter(candidate => candidate.id !== item.id); emit(`Removed unused installer-owned image for ${item.service}.`) }
+      if (removed.code === 0) { ledger.images = ledger.images.filter(candidate => candidate.id !== item.id); emit(`Removed unused stack image for ${item.service}.`) }
+      else if (removeCurrent) throw new Error(`Could not remove unused image for ${item.service}. Docker may still have a reference to it; inspect Docker images and retry image cleanup. No image removal was forced.`)
+    }
+    // These exact helper tags are an additional explicit uninstall choice.
+    // Do not adopt them into the ownership ledger: a later ordinary cleanup
+    // must never inherit permission to remove a shared utility image.
+    if (removeCurrent && includeHelpers) for (const reference of UNINSTALL_HELPER_IMAGES) {
+      const image = await inspectImage(reference)
+      if (!image) continue
+      const labels = image.Config?.Labels ?? {}
+      if (!(image.RepoTags ?? []).includes(reference)
+        || (Object.hasOwn(labels, OWNER) && labels[OWNER] !== owner)
+        || (labels['com.docker.compose.project'] && labels['com.docker.compose.project'] !== config.name)) {
+        emit(`Preserved Alpine helper image ${reference}: its tags or ownership do not match the selected cleanup.`)
+        continue
+      }
+      if (referencedImages.has(image.Id)) {
+        emit(`Preserved Alpine helper image ${reference}: still used by a running or stopped container.`)
+        continue
+      }
+      // Preserve aliases, including two selected helper tags sharing one ID.
+      // Docker cannot remove a multiply tagged image by ID without forcing it.
+      if (image.RepoTags.some(tag => tag !== '<none>:<none>' && tag !== reference)) {
+        emit(`Preserved Alpine helper image ${reference}: it has additional tags.`)
+        continue
+      }
+      const removed = await execute(['image', 'rm', image.Id])
+      if (removed.code !== 0) throw new Error(`Could not remove unused Alpine helper image ${reference}. Docker may still have a reference to it; inspect Docker images and retry image cleanup. No image removal was forced.`)
+      emit(`Removed unused Alpine helper image ${reference}.`)
     }
     for (const item of [...ledger.volumes]) {
       if (item.kind !== 'temporary' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/.test(item.name) || persistentVolumes.has(item.name) || referencedVolumes.has(item.name)) continue
@@ -196,9 +247,26 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
     save()
   }
   if (mode === 'cleanup' || mode === 'uninstall-images') {
-    // Adopt only exact, Compose-labeled build images, never similarly named user images.
-    for (const [name, service] of services.filter(([, service]) => service.build)) recordImage(await inspectImage(service.image), name, service.image)
+    // Built images require ownership labels. The explicit uninstall choice also
+    // covers exact configured dependencies, including older installs with no
+    // dependency ledger. Never use name prefixes or a global prune.
+    for (const [name, service] of services) {
+      if (!service.build && mode !== 'uninstall-images') continue
+      const image = await inspectImage(service.image)
+      if (service.build) {
+        recordImage(image, name, service.image)
+        if (mode === 'uninstall-images' && image && !ownedImage(image, name)) emit(`Preserved image for ${name}: installer ownership could not be proved.`)
+      }
+      else if (dependencyCandidate(image, name, service.image)) {
+        const item = { id: image.Id, service: name, reference: service.image }
+        uninstallDependencies.set(name, item)
+        if (!ledger.images.some(candidate => candidate.id === item.id && candidate.reference === item.reference)) ledger.images.push(item)
+      }
+      else if (image) emit(`Preserved image for ${name}: its tags or ownership do not match this installation.`)
+    }
+    save()
     await cleanup(mode === 'uninstall-images')
+    if (mode === 'uninstall-images') emit(`Images outside the configured stack${includeHelpers ? ', selected Alpine helper tags' : ''} or proven installer ownership, and global Docker build cache, were preserved.`)
     return { ok: true }
   }
   if (mode === 'start-apps') {
@@ -221,8 +289,31 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
       const image = await inspectImage(service.image)
       if (!image) throw new Error(`Required image is missing for ${name}; rerun installation image preparation.`)
       const running = containers.find(container => container.Image === image.Id && container.State?.Running && container.Config?.Labels?.['com.docker.compose.project'] === config.name && container.Config?.Labels?.['com.docker.compose.service'] === name)
-      if (!running || running.State?.Restarting || (running.State?.Health && running.State.Health.Status !== 'healthy')) throw new Error(`Service ${name} is not running the validated current image or is unhealthy/restarting. Inspect its logs before retrying; do not delete data volumes.`)
+      if (!running || running.State?.Restarting || (running.State?.Health && !['healthy', 'starting'].includes(running.State.Health.Status))) throw new Error(`Service ${name} is not running the validated current image or is unhealthy/restarting. Inspect its logs before retrying; do not delete data volumes.`)
       observed.push({ name, id: running.Id, image: image.Id, restarts: Number(running.RestartCount ?? 0) })
+    }
+    // Compose startup and the MCP health gate do not wait for independent
+    // services (for example the dashboard or worker) to finish their first
+    // healthcheck. Allow only that explicit starting state a bounded grace
+    // period; wrong images, failed healthchecks and restarts still fail.
+    let sample = containers
+    let waitingFor = ''
+    for (let attempt = 0; ; attempt++) {
+      const starting = []
+      for (const item of observed) {
+        const current = sample.find(container => container.Id === item.id)
+        if (!current || current.Image !== item.image || !current.State?.Running || current.State?.Restarting || Number(current.RestartCount ?? 0) > item.restarts) throw new Error(`Service ${item.name} restarted or became unavailable during image verification. Inspect its logs and Docker storage; user data volumes were preserved.`)
+        const health = current.State?.Health?.Status
+        if (health === 'starting') starting.push(item.name)
+        else if (health && health !== 'healthy') throw new Error(`Service ${item.name} is unhealthy during image verification. Inspect its logs before retrying; user data volumes were preserved.`)
+      }
+      if (!starting.length) break
+      if (attempt >= 60) throw new Error(`Services still starting after 120 seconds: ${starting.join(', ')}. Inspect their logs before retrying; user data volumes were preserved.`)
+      const names = starting.join(', ')
+      if (names !== waitingFor) emit(`Waiting up to 120 seconds for initial service healthchecks: ${names}.`)
+      waitingFor = names
+      await pause(2000)
+      sample = await allContainers()
     }
     await pause(2000)
     const second = await allContainers()
@@ -336,8 +427,8 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...options] = process.argv.slice(2)
-  if (options.some(option => option !== '--all-profiles')) throw new Error('Unsupported image lifecycle argument.')
-  imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles') }).catch(error => {
+  if (options.some(option => !['--all-profiles', '--include-helpers'].includes(option))) throw new Error('Unsupported image lifecycle argument.')
+  imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles'), includeHelpers: options.includes('--include-helpers') }).catch(error => {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

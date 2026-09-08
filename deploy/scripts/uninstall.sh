@@ -62,14 +62,18 @@ WHAT IT DOES
      in the repository root.
   4. Stops and removes the local Compose containers and networks.
   5. Separately asks whether to delete persistent volumes and the environment file (default: keep).
-  6. Offers cleanup of unused, provably installer-owned images and temporary artifacts.
+  6. Offers cleanup of unused stack images, Alpine helpers and temporary artifacts.
 
 WHAT IT REMOVES
   - Persistent-memory containers and project networks.
   - Persistent volumes and .env.persistent-memory only with explicit deletion consent.
-  - Unused images recorded by this install or bearing this exact Compose project's build labels.
+  - Unused application images with installer ownership or exact Compose build labels.
+  - Exact dependency image tags from this stack's Compose configuration, when image cleanup is selected.
+  - Alpine helper tags alpine:3.20 and alpine:latest, when image cleanup is selected.
 
 WHAT IT PRESERVES
+  - Images used by any running/stopped container or tagged outside this installation.
+  - Unrelated images and global Docker build cache; no global prune runs.
   - Existing memory exports are preserved in the repository root.
   - Repository source files are preserved.
   - Modified or unproven Claude/Codex agent configuration is preserved with
@@ -503,7 +507,7 @@ remove_project_images() {
         return 0
     fi
     # Includes stopped/foreign container references; no force or prefix matching.
-    node "$REPO_ROOT/scripts/docker-image-lifecycle.mjs" uninstall-images --all-profiles
+    node "$REPO_ROOT/scripts/docker-image-lifecycle.mjs" uninstall-images --all-profiles --include-helpers
 }
 
 remove_generated_env() {
@@ -531,7 +535,7 @@ uninstall_stack() {
         ok "Persistent data volumes and .env.persistent-memory were preserved."
     fi
     ok "Persistent-memory containers and networks removed."
-    if prompt_yes_no "Remove unused installer-owned images and disposable image-check artifacts?" "y"; then
+    if prompt_yes_no "Remove unused stack images, Alpine helpers (alpine:3.20 and alpine:latest), and disposable image-check artifacts?" "y"; then
         remove_project_images
     fi
     if [ "$delete_data" = "1" ]; then

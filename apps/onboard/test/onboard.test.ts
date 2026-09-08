@@ -573,6 +573,8 @@ describe('install steps', () => {
     expect(script).not.toContain('--rmi all')
     expect(script).not.toContain('docker image rm -f')
     expect(script).toContain('docker-image-lifecycle.mjs')
+    expect(script).toContain('uninstall-images --all-profiles --include-helpers')
+    expect(script).toContain('Alpine helpers (alpine:3.20 and alpine:latest)')
     expect(script).toContain('persistent-memory-')
     expect(script).toContain('rm -f \"$ENV_RUNTIME\"')
     expect(script).toContain('POSTGRES_STATE_MISSING=1')

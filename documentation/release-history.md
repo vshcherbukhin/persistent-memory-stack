@@ -3,6 +3,24 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.1.4 - 2026-09-08
+
+[GitHub release v1.1.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.4)
+
+- Explains that API-only installs omit host Ollama monitoring, while required
+  server-managed local embeddings still report missing hosts and models.
+  Configured capability models remain visible before their first observation.
+- Documents the 120-second grace for running containers' initial healthchecks and
+  visible image/runtime diagnostics. The reported Mac failure occurred in required image/runtime
+  validation; its exact cause remains unverified.
+- Describes optional uninstall cleanup of exact configured dependency images,
+  the explicitly listed Alpine utility tags `alpine:3.20` and `alpine:latest`,
+  protection for running/stopped containers and unrelated ownership/tags, and
+  retention of unattributed base images and caches without forced removal.
+- Includes version-specific
+  [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.1.4/README.md)
+  and the `npm run update-persistent-memory -- --release 1.1.4` update command.
+
 ## 1.1.3 - 2026-09-08
 
 [GitHub release v1.1.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.1.3)
