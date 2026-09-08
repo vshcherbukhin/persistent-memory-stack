@@ -119,7 +119,8 @@ async function prereqState() {
     execCapture('docker', ['--version']),
     execCapture('docker', ['info', '--format', '{{.OSType}}']),
     execCapture('docker', ['compose', 'version']),
-    execCapture('node', ['-v']),
+    // Probe the running interpreter, not a different Node selected later on PATH.
+    execCapture(process.execPath, ['-v']),
     execCapture(presenceCommand('ollama').command, presenceCommand('ollama').args),
     fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok ? r.json() : null).catch(() => null),
   ])
@@ -282,6 +283,12 @@ app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } 
         emit({ type: 'done', ok: false })
         return
       }
+    }
+    if (req.body.component === 'node') {
+      // Replacing the binary on disk cannot change this already-running process.
+      emit({ type: 'stdout', id: 'node-restart', chunk: 'Node 24 was installed. Stop this installer with Ctrl+C, open a terminal using Node 24 (verify with node -v), then run npm run install-persistent-memory again. The current installer must be restarted before continuing.\n' })
+      emit({ type: 'done', ok: true, restartRequired: true })
+      return
     }
     const ready = await waitForPrereqReady(req.body.component, emit)
     if (!ready) {

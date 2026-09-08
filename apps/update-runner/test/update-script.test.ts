@@ -277,8 +277,8 @@ describe('terminal update script', () => {
     expect(compose).toContain('${PM_COORDINATOR_STATE_DIR:-../../.local/update-coordinator-state}:/run/persistent-memory/update-coordinator-state:ro')
     expect(JSON.parse(rootPackage).scripts.setup).toBe('node scripts/setup.mjs')
     const setup = await readFile(new URL('../../../scripts/setup.mjs', import.meta.url), 'utf8')
-    expect(setup).toContain("runNpm(['run', 'build:update-coordinator']")
-    expect(setup).toContain("run(process.execPath, ['scripts/install-update-coordinator.mjs'")
+    expect(setup).toContain("['run', 'build:update-coordinator']")
+    expect(setup).toContain("['scripts/install-update-coordinator.mjs', '--root'")
   })
 
   it('keeps the initiating environment and browser handoff through coordinator bridge hops', async () => {

@@ -35,8 +35,13 @@ describe('native Windows host execution', () => {
     expect(env.PATH).toContain('C:\\tools')
     expect(env.PATH).toContain('Programs\\Ollama')
   })
-  it('preserves macOS command and environment semantics', () => {
-    expect(hostCommand('npm', ['run', 'setup'], { platform: 'darwin', env: { PATH: '/opt/homebrew/bin:/usr/bin' } })).toEqual({ command: 'npm', args: ['run', 'setup'], env: { PATH: '/opt/homebrew/bin:/usr/bin' } })
+  it('keeps macOS npm children on the validated runtime despite another Homebrew Node on PATH', () => {
+    const macNode = '/opt/homebrew/Cellar/node@24/24.14.1/bin/node'
+    const options = { platform: 'darwin' as const, execPath: macNode, env: { PATH: '/opt/homebrew/bin:/usr/bin', CUSTOM: 'preserved' } }
+    expect(hostCommand('npm', ['run', 'setup'], options)).toEqual({ command: 'npm', args: ['run', 'setup'], env: { PATH: '/opt/homebrew/Cellar/node@24/24.14.1/bin:/opt/homebrew/bin:/usr/bin', CUSTOM: 'preserved' } })
+    expect(hostCommand('node', ['-v'], options).command).toBe(macNode)
+    const once = hostEnvironment(options)
+    expect(hostEnvironment({ ...options, env: once })).toEqual(once)
     expect(presenceCommand('ollama', 'darwin')).toEqual({ command: 'which', args: ['ollama'] })
     expect(presenceCommand('ollama', 'win32')).toEqual({ command: 'where.exe', args: ['ollama'] })
   })
@@ -49,12 +54,16 @@ describe('platform prerequisites and app paths', () => {
     expect(parseDockerInfo('', 0).ok).toBe(false)
     expect(parseDockerInfo('linux', 1).ok).toBe(false)
   })
-  it('enforces the toolchain Node version floor', () => {
+  it('accepts supported LTS lines while rejecting Current, future and malformed versions', () => {
     expect(parseNodeVersion('v22.12.0').ok).toBe(true)
     expect(parseNodeVersion('v24.0.0').ok).toBe(true)
     expect(parseNodeVersion('v22.11.0').ok).toBe(false)
     expect(parseNodeVersion('v20.20.0').ok).toBe(false)
     expect(parseNodeVersion('v23.11.0').ok).toBe(false)
+    for (const version of ['v25.0.0', 'v26.8.1', 'v28.0.0', 'v24.0.0-rc.1', 'prefix v24.0.0']) {
+      expect(parseNodeVersion(version).ok, version).toBe(false)
+    }
+    expect(parseNodeVersion('v26.8.1').detail).toContain('restart the installer')
   })
   it('keeps Windows Docker manual while providing an official Ollama installation action', () => {
     expect(() => buildPrereqInstallPlan('docker', { platform: 'win32', brewPath: null, hasDocker: false, hasOllama: false })).toThrow('Docker Desktop for Windows')

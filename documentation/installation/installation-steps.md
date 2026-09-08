@@ -21,8 +21,9 @@ Linux containers.
 
 These screenshots are a **sandbox simulation of the installer flow** using safe
 demonstration values. They did not create real user-home files, Docker
-containers, or data. Your screen may show different detected tools or optional
-choices.
+containers, or data. Some screenshots retain sidebar labels from an earlier
+release. The current personal installer has the eleven steps described below;
+it has no Shared Memories step. Detected tools and optional choices may differ.
 
 ## 1. Get started
 
@@ -32,13 +33,19 @@ Choose **Get started** to begin a local Personal Memories installation.
 
 ## 2. Check your environment
 
-Confirm Node 24 LTS or Node 22.12+ in the Node 22 line, Docker, and Docker Compose
+Confirm Node 24.x LTS or Node 22.12+ in the Node 22 line, Docker, and Docker Compose
 are ready. Windows also requires Git for Windows. Review the resource table's
 actual, minimum, and recommended RAM and disk figures. Next remains blocked
 until the base application can run with API embeddings and extraction. Missing
 Ollama is optional here; it is required only when you choose local embeddings.
 See [machine requirements](machine-requirements.md) before preparing a small Mac
 or Windows laptop.
+
+The installer supports those two Node major versions only. Node 25, 26, and
+other majors are rejected even if an individual dependency supports them. If
+setup stops before the browser opens, follow the
+[macOS recovery steps](#macos-recover-from-an-early-setup-failure) below or select
+a supported Node version in your Windows terminal.
 
 On macOS, **Estimated available RAM** includes free, speculative, and inactive
 pages that the system may reclaim. This can exceed currently free RAM;
@@ -107,26 +114,86 @@ integrations. Secrets remain masked.
 
 ![Environment review](../assets/lifecycle/onboarding/installer-review.png)
 
-## 10. Shared Memories is optional
-
-Skip this step to finish with Personal Memories only. You can connect a Shared
-Memories server later from your local dashboard.
-
-![Shared Memories choice](../assets/lifecycle/onboarding/installer-shared.png)
-
-## 11. Install
+## 10. Install
 
 Choose **Generate & Install** and wait for the local services, registrations,
 and dashboard readiness checks to finish.
 
 ![Installation progress](../assets/lifecycle/onboarding/installer-install.png)
 
-## 12. Open your dashboard
+## 11. Open your dashboard
 
 Select **Go to dashboard**. Passwordless installs open Personal Overview
 directly; password-protected installs open the local login screen first.
+Configure any optional Shared Memories server connection later from this local
+dashboard; the personal-install wizard does not ask for a shared server or token.
 
 ![Installation complete](../assets/lifecycle/onboarding/installer-done.png)
 
 For routine updates, see the dashboard **Releases and updates** guide. For
 removal and export, see [Uninstall memory stack](uninstall-memory-stack.md).
+
+## macOS: recover from an early setup failure
+
+Stop an old wizard with **Ctrl+C** in the terminal that launched it. With
+Homebrew installed, install the supported Node 24 line and select it for the
+current terminal session:
+
+```bash
+brew install node@24
+export PATH="$(brew --prefix node@24)/bin:$PATH"
+hash -r
+node --version
+node -p "process.execPath"
+npm --version
+```
+
+Check that the version is `v24.x` and the executable is from the selected
+Homebrew installation before proceeding. This session PATH change does not
+force-link Node or replace another project's global runtime. Homebrew's
+[`node@24` formula](https://formulae.brew.sh/formula/node@24) is installed separately;
+[`brew --prefix`](https://docs.brew.sh/Manpage#--prefix-installed-formula-)
+locates it without assuming an Apple Silicon or Intel installation path. Repeat
+the PATH selection when opening a new terminal, or use your existing version
+manager to select Node 24.
+
+From the Persistent Memory checkout, restart setup:
+
+```bash
+npm run check:host
+npm run install-persistent-memory
+```
+
+If setup still fails, keep the name of the failed setup substep and the **first
+error above the final `host-runtime`/command-exit wrapper**, together with the
+Node version and executable path. A final nonzero-exit wrapper only reports
+that a child command failed; it does not identify the original cause. An
+unsupported Node version alone is not proof of what caused an earlier failure.
+Share only redacted diagnostic output, never API keys or the environment file.
+Keep the existing environment and data when retrying.
+
+## Incomplete memory-instruction markers
+
+On Windows or macOS, if **Update agent integration files** reports **Persistent memory instructions
+markers are incomplete** (or **Persistent-memory instruction markers are
+incomplete**), the failure concerns the delimiters in an existing agent
+instruction file or a supplied custom memory block. This is a different issue
+from the supported Node version check. Keep the first error and affected file
+path when reporting the failure; the final command-exit wrapper is only a
+summary.
+
+When updating an existing instruction file with incomplete or nested markers,
+the installer first saves an exact copy beside it, named
+`<agent-file>.persistent-memory-backup-<timestamp>.bak` (with a suffix if needed
+to avoid replacing an existing backup). It then converts the reserved marker
+lines outside code examples to inactive recovery comments and adds a complete
+generated memory block. Existing prose and examples are retained rather than
+guessing which instructions an unmatched marker enclosed. The repair warning
+names both the affected file and its backup for review.
+
+If that backup cannot be created, the instruction and rule files are not
+changed; resolve the reported permissions or disk-space issue before retrying.
+A newly supplied custom memory block with invalid markers still fails validation
+before those files are written. Correct that custom block instead of deleting
+an agent instruction file or its profile folder. Keep the backup, environment
+file, and memory data when rerunning setup.

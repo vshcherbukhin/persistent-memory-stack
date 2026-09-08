@@ -97,7 +97,50 @@ describe('managed memory instruction preservation', () => {
     `${BEGIN}\nKeep this after an unmatched begin.\n`,
     `Keep this before an unmatched end.\n${END}\n`,
     `${BEGIN}\n${BEGIN}\nNever delete this nested content.\n${END}\n`,
-  ])('fails closed on malformed ownership markers', original => {
-    expect(() => injectMemoryBlock(original, defaultBlock)).toThrow('existing instructions were not changed')
+  ])('repairs malformed ownership markers without dropping any existing content: %s', original => {
+    const once = injectMemoryBlock(original, defaultBlock)
+    const preserved = original.replaceAll(BEGIN, '<!-- persistent-memory:recovered-begin -->')
+      .replaceAll(END, '<!-- persistent-memory:recovered-end -->')
+    expect(once.endsWith(preserved)).toBe(true)
+    expect(once.match(/<!-- persistent-memory:begin -->/g)).toHaveLength(1)
+    expect(once.match(/<!-- persistent-memory:end -->/g)).toHaveLength(1)
+    expect(injectMemoryBlock(once, defaultBlock)).toBe(once)
+  })
+
+  it('keeps legacy-looking lines and complete old regions when any original marker is damaged', () => {
+    const original = `# Team instructions\n\n${BEGIN}\n${defaultBlock}${END}\n\n${BEGIN}\n${defaultBlock}\n## User policy\nNever remove this section.\n\n\n`
+    const preserved = original.replaceAll(BEGIN, '<!-- persistent-memory:recovered-begin -->')
+      .replaceAll(END, '<!-- persistent-memory:recovered-end -->')
+    const once = injectMemoryBlock(original, defaultBlock)
+    expect(once.endsWith(preserved)).toBe(true)
+    expect(injectMemoryBlock(once, defaultBlock)).toBe(once)
+  })
+
+  it.each(['```markdown', '~~~markdown'])('repairs active markers while preserving %s examples and indentation', fence => {
+    const examples = `${fence}\n${BEGIN}\n${END}\n${fence.slice(0, 3)}\n    ${BEGIN}\n\t${END}\n \t${BEGIN}\nInline ${END} example.\n`
+    const original = `  ${BEGIN}\t\n${examples}`
+    const once = injectMemoryBlock(original, defaultBlock)
+    expect(once.endsWith(`  <!-- persistent-memory:recovered-begin -->\t\n${examples}`)).toBe(true)
+    expect(injectMemoryBlock(once, defaultBlock)).toBe(once)
+  })
+
+  it('preserves a BOM, CRLF, Unicode, leading and trailing blank lines during repair and retries', () => {
+    const original = `\uFEFF\r\n# Équipe 项目\r\n\r\n${BEGIN}  \r\nKeep every line.\r\n\r\n\r\n`
+    const once = injectMemoryBlock(original, defaultBlock)
+    expect(once.startsWith(`\uFEFF${BEGIN}\r\n`)).toBe(true)
+    expect(once.endsWith(original.slice(1).replace(BEGIN, '<!-- persistent-memory:recovered-begin -->'))).toBe(true)
+    expect(injectMemoryBlock(once, defaultBlock)).toBe(once)
+    expect(once.replace(/\r\n/g, '')).not.toContain('\n')
+  })
+
+  it.each([BEGIN, END, `${BEGIN}\n${END}`, `${END}\nEscaped region\n${BEGIN}`, '```markdown\nUnclosed custom example'])('rejects invalid custom blocks instead of repairing them: %s', custom => {
+    expect(() => injectMemoryBlock('# Existing user instructions\n', custom)).toThrow(/markers/)
+  })
+
+  it('allows reserved marker examples inside complete custom code fences', () => {
+    const custom = `## Custom memory procedure\n\n\`\`\`markdown\n${BEGIN}\n${END}\n\`\`\``
+    const once = injectMemoryBlock('# User instructions\n\nKeep this.\n', custom)
+    expect(once).toContain(custom)
+    expect(injectMemoryBlock(once, custom)).toBe(once)
   })
 })

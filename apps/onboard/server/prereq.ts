@@ -158,7 +158,7 @@ export function prereqInstallCapabilities(platform: string): Record<PrereqCompon
 export function manualPrereqHint(component: PrereqComponent, platform: string): string {
   const restart = platform === 'win32' ? ' Reopen PowerShell and restart the installer after installing.' : ' Restart the installer after installing.'
   if (component === 'homebrew') return 'Homebrew is only used for automatic prerequisite installation on macOS.'
-  if (component === 'node') return `Install Node.js 22.12+ (Node 24 LTS recommended) with npm from https://nodejs.org/.${restart}`
+  if (component === 'node') return `Install Node.js 24 LTS (24.x) or Node 22.12+ within 22.x with npm from https://nodejs.org/. Newer Current releases are not yet validated.${restart}`
   if (component === 'docker' || component === 'compose') return platform === 'win32'
     ? 'Install Docker Desktop for Windows from https://docs.docker.com/desktop/setup/install/windows-install/, enable its WSL 2 backend, start Docker Desktop and select Linux containers. Docker Compose v2 is included.'
     : 'Install and start Docker Engine or Docker Desktop with Linux containers and Docker Compose v2.'
@@ -194,14 +194,14 @@ export function parseComposeVersion(stdout: string, exitCode: number): ProbeResu
     : { ok: false, detail: `Docker Compose v${m[1]} is too old; v2+ required.` }
 }
 
-/** `node -v` → require Node 22.12+ (toolchain minimum). */
+/** Supported host lines, not every version accepted by a dependency's engine range. */
 export function parseNodeVersion(stdout: string): ProbeResult {
-  const m = /v(\d+)\.(\d+)\.(\d+)/.exec(stdout.trim())
+  const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(stdout.trim())
   if (!m) return { ok: false, detail: 'Node not found.' }
   const major = Number(m[1])
-  return (major >= 24 || (major === 22 && Number(m[2]) >= 12))
+  return (major === 24 || (major === 22 && Number(m[2]) >= 12))
     ? { ok: true, detail: `Node v${m[1]}.${m[2]}.${m[3]}.` }
-    : { ok: false, detail: `Node v${m[1]}.${m[2]} is unsupported; use v22.12+ on Node 22 or Node 24+.` }
+    : { ok: false, detail: `This installer is running Node v${m[1]}.${m[2]}.${m[3]}. Use Node 24 LTS (24.x) or Node 22.12+ within 22.x, then restart the installer. Newer Current releases are not yet validated.` }
 }
 
 export function parseCommandPresence(label: string, stdout: string, exitCode: number): ToolProbeResult {

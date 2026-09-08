@@ -302,11 +302,14 @@ test('the documentation home starts users with Persistent Memory Stack and the i
   assert.match(config, /- "Installation":\n      - "Windows preparation": installation\/windows-installation\.md\n      - "Installation steps": installation\/installation-steps\.md\n      - "Machine requirements and models": installation\/machine-requirements\.md\n      - "Uninstall memory stack": installation\/uninstall-memory-stack\.md/)
 })
 
-test('lifecycle guides keep every installer and uninstall screenshot distinct and in separate flows', async () => {
+test('lifecycle guides keep personal installation and uninstall screenshots distinct and in separate flows', async () => {
   const root = new URL('../../../documentation/assets/lifecycle/', import.meta.url)
   const installGuide = await readFile(new URL('../../../documentation/installation/installation-steps.md', import.meta.url), 'utf8')
   const uninstallGuide = await readFile(new URL('../../../documentation/installation/uninstall-memory-stack.md', import.meta.url), 'utf8')
   const installer = (await readdir(new URL('onboarding/', root))).filter((name) => name.endsWith('.png')).sort()
+  // The legacy connector screenshot remains available, but personal setup no
+  // longer includes a Shared Memories step.
+  const personalInstaller = installer.filter((name) => name !== 'installer-shared.png')
   const uninstall = (await readdir(new URL('uninstall/', root))).filter((name) => name.endsWith('.png')).sort()
   const digest = async (directory, name) => createHash('sha256').update(await readFile(new URL(name, directory))).digest('hex')
 
@@ -314,11 +317,15 @@ test('lifecycle guides keep every installer and uninstall screenshot distinct an
   assert.equal(uninstall.length, 5)
   assert.equal(new Set(await Promise.all(installer.map((name) => digest(new URL('onboarding/', root), name)))).size, 12)
   assert.equal(new Set(await Promise.all(uninstall.map((name) => digest(new URL('uninstall/', root), name)))).size, 5)
-  assert.match(installGuide, /## 12\. Open your dashboard/)
+  assert.equal(personalInstaller.length, 11)
+  assert.match(installGuide, /^## 10\. Install$/m)
+  assert.match(installGuide, /^## 11\. Open your dashboard$/m)
+  assert.doesNotMatch(installGuide, /^## \d+\. Shared Memories/m)
+  assert.doesNotMatch(installGuide, /installer-shared\.png/)
   assert.match(installGuide, /sandbox simulation of the installer flow/i)
   assert.match(uninstallGuide, /separate terminal process/i)
   assert.match(uninstallGuide, /sandbox simulation of the script prompts/i)
-  for (const name of installer) assert.match(installGuide, new RegExp(name.replace('.', '\\.')))
+  for (const name of personalInstaller) assert.match(installGuide, new RegExp(name.replace('.', '\\.')))
   for (const name of uninstall) assert.match(uninstallGuide, new RegExp(name.replace('.', '\\.')))
 })
 

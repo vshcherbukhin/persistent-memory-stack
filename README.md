@@ -8,8 +8,9 @@ context across conversations. Find the right knowledge again through semantic
 search, explore its connections in a visual graph, and keep the source evidence
 within reach.
 
-Start with your own **Personal Memories** stack. Connect **Shared Memories**
-later when you want access to a team's knowledge.
+Start with your own **Personal Memories** stack. Configure optional **Shared
+Memories** connections later from the local dashboard when you have a shared
+server and its connector token.
 
 [Get started](#get-started) · [Features](#what-you-can-do) ·
 [Documentation](documentation/) · [Releases](https://github.com/vshcherbukhin/persistent-memory-stack/releases) · [Release notes](release-history.md)
@@ -23,7 +24,7 @@ later when you want access to a team's knowledge.
 | **Recall relevant context** | Combine semantic retrieval with graph relationships and bounded responses that retain references for deeper follow-up. |
 | **Explore a living knowledge graph** | Browse memories, entities, and connections in 3D or 2D. Filter by project, tags, badges, and fact validity; follow how knowledge changes over time. |
 | **Keep the evidence** | Ingest documents and retain links between sources, memories, and derived graph facts. Review graph impact before deleting a memory. |
-| **Keep personal and shared work distinct** | Use Personal Memories independently, then optionally connect a Shared Memories server with scoped access. |
+| **Keep personal and shared work distinct** | Use Personal Memories independently, then configure an optional Shared Memories server connection with scoped access from the local dashboard. |
 | **Choose models that fit your computer** | Setup checks RAM, disk space, and Docker resources. Use local Ollama embeddings or OpenAI/Voyage APIs, with suggested models and connection tests. Configure fact extraction separately. |
 | **See what the system is doing** | Inspect memories, service health, worker activity, security findings, and model token usage from one dashboard. |
 | **Avoid unnecessary model work** | Unchanged memory updates skip extraction, embedding, and graph processing; meaningful edits keep the full pipeline. |
@@ -39,6 +40,10 @@ does not require every model to run locally.
 Prepare **Node.js 24 LTS** (or Node 22.12+ within the Node 22 line), **Git**, and
 **Docker Desktop running Linux containers**. Windows also needs **Git for Windows
 with Git Bash**. The wizard can install or start Ollama and guide model setup.
+The supported host runtime is **Node 22.12+ within major 22 or Node 24.x**;
+other majors, including Node 25 and 26, are not supported by this installer.
+For macOS runtime selection and early setup failures, see
+[Node recovery instructions](documentation/installation/installation-steps.md#macos-recover-from-an-early-setup-failure).
 
 ### Machine requirements
 
@@ -105,11 +110,12 @@ Or from **Windows PowerShell**:
 npm.cmd run install-persistent-memory
 ```
 
-The 12-step wizard checks prerequisites, prepares models, tests your extraction
+The 11-step personal-install wizard checks prerequisites, prepares models, tests your extraction
 provider, builds the stack, and registers your selected Claude/Codex clients.
 Have your extraction API key and, for API embeddings, an embedding API key ready
 (the same OpenAI key can serve both). Keep the installer terminal
-open until it finishes.
+open until it finishes. Shared-server connections are configured later from the
+dashboard, after personal installation is complete.
 
 Then open the dashboard at **[localhost:3200](http://localhost:3200)** and reconnect
 your agent client so it loads the MCP configuration and memory rules. A fresh

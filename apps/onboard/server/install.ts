@@ -9,14 +9,14 @@
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { buildSteps, extractToken, parseVerifySummary, type InstallStep } from './steps.js'
-import { hasModel, parseOllamaTags } from './prereq.js'
+import { hasModel, parseNodeVersion, parseOllamaTags } from './prereq.js'
 import {
   buildMcpEntry,
   registerClaudeWrite,
   registerCodexWrite,
   planRegistration,
 } from './register.js'
-import { targetMemoryFiles, writeRuleTargets } from './rule.js'
+import { targetMemoryFiles, writeRuleTargets, ruleRepairWarning } from './rule.js'
 import { writeOwnershipManifest } from './ownership.js'
 import { hostCommand } from './host.js'
 import { writeInstallSuccess } from './install-success.js'
@@ -125,7 +125,8 @@ function doWriteRule(ctx: InstallContext, emit: (e: InstallEvent) => void): bool
     // Claude reads the project CLAUDE.md in folder sessions whether via Code or Desktop, so the rule
     // targets Claude when EITHER is selected (mirrors the directory-aware MCP scope).
     const targets = targetMemoryFiles({ claude: w.apps.claudeCli || w.apps.claudeDesktop, codex: w.apps.codexCli || w.apps.codexDesktop, level: w.regLevel, projectPaths: w.projectPaths, home: w.home, profileEnv: w.profileEnv })
-    writeRuleTargets(targets, w.ruleBody, w.memoryBlock)
+    const result = writeRuleTargets(targets, w.ruleBody, w.memoryBlock)
+    for (const repair of result.repairs) emit({ type: 'stdout', id: 'write-rule', chunk: `${ruleRepairWarning(repair)}\n` })
     if (targets.length === 0) emit({ type: 'stdout', id: 'write-rule', chunk: 'No CLAUDE.md/AGENTS.md targets — rule not written.\n' })
     for (const t of targets) emit({ type: 'stdout', id: 'write-rule', chunk: `✓ ${t.ruleFile} (+ ref in ${t.memoryFile})\n` })
     return true
@@ -273,6 +274,12 @@ async function modelIsPulled(ctx: InstallContext, model: string): Promise<boolea
 }
 
 export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) => void): Promise<void> {
+  const runtime = parseNodeVersion(process.version)
+  if (!runtime.ok) {
+    emit({ type: 'error', id: 'node', message: runtime.detail })
+    emit({ type: 'done', ok: false })
+    return
+  }
   const w = ctx.wizard
   const flow = w?.flow ?? 'full'
   const steps = buildSteps({

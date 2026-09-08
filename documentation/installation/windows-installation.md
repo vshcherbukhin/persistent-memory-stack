@@ -28,7 +28,7 @@ commands; prerequisite installers may request elevation separately.
 
 | Prerequisite | Preparation |
 |---|---|
-| [Node.js](https://nodejs.org/en/download) | Install Node 24 LTS, or Node 22.12 or newer within the Node 22 line. npm is included. This project's host tooling requires Node 22.12+ even though some dependencies still permit Node 20. |
+| [Node.js](https://nodejs.org/en/download) | Install Node 24.x LTS, or Node 22.12 or newer within the Node 22 line. npm is included. These are the only supported host major versions; Node 25, 26, and other majors are rejected even if individual dependencies permit them. |
 | [Git for Windows](https://gitforwindows.org/) | Install Git with Git Bash and make Git available to command-line applications. Lifecycle helpers use the bundled Bash and Unix utilities. |
 | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) | Use a currently supported Windows version, enable hardware virtualization and WSL 2, and select the WSL 2 backend with **Linux containers**. Start Docker Desktop and wait for its engine to be ready. |
 | [Ollama for Windows](https://docs.ollama.com/windows) — local embeddings only | Choose **Install / start Ollama** in the Embeddings step after reviewing resources, or install it manually. Keep the native application running for local embeddings; API embeddings do not need it. |
@@ -129,7 +129,7 @@ finishes. A visible wizard tab also keeps the server active while you fill in th
 form, without changing your entries. Keep the launch terminal open. In shorter
 windows, scroll the sidebar to see the remaining steps.
 
-Follow the 12 [Installation steps](installation-steps.md). Published stable GitHub
+Follow the 11 [Installation steps](installation-steps.md). Published stable GitHub
 Releases are checked automatically after installation, with no update token or
 setup step. Installing an update remains an explicit action. Install Personal Memories
 first, select an embedding model that fits the machine, and test the extraction
@@ -168,6 +168,12 @@ For tools installed outside the wizard, reopen the terminal and relaunch the
 wizard if it still sees the old PATH. Reuse the existing generated configuration
 if an installation was interrupted; do not delete it or regenerate secrets to
 work around a failure.
+
+If the failed setup substep is **Update agent integration files** and its error
+mentions incomplete Persistent Memory instruction markers, see
+[instruction-file recovery](installation-steps.md#incomplete-memory-instruction-markers).
+The repair backs up the original file and preserves its existing instructions;
+do not delete Claude/Codex profiles to get past that error.
 
 The registration step's **Choose…** button opens the native Windows folder
 dialog. You can also enter an absolute Windows path such as
@@ -306,12 +312,12 @@ uses shell redirection, which also works on macOS.
 
 If installation stopped at verification and the wizard is still open, keep that
 page open while correcting the cause. After `npm.cmd run verify-persistent-memory`
-passes, select **Shared Memories** in the wizard sidebar, then **Next** to retry
-the installation steps with the current answers and existing environment file.
+passes, select **Review env** in the wizard sidebar, inspect the masked preview,
+then choose **Generate & Install** to retry. Review saves the current answers
+to the existing environment file, so check the configuration before proceeding.
 This repeats the setup/build checks and reuses the downloaded model and data
 volumes. Let it finish MCP registration and rule writing before treating setup
-as complete. Do not return to **Review env** just to retry, because that step
-generates the environment again.
+as complete. Do not delete the environment file or data volumes to retry.
 
 ## Routine operation after installation
 
@@ -335,10 +341,11 @@ Desktop, or delete `.env.persistent-memory` to troubleshoot an installation.
 
 ## macOS uses the same lifecycle commands
 
-Keep using native Node, Docker Desktop, and optional host Ollama on macOS, with Node 24
-LTS or Node 22.12+ in the Node 22 line. Use `npm run check:host` and then
+Keep using native Node, Docker Desktop, and optional host Ollama on macOS, with Node 24.x
+LTS or Node 22.12+ in the Node 22 line. Other Node majors are unsupported. Use `npm run check:host` and then
 `npm run install-persistent-memory` from the checkout. The launcher uses the
 system Bash on macOS; Git for Windows and WSL are Windows prerequisites only.
 The existing Homebrew assistance and Personal-first wizard remain available.
 The start, stop, verify, and update command names above are identical with
-`npm` in place of `npm.cmd`.
+`npm` in place of `npm.cmd`. For Homebrew Node selection and a failure before
+the wizard opens, see [macOS setup recovery](installation-steps.md#macos-recover-from-an-early-setup-failure).
