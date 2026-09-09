@@ -555,8 +555,11 @@ export function MemoriesClient({
                 <Icon name="search_off" size={30} className="memory-blank-icon" />
                 <strong>No memories match these filters</strong>
                 <span>
+                  {/* Search returns nearest neighbours rather than threshold matches,
+                      so a search alone rarely empties the list — it is the combination
+                      that does. Say that instead of blaming the query. */}
                   {query.trim()
-                    ? <>Semantic search found nothing above the similarity threshold for <b>“{query.trim()}”</b>{filterCount > 1 ? ' within the other active filters' : ''}.</>
+                    ? <>Nothing matched <b>“{query.trim()}”</b>{filterCount > 1 ? <> within the other {filterCount - 1} active filter{filterCount === 2 ? '' : 's'}</> : null}.</>
                     : <>No stored memory matches the {filterCount} active filter{filterCount === 1 ? '' : 's'}.</>}
                 </span>
                 <div className="memory-blank-actions">

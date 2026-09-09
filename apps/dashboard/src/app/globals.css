@@ -4285,7 +4285,7 @@ button.primary:hover,
 
 /* ── Overview: incident line, sparklines, activity + corpus row ───────────── */
 .overview-page { display: flex; flex-direction: column; gap: 20px; }
-.overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.overview-grid { grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); }
 .overview-card { position: relative; overflow: hidden; }
 .metric-spark { position: absolute; right: 0; bottom: 0; opacity: .5; pointer-events: none; }
 
@@ -4397,7 +4397,6 @@ button.primary:hover,
 .corpus-count { color: var(--muted); flex: 0 0 auto; font-size: 11.5px; text-align: right; width: 42px; }
 
 @media (max-width: 1180px) {
-  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-lower { grid-template-columns: minmax(0, 1fr); }
 }
 

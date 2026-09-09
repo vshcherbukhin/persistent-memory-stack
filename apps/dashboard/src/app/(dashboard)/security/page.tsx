@@ -55,7 +55,7 @@ export default async function SecurityPage({
 
   return (
     <div className="page-fill security-page">
-      <h1>Security</h1>
+      {/* The app header already titles this page; a second <h1> just repeated it. */}
       <p className="muted" style={{ maxWidth: 720 }}>
         Open DLP findings — PII (Presidio) and secrets (gitleaks) detected in stored memories
         or blocked document ingests. You see your team&apos;s findings; super-admins see all

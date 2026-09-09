@@ -260,9 +260,11 @@ export default async function OverviewPage({
           label="Saved Memories"
           value={compact(overview.counts.memories)}
           meta={
-            activityUnavailable
-              ? 'Browse, search, verify, and edit memory records'
-              : `${writesLastDay} written or updated in the last 24h`
+            // A bare "0 written" next to a healthy corpus reads like a fault; fall
+            // back to describing the page when there is nothing to report.
+            !activityUnavailable && writesLastDay > 0
+              ? `${writesLastDay} written or updated in the last 24h`
+              : 'Browse, search, verify, and edit memory records'
           }
           tone="neutral"
           spark={<Sparkline points={writeBuckets} />}
