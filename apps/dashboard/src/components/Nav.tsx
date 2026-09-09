@@ -181,11 +181,11 @@ export function Nav({
         <span className="brand-mark" aria-hidden="true">
           <ProductMark />
         </span>
-        <span>PM Management<small>Persistent Memory</small></span>
+        <span>Persistent Memory<small>{localMode ? 'Local dashboard' : 'Shared server'}</small></span>
       </div>
       {localMode ? (
         <div className="space-switch">
-          <span className="space-switch-label">Switch Space</span>
+          <span className="space-switch-label">Space</span>
           <Select
             ariaLabel="Switch dashboard space"
             value={selectedSpace}

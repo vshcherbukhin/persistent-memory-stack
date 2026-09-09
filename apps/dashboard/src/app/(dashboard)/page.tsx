@@ -142,9 +142,10 @@ export default async function OverviewPage({
 
   // The lower row is supplementary: the graph being unreachable must degrade these
   // panels, never fail the whole control-plane summary.
-  const [activityResult, facetsResult] = await Promise.allSettled([
+  const [activityResult, facetsResult, pendingResult] = await Promise.allSettled([
     api.getMemoryGraphActivity({ projects: [], tags: [], badges: [], validity: 'all' }, space),
-    api.getMemoryGraphFacets({ facet: 'badges' }, space),
+    api.getMemoryGraphFacets({}, space),
+    api.pendingEmbeddings(space),
   ])
   const activityEvents: MemoryGraphActivity[] = activityResult.status === 'fulfilled' ? activityResult.value.events ?? [] : []
   const badgeFacets: MemoryGraphFacet[] = facetsResult.status === 'fulfilled' ? facetsResult.value.badges ?? [] : []
@@ -153,6 +154,14 @@ export default async function OverviewPage({
   const now = Date.now()
   const writeBuckets = hourlyBuckets(activityEvents.filter((e) => e.kind !== 'read'), now)
   const writesLastDay = writeBuckets.reduce((sum, n) => sum + n, 0)
+  const entityCount = facetsResult.status === 'fulfilled' ? facetsResult.value.tags?.length ?? 0 : 0
+  const projectCount = facetsResult.status === 'fulfilled' ? facetsResult.value.projects?.length ?? 0 : 0
+  const pendingEmbedding = pendingResult.status === 'fulfilled' ? pendingResult.value.memories : 0
+  // Prototype meta: recent writes plus anything still waiting to be searchable.
+  const savedMemoriesMeta = [
+    writesLastDay > 0 ? `+${writesLastDay} in the last 24h` : null,
+    pendingEmbedding > 0 ? `${pendingEmbedding} awaiting embedding` : null,
+  ].filter(Boolean).join(' · ') || 'Browse, search, verify, and edit memory records'
 
   // One incident line, highest severity first, so a degraded stack states itself
   // before the reader has to interpret six cards.
@@ -205,6 +214,16 @@ export default async function OverviewPage({
         />
       ) : null}
       <section className="overview-grid" aria-label="Dashboard summary">
+        {/* Prototype order: the corpus leads, then runtime, then cost, then graph. */}
+        <OverviewCard
+          href={hrefWithSpace(`/memories?surface=${space}`, space)}
+          label="Saved Memories"
+          value={compact(overview.counts.memories)}
+          meta={savedMemoriesMeta}
+          tone="neutral"
+          badge={personalMode ? 'personal' : 'shared'}
+          spark={<Sparkline points={writeBuckets} />}
+        />
         {!personalMode ? (
           <OverviewCard
             href={peopleHref}
@@ -256,18 +275,15 @@ export default async function OverviewPage({
           badgeTone="neutral"
         />
         <OverviewCard
-          href={hrefWithSpace(`/memories?surface=${space}`, space)}
-          label="Saved Memories"
-          value={compact(overview.counts.memories)}
+          href={hrefWithSpace(`/memories?surface=${space}&tab=graph`, space)}
+          label="Graph entities"
+          value={facetsUnavailable ? '—' : compact(entityCount)}
           meta={
-            // A bare "0 written" next to a healthy corpus reads like a fault; fall
-            // back to describing the page when there is nothing to report.
-            !activityUnavailable && writesLastDay > 0
-              ? `${writesLastDay} written or updated in the last 24h`
-              : 'Browse, search, verify, and edit memory records'
+            facetsUnavailable
+              ? 'Graph projection unavailable'
+              : `${compact(projectCount)} project${projectCount === 1 ? '' : 's'} · ${compact(badgeFacets.length)} categories`
           }
-          tone="neutral"
-          spark={<Sparkline points={writeBuckets} />}
+          tone={facetsUnavailable ? 'warn' : 'neutral'}
         />
       </section>
 

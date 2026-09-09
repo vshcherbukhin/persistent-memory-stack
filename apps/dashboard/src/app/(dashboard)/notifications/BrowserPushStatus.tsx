@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { Icon } from '@/components/ui/Icon'
-import { useToast } from '@/components/ui/Toast'
 
 type Permission = 'granted' | 'denied' | 'default' | 'unsupported'
 
@@ -39,7 +38,7 @@ export function BrowserPushStatus() {
   const [worker, setWorker] = useState<boolean | null>(null)
   const [origin, setOrigin] = useState('')
   const [busy, setBusy] = useState(false)
-  const toast = useToast()
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   useEffect(() => {
     setOrigin(window.location.host)
@@ -61,17 +60,18 @@ export function BrowserPushStatus() {
 
   const sendTest = async () => {
     setBusy(true)
+    setResult(null)
     try {
       const response = await fetch('/api/browser-push/test', { method: 'POST' })
       const body = await response.json().catch(() => null)
       if (!response.ok) {
-        toast.error(body?.message ?? 'Test notification failed to send.')
+        setResult({ ok: false, message: body?.message ?? 'Test notification failed to send.' })
         return
       }
       // A queued send is not a delivered notification; say what actually happened.
-      toast.success('Test notification sent. If nothing appears, delivery is being blocked outside the dashboard.')
+      setResult({ ok: true, message: 'Test notification sent. If nothing appears, delivery is being blocked outside the dashboard.' })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Test notification failed to send.')
+      setResult({ ok: false, message: err instanceof Error ? err.message : 'Test notification failed to send.' })
     } finally {
       setBusy(false)
     }
@@ -105,6 +105,9 @@ export function BrowserPushStatus() {
       >
         <Icon name="sensors" size={15} /> {busy ? 'Sending…' : 'Send a test notification'}
       </button>
+      {result ? (
+        <div className={`notice ${result.ok ? 'ok' : 'danger'} push-status-notice`} role="status">{result.message}</div>
+      ) : null}
       {permission !== 'granted' ? (
         <p className="note" style={{ marginTop: 8 }}>
           A test can only be sent once this browser has granted permission.

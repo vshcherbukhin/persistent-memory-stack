@@ -102,6 +102,25 @@ export function AppHeader({
   const seg = pathname.replace(/^\//, '').split('/')[0] || 'overview'
   const sharedSpace = localMode && (pathname.startsWith('/connection') || searchParams.get('space') === 'shared' || searchParams.get('surface') === 'shared')
   const documentationHref = `/documentation?space=${sharedSpace || searchParams.get('space') === 'shared' ? 'shared' : 'personal'}`
+  // The prototype's status pill. Sourced from the same navigation-health summary
+  // the sidebar already polls, so it never invents a health claim.
+  const [runtimeDegraded, setRuntimeDegraded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    const read = async () => {
+      try {
+        const response = await fetch('/api/navigation-health?runtime=1&security=0', { cache: 'no-store' })
+        if (!response.ok) return
+        const data = await response.json() as { servicesDown?: number; workersDown?: number }
+        if (!cancelled) setRuntimeDegraded((data.servicesDown ?? 0) > 0 || (data.workersDown ?? 0) > 0)
+      } catch {
+        // A health probe must never break the header.
+      }
+    }
+    void read()
+    const id = window.setInterval(() => void read(), 15_000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
   const [title, sub] = sharedSpace && LOCAL_SHARED_TITLES[seg]
     ? LOCAL_SHARED_TITLES[seg]
     : localMode && LOCAL_TITLES[seg]
@@ -292,11 +311,16 @@ export function AppHeader({
     <>
       <header className="app-header">
         <div className="head-titles">
-          <div className="head-title">{title}</div>
-          <div className="head-sub">{sub}</div>
+          {/* Prototype: the space names the context above the page title. */}
+          <div className="head-crumb">{sharedSpace ? 'Shared memories' : 'Personal memories'}</div>
+          <div className="head-title" title={sub}>{title}</div>
         </div>
         <div className="head-tabs" />
         <div className="head-actions">
+          <span className={`runtime-pill${runtimeDegraded ? ' degraded' : ''}`} title={runtimeDegraded ? 'A service or worker needs attention' : 'Stream MCP service is running'}>
+            <i className="runtime-dot" aria-hidden="true" />
+            stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
+          </span>
           {teamName && !localMode ? <span className="head-badge head-team">{teamName}</span> : null}
           {!localMode ? <span className={`role-badge ${roleClass} head-role`}>{roleLabel}</span> : null}
           {showLogout ? (

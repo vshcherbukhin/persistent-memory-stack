@@ -333,7 +333,7 @@ export function MemoriesClient({
           className={`service-view-button${activeView === 'list' ? ' active' : ''}`}
           onClick={() => selectMemoryTab('list')}
         >
-           Memory List ({total.toLocaleString()})
+          <Icon name="memory" size={15} /> Memories <span className="service-view-count">{total.toLocaleString()}</span>
         </button>
         {graphEnabled ? <>
           <span className="service-view-separator" aria-hidden="true" />
@@ -344,7 +344,7 @@ export function MemoriesClient({
             className={`service-view-button${activeView === 'graph' ? ' active' : ''}`}
             onClick={() => selectMemoryTab('graph')}
           >
-            Memory Graph
+            <Icon name="hub" size={15} /> Memory graph
           </button>
         </> : null}
         {canUseMemoryTools ? (
@@ -357,7 +357,7 @@ export function MemoriesClient({
               className={`service-view-button${activeView === 'tools' ? ' active' : ''}`}
               onClick={() => selectMemoryTab('tools')}
             >
-              Memory Tools
+              <Icon name="storage" size={15} /> Tools
             </button>
           </>
         ) : null}
@@ -403,10 +403,10 @@ export function MemoriesClient({
         ) : null}
         <div className="memory-badge-filter">
           <Select
-            ariaLabel="Filter by badge"
+            ariaLabel="Filter by category"
             value={filterBadge}
             onChange={setFilterBadge}
-            options={[{ value: '', label: 'All badges' }, ...badges.map((badge) => ({ value: badge, label: badge }))]}
+            options={[{ value: '', label: 'All categories' }, ...badges.map((badge) => ({ value: badge, label: badge }))]}
           />
         </div>
         <ConfidenceRangeSelect
@@ -417,14 +417,27 @@ export function MemoriesClient({
             setScoreMax(max === '1.0' ? '' : max)
           }}
         />
+        {/* Prototype: the active-filter count reads as a chip, and export sits in
+            reach of the filtered view rather than only inside Tools. */}
+        {filtersActive ? (
+          <span className="filter-count-chip">
+            <Icon name="filter_alt" size={13} />
+            {filterCount} filter{filterCount === 1 ? '' : 's'}
+          </span>
+        ) : null}
         <button
           type="button"
           className={`btn ${filtersActive ? 'accent-quiet' : 'secondary'}`}
           disabled={busy || !filtersActive}
           onClick={clearFilters}
         >
-          {filtersActive ? `Reset ${filterCount} filter${filterCount === 1 ? '' : 's'}` : 'Reset'}
+          Reset
         </button>
+        {canUseMemoryTools ? (
+          <button type="button" className="btn secondary" onClick={() => selectMemoryTab('tools')}>
+            <Icon name="download" size={15} /> Export
+          </button>
+        ) : null}
       </form>
 
       {/* The list */}

@@ -9,7 +9,7 @@ describe('Memory List trust and filter controls', () => {
 
     expect(client).not.toContain('verifyMemoryAction')
     expect(client).not.toContain('m.verified')
-    expect(client).toContain('Memory List ({total.toLocaleString()})')
+    expect(client).toContain('<span className="service-view-count">{total.toLocaleString()}</span>')
   })
 
   it('uses one applied confidence-range popover instead of two score text fields', () => {
