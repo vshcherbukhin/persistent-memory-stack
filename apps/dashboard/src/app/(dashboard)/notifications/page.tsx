@@ -1,6 +1,7 @@
 import { requireControlPlane, isSuperuser } from '@/lib/session'
 import { api, normalizeMemorySurface } from '@/lib/api'
 import { NotificationsClient, type NotificationTarget } from './NotificationsClient'
+import { BrowserPushStatus } from './BrowserPushStatus'
 import { SettingsLayout, SettingsPageFrame, SettingsSection, type SettingsNavItem } from '@/components/settings/SettingsShell'
 import { NotifyForm } from './NotifyForm'
 import { saveNotifyTargetAction } from './actions'
@@ -100,6 +101,9 @@ export default async function NotificationsPage({
               surface={surface}
               personalMode
             />
+            {/* What gets sent is settled above. Whether anything can arrive at all
+                is a separate question, and it is the half that usually fails. */}
+            <BrowserPushStatus />
           </SettingsSection>
         </SettingsLayout>
       </SettingsPageFrame>

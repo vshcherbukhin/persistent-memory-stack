@@ -527,13 +527,39 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
         </div>
       </div>
 
-      {/* Totals card + token trend chart */}
+      {/* Headline figures for the selected window, then the trend behind them. */}
+      <section className="usage-kpis" aria-label={`Usage totals · ${WINDOW_LABEL[chartWindow]}`}>
+        <div className="panel usage-kpi">
+          <div className="section-label">Total tokens</div>
+          <div className="usage-kpi-value">{fmtTok(chartData.totals.tokens)}</div>
+          <div className="muted">{WINDOW_LABEL[chartWindow]}</div>
+        </div>
+        <div className="panel usage-kpi">
+          <div className="section-label">Requests</div>
+          <div className="usage-kpi-value">{fmtTok(chartData.totals.requests)}</div>
+          <div className="muted">{WINDOW_LABEL[chartWindow]}</div>
+        </div>
+        <div className="panel usage-kpi">
+          <div className="section-label">Estimated cost</div>
+          <div className="usage-kpi-value accent">{fmtCost(chartData.totals.cost)}</div>
+          <div className="muted">locally-run models are not billed</div>
+        </div>
+        <div className="panel usage-kpi">
+          <div className="section-label">Tokens per request</div>
+          <div className="usage-kpi-value">
+            {chartData.totals.requests > 0
+              ? fmtTok(Math.round(chartData.totals.tokens / chartData.totals.requests))
+              : '—'}
+          </div>
+          <div className="muted">mean across the window</div>
+        </div>
+      </section>
+
       <div className="spark-card">
         <div className="spark-head">
-          <div className="spark-stats">
-            <div><div className="stat-label">Total tokens</div><div className="stat-value">{fmtTok(chartData.totals.tokens)}</div></div>
-            <div><div className="stat-label">Requests</div><div className="stat-value">{fmtTok(chartData.totals.requests)}</div></div>
-            <div><div className="stat-label">Est. cost</div><div className="stat-value accent">{fmtCost(chartData.totals.cost)}</div></div>
+          <div>
+            <h2 className="card-title">Usage over time</h2>
+            <p className="note" style={{ margin: '3px 0 0' }}>Token volume per bucket for the selected window.</p>
           </div>
           <div className="spark-meta">{WINDOW_LABEL[chartWindow]}</div>
         </div>
