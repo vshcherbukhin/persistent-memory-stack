@@ -119,6 +119,24 @@ export function MemoriesClient({
   const [bulkDeleting, setBulkDeleting] = useState<BulkGraphDeletePreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<PendingEmbeddings | null>(initialPending)
+  // Filter state drives three things: the reset affordance, the result line, and
+  // which blank state the table shows when a query returns nothing.
+  const filterCount = [
+    query.trim(),
+    filterTeam,
+    filterProject,
+    filterBadge,
+    scoreMin || scoreMax,
+  ].filter(Boolean).length
+  const filtersActive = filterCount > 0
+  const clearFilters = () => {
+    setQuery('')
+    setFilterTeam('')
+    setFilterProject('')
+    setFilterBadge('')
+    setScoreMin('')
+    setScoreMax('')
+  }
   const refreshInFlight = useRef(false)
   const loadMoreInFlight = useRef(false)
   const scrollBodyRef = useRef<HTMLDivElement>(null)
@@ -399,18 +417,11 @@ export function MemoriesClient({
         />
         <button
           type="button"
-          className="btn secondary"
-          disabled={busy}
-          onClick={() => {
-            setQuery('')
-            setFilterTeam('')
-            setFilterProject('')
-            setFilterBadge('')
-            setScoreMin('')
-            setScoreMax('')
-          }}
+          className={`btn ${filtersActive ? 'accent-quiet' : 'secondary'}`}
+          disabled={busy || !filtersActive}
+          onClick={clearFilters}
         >
-          Reset
+          {filtersActive ? `Reset ${filterCount} filter${filterCount === 1 ? '' : 's'}` : 'Reset'}
         </button>
       </form>
 
@@ -534,9 +545,51 @@ export function MemoriesClient({
               Loading more memories as you scroll…
             </div>
           ) : null}
-          {rows.length === 0 ? <div className="gt-empty">No memories. <span style={{ color: 'var(--dim)' }}>Start an ingest or write one from your agent to populate this list.</span></div> : null}
+          {rows.length === 0 ? (
+            filtersActive ? (
+              // A search that found nothing is a different problem from an empty
+              // corpus, and needs a different way out.
+              <div className="memory-blank" role="status">
+                <Icon name="search_off" size={30} className="memory-blank-icon" />
+                <strong>No memories match these filters</strong>
+                <span>
+                  {query.trim()
+                    ? <>Semantic search found nothing above the similarity threshold for <b>“{query.trim()}”</b>{filterCount > 1 ? ' within the other active filters' : ''}.</>
+                    : <>No stored memory matches the {filterCount} active filter{filterCount === 1 ? '' : 's'}.</>}
+                </span>
+                <div className="memory-blank-actions">
+                  <button type="button" className="btn primary" onClick={clearFilters}>Clear all filters</button>
+                  {query.trim() ? (
+                    <button type="button" className="btn secondary" onClick={() => setQuery('')}>Keep filters, drop the search</button>
+                  ) : null}
+                </div>
+                <span className="memory-blank-foot">{filterCount} filter{filterCount === 1 ? '' : 's'} narrowing {total.toLocaleString()} record{total === 1 ? '' : 's'} down to 0.</span>
+              </div>
+            ) : (
+              <div className="memory-blank" role="status">
+                <Icon name="memory" size={30} className="memory-blank-icon" />
+                <strong>No memories yet</strong>
+                <span>
+                  Your agents write here. Start a session in Claude or Codex and ask it to remember
+                  something — or import an existing corpus from the Tools tab.
+                </span>
+                <div className="memory-blank-actions">
+                  <button type="button" className="btn primary" onClick={() => selectMemoryTab('tools')}>
+                    <Icon name="upload" size={15} /> Import memories
+                  </button>
+                </div>
+              </div>
+            )
+          ) : null}
         </div>
       </div>
+      {rows.length > 0 ? (
+        <p className="memory-result-line" role="status">
+          Showing <b>{rows.length.toLocaleString()}</b> of <b>{total.toLocaleString()}</b>
+          {filtersActive ? <> matching {filterCount} filter{filterCount === 1 ? '' : 's'}</> : null}
+          {!query.trim() && nextCursor ? ' · scroll to load more' : null}
+        </p>
+      ) : null}
       <p className="note" style={{ margin: '12px 2px 0' }}>
         {isPersonalSurface
           ? 'Personal memories stay in this local stack. You can manage the local records here; shared-memory team permissions only apply in the Shared Memories surface.'

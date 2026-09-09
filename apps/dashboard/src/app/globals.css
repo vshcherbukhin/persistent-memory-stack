@@ -4282,3 +4282,143 @@ button.primary:hover,
 
 /* Keep informative counts readable over the selected facet tint. */
 .memory-graph-facet-list button.active small { color: var(--body); }
+
+/* ── Overview: incident line, sparklines, activity + corpus row ───────────── */
+.overview-page { display: flex; flex-direction: column; gap: 20px; }
+.overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.overview-card { position: relative; overflow: hidden; }
+.metric-spark { position: absolute; right: 0; bottom: 0; opacity: .5; pointer-events: none; }
+
+.overview-incident { display: flex; gap: 12px; align-items: flex-start; margin: 0; }
+.overview-incident-icon { color: var(--coral); flex: 0 0 auto; margin-top: 1px; }
+.overview-incident p { color: var(--body); margin: 4px 0 0; max-width: 88ch; }
+.overview-incident-action {
+  align-items: center;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12.5px;
+  font-weight: 600;
+  gap: 5px;
+  margin-top: 9px;
+}
+.overview-incident-action:hover { color: var(--accent-hover); text-decoration: none; }
+
+.overview-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.overview-panel { display: flex; flex-direction: column; margin-bottom: 0; }
+.overview-panel-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.overview-panel-head .note { margin: 3px 0 0; font-size: 12px; }
+.overview-panel-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 12.5px;
+  gap: 9px;
+  padding: 28px 16px;
+  text-align: center;
+}
+.overview-panel-empty .ui-icon { color: var(--dim); }
+.overview-panel-empty span { max-width: 46ch; }
+.overview-panel-action {
+  align-items: center;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 11.5px;
+  font-weight: 700;
+  gap: 5px;
+  letter-spacing: .04em;
+  margin-top: 14px;
+  text-transform: uppercase;
+}
+.overview-panel-action:hover { color: var(--accent-hover); text-decoration: none; }
+
+.live-dot {
+  background: currentColor;
+  border-radius: 50%;
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+  animation: pulseDot 2.2s var(--ease) infinite;
+}
+
+.activity-feed { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+.activity-item {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--divider-soft);
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+}
+.activity-item:last-child { border-bottom: 0; }
+.activity-item .dot { flex: 0 0 auto; margin-top: 6px; }
+.activity-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.activity-line { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.activity-label {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-meta { color: var(--muted); font-family: var(--font-mono); font-size: 10.5px; }
+.activity-when {
+  color: var(--dim);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding-top: 2px;
+}
+
+.corpus-list { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+.corpus-row { align-items: center; display: flex; gap: 10px; padding: 6px 0; }
+.corpus-label {
+  color: var(--soft);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 132px;
+  flex: 0 0 auto;
+}
+.corpus-track { background: var(--border); border-radius: 3px; flex: 1; height: 5px; min-width: 0; }
+.corpus-fill { background: var(--plasma); border-radius: 3px; display: block; height: 100%; opacity: .85; }
+.corpus-count { color: var(--muted); flex: 0 0 auto; font-size: 11.5px; text-align: right; width: 42px; }
+
+@media (max-width: 1180px) {
+  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-lower { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Memories: distinct blank states and a result-position line ───────────── */
+.memory-blank {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 56px 24px;
+  text-align: center;
+}
+.memory-blank-icon { color: var(--dim); margin-bottom: 2px; }
+.memory-blank strong { color: var(--text); font-size: 15px; font-weight: 600; }
+.memory-blank > span { color: var(--muted); font-size: 12.5px; line-height: 1.6; max-width: 52ch; }
+.memory-blank b { color: var(--text); }
+.memory-blank-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
+.memory-blank-foot { color: var(--dim); font-size: 11px; }
+.memory-result-line {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin: 10px 2px 0;
+}
+.memory-result-line b { color: var(--soft); font-family: var(--font-mono); font-weight: 500; }
