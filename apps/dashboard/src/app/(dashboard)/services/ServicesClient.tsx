@@ -625,6 +625,17 @@ export function ServicesClient({
               (on native Linux, set <code className="code-inline">DOCKER_GID</code> to the host docker-group gid).
             </p>
             <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>{error}</p>
+            {/* State is unknown, not false: the containers may well be running.
+                Say so, and give the reader a way to re-probe without a reload. */}
+            <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--body)' }}>
+              Service state below is <b>unknown</b> while this is down — the containers themselves may still be running.
+              Start and stop actions are disabled until the sidecar answers.
+            </p>
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void refresh(true)}>
+                <Icon name="refresh" size={15} /> Retry connection
+              </button>
+            </div>
           </div>
         ) : (
           <div className="notice danger">{error}</div>
