@@ -4422,3 +4422,56 @@ button.primary:hover,
   margin: 10px 2px 0;
 }
 .memory-result-line b { color: var(--soft); font-family: var(--font-mono); font-weight: 500; }
+
+/* ── Destructive confirmations: state the impact before offering the button ── */
+.delete-warning { margin: 0 0 14px; }
+.delete-impact {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+.delete-impact-row {
+  align-items: baseline;
+  border-bottom: 1px solid var(--divider-soft);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 8px 13px;
+}
+.delete-impact-row:last-child { border-bottom: 0; }
+.delete-impact dt { color: var(--muted); font-size: 11.5px; margin: 0; }
+.delete-impact dd { color: var(--text); font-size: 12.5px; margin: 0; text-align: right; }
+.delete-impact dd.warn { color: var(--marigold); }
+.delete-impact dd.danger { color: var(--coral); }
+.delete-confirm-field { margin: 14px 0 4px; }
+.delete-confirm-field label { color: var(--soft); display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.delete-confirm-field .ui-input.invalid { border-color: var(--coral); box-shadow: 0 0 0 2px var(--coral-12); }
+.field-hint.danger { color: var(--coral); display: block; margin-top: 5px; }
+
+/* ── Workers: failure is stated, and a job can be run by hand ─────────────── */
+.worker-incident { margin: 0 0 16px; }
+.worker-incident-item {
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding-top: 4px;
+}
+.worker-incident-item b { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+.worker-row-failed { background: var(--coral-12); box-shadow: inset 2px 0 0 var(--coral); }
+.worker-row-failed:hover { background: var(--coral-12); }
+.worker-run-now {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--soft);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.worker-run-now:hover:not(:disabled) { border-color: var(--accent-40); color: var(--accent); }
+.worker-run-now:disabled { cursor: not-allowed; opacity: .4; }

@@ -86,6 +86,7 @@ function CronButton({
 
 export function WorkersClient({
   initial,
+  initialLiveness,
   initialError,
   canControl,
 }: {
@@ -95,6 +96,9 @@ export function WorkersClient({
   canControl: boolean
 }) {
   const [workers, setWorkers] = useState<WorkerStatus[]>(initial)
+  // Liveness was already fetched and passed in, but never rendered: a dead worker
+  // process looked identical to an idle one.
+  const [liveness, setLiveness] = useState<WorkerLiveness | null>(initialLiveness)
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [busy, setBusy] = useState<string | null>(null)
   const busyRef = useRef<string | null>(null)
@@ -117,6 +121,7 @@ export function WorkersClient({
     try {
       const r = await listWorkersAction()
       setWorkers(r.workers)
+      setLiveness(r.liveness)
       setError(r.error ?? null)
     } finally {
       inFlight.current = false
@@ -223,12 +228,38 @@ export function WorkersClient({
   }
 
   const cols = 'minmax(220px, .9fr) minmax(300px, 1fr) 176px 170px minmax(360px, 2fr)'
+  const workerProcessDown = liveness !== null && !liveness.alive
+  const failingWorkers = workers.filter((w) => w.status === 'failed' || w.lastError)
   const saveDisabled =
     !scheduleWorker || !schedulePreview || !schedulePreview.valid || !scheduleChanged || busy !== null || !canControl
 
   return (
     <div className="page-fill workers-page">
       {error ? <div className="notice danger">{error}</div> : null}
+
+      {/* A failing schedule needs to say what stops working, not just colour a row. */}
+      {workerProcessDown ? (
+        <div className="notice danger worker-incident" role="status">
+          <div className="notice-title">The worker process is not reporting</div>
+          No scheduled job can run — embedding backfill and graph consolidation are both stalled.
+          Stored memories are unaffected, but new records stay unembedded until the process is back.
+        </div>
+      ) : failingWorkers.length > 0 ? (
+        <div className="notice danger worker-incident" role="status">
+          <div className="notice-title">
+            {failingWorkers.length === 1
+              ? `${failingWorkers[0]!.name} has failed its last run`
+              : `${failingWorkers.length} jobs have failed their last run`}
+          </div>
+          {failingWorkers.map((w) => (
+            <div key={w.name} className="worker-incident-item">
+              <b>{w.name}</b> — {w.lastError ?? 'failed without an error message'}
+              {w.errorCount > 1 ? ` (${w.errorCount} consecutive failures)` : ''}
+              {w.enabled && w.nextRunAt ? `; retries ${fmtNext(w.nextRunAt)}` : '; paused, no retry scheduled'}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="gt table-scroll">
         <div className="gt-head" style={{ gridTemplateColumns: cols }}>
@@ -243,8 +274,13 @@ export function WorkersClient({
             const toggleAction: WorkerAction = w.enabled ? 'pause' : 'resume'
             const toggleBusy = busy === `${w.name}:pause` || busy === `${w.name}:resume`
             const statusKind = w.status === 'failed' || w.lastError ? 'error' : w.enabled ? 'running' : 'stopped'
+            const runBusy = busy === `${w.name}:run-now`
             return (
-              <div className="gt-row worker-row" key={w.name} style={{ gridTemplateColumns: cols }}>
+              <div
+                className={`gt-row worker-row${statusKind === 'error' ? ' worker-row-failed' : ''}`}
+                key={w.name}
+                style={{ gridTemplateColumns: cols }}
+              >
                 <div>
                   <div style={{ color: 'var(--body)' }}>{w.name}</div>
                   <div style={{ color: 'var(--dim)', fontSize: 11 }}>{w.description}</div>
@@ -296,6 +332,20 @@ export function WorkersClient({
                             disabled={busy !== null}
                             onClick={() => void act(w.name, toggleAction)}
                           />
+                        </Tooltip>
+                        {/* run-now was already a supported WorkerAction; the UI
+                            simply never offered it, so a failed job could only be
+                            retried by waiting for its next scheduled tick. */}
+                        <Tooltip label={`Run ${w.name} now`}>
+                          <button
+                            type="button"
+                            className="worker-run-now"
+                            aria-label={`Run ${w.name} now`}
+                            disabled={busy !== null || workerProcessDown}
+                            onClick={() => void act(w.name, 'run-now')}
+                          >
+                            <Icon name={runBusy ? 'hourglass_top' : 'play_arrow'} size={15} />
+                          </button>
                         </Tooltip>
                       </>
                     ) : null}

@@ -116,7 +116,9 @@ export function MemoriesClient({
   const [editing, setEditing] = useState<Memory | null>(null)
   const [viewing, setViewing] = useState<Memory | null>(null)
   const [deleting, setDeleting] = useState<{ memory: Memory; preview: GraphDeletePreview } | null>(null)
-  const [bulkDeleting, setBulkDeleting] = useState<BulkGraphDeletePreview | null>(null)
+  // The scope travels with the preview: a bulk delete confirmation that cannot
+  // name what it is about to delete is not a confirmation.
+  const [bulkDeleting, setBulkDeleting] = useState<{ preview: BulkGraphDeletePreview; scope: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<PendingEmbeddings | null>(initialPending)
   // Filter state drives three things: the reset affordance, the result line, and
@@ -625,7 +627,10 @@ export function MemoriesClient({
             return r
           })}
           onRequestBulkDelete={(project) => void wrap(async () => {
-            setBulkDeleting(await previewBulkDeleteAction(project, surface))
+            setBulkDeleting({
+              preview: await previewBulkDeleteAction(project, surface),
+              scope: project?.trim() || 'all projects',
+            })
           })}
           onBackfill={() => void wrap(async () => {
             const r = await runBackfillAction()
@@ -686,11 +691,12 @@ export function MemoriesClient({
 
       {bulkDeleting ? (
         <BulkDeletePreviewModal
-          preview={bulkDeleting}
+          preview={bulkDeleting.preview}
+          scope={bulkDeleting.scope}
           busy={busy}
           onClose={() => setBulkDeleting(null)}
           onConfirm={() => void wrap(async () => {
-            const deleted = await bulkDeleteAction({ previewToken: bulkDeleting.token, surface })
+            const deleted = await bulkDeleteAction({ previewToken: bulkDeleting.preview.token, surface })
             toast.success(`Deleted ${deleted.toLocaleString()} memory row${deleted === 1 ? '' : 's'}.`)
             setBulkDeleting(null)
             await refresh()
@@ -701,19 +707,40 @@ export function MemoriesClient({
   )
 }
 
+/** Impact rows shared by both destructive confirmations. */
+function DeleteImpact({ rows }: { rows: { label: string; value: string; tone?: 'warn' | 'danger' }[] }) {
+  return (
+    <dl className="delete-impact">
+      {rows.map((row) => (
+        <div key={row.label} className="delete-impact-row">
+          <dt>{row.label}</dt>
+          <dd className={row.tone ? `mono ${row.tone}` : 'mono'}>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function BulkDeletePreviewModal({
   preview,
+  scope,
   busy,
   onClose,
   onConfirm,
 }: {
   preview: BulkGraphDeletePreview
+  scope: string
   busy: boolean
   onClose: () => void
   onConfirm: () => void
 }) {
   const hasPrimary = preview.primaryMemoryCount > 0
-  const canConfirm = !hasPrimary || preview.canConfirmPrimary
+  const permitted = !hasPrimary || preview.canConfirmPrimary
+  // Typing the scope is the gate. A bulk delete is unrecoverable and the count
+  // alone is too easy to click past.
+  const [typed, setTyped] = useState('')
+  const matches = typed.trim() === scope
+  const canConfirm = permitted && matches
   return (
     <Modal
       title={hasPrimary ? 'Review graph-primary bulk deletion' : 'Review bulk deletion'}
@@ -724,16 +751,62 @@ function BulkDeletePreviewModal({
         <>
           <button className="btn secondary" disabled={busy} onClick={onClose}>Cancel</button>
           <button className="btn danger" disabled={busy || !canConfirm} onClick={onConfirm}>
-            {hasPrimary ? 'Delete and cascade graph facts' : 'Delete selected memories'}
+            {hasPrimary
+              ? `Delete ${preview.memoryCount.toLocaleString()} and cascade ${preview.primaryFactCount.toLocaleString()} fact${preview.primaryFactCount === 1 ? '' : 's'}`
+              : `Delete ${preview.memoryCount.toLocaleString()} memor${preview.memoryCount === 1 ? 'y' : 'ies'}`}
           </button>
         </>
       }
     >
-      <p>This preview covers <b>{preview.memoryCount.toLocaleString()}</b> selected memor{preview.memoryCount === 1 ? 'y' : 'ies'} and <b>{preview.episodeCount.toLocaleString()}</b> recorded graph episode{preview.episodeCount === 1 ? '' : 's'}.</p>
+      <div className="notice danger delete-warning">
+        <div className="notice-title">
+          This deletes {preview.memoryCount.toLocaleString()} memor{preview.memoryCount === 1 ? 'y' : 'ies'} permanently
+        </div>
+        There is no undo and no trash. Export first if you are not certain.
+      </div>
+
+      <DeleteImpact
+        rows={[
+          { label: 'Scope', value: scope },
+          { label: 'Memories', value: preview.memoryCount.toLocaleString() },
+          { label: 'Graph episodes removed', value: preview.episodeCount.toLocaleString() },
+          { label: 'Graph-primary memories', value: preview.primaryMemoryCount.toLocaleString(), tone: hasPrimary ? 'warn' : undefined },
+          { label: 'Graph facts cascaded', value: preview.primaryFactCount.toLocaleString(), tone: hasPrimary ? 'danger' : undefined },
+        ]}
+      />
+
       {hasPrimary ? (
-        <p><b>{preview.primaryMemoryCount.toLocaleString()}</b> selected memor{preview.primaryMemoryCount === 1 ? 'y is' : 'ies are'} primary sources for <b>{preview.primaryFactCount.toLocaleString()}</b> current graph fact{preview.primaryFactCount === 1 ? '' : 's'}. Deleting them cascades those facts and any entities left without support.</p>
-      ) : <p>No selected memory is currently a primary source. Deletion still removes the graph episodes recorded for every selected memory.</p>}
-      {!canConfirm ? <p className="notice danger">A Shared team member cannot confirm a graph-primary cascade. Ask a team admin to review this scope.</p> : null}
+        <p>
+          <b>{preview.primaryMemoryCount.toLocaleString()}</b> of these are primary sources. Deleting them removes{' '}
+          <b>{preview.primaryFactCount.toLocaleString()}</b> derived fact{preview.primaryFactCount === 1 ? '' : 's'} that other
+          memories may still reference by name, plus any entities left without support.
+        </p>
+      ) : (
+        <p>No selected memory is currently a primary source. Deletion still removes the graph episodes recorded for every selected memory.</p>
+      )}
+
+      {!permitted ? (
+        <p className="notice danger">A Shared team member cannot confirm a graph-primary cascade. Ask a team admin to review this scope.</p>
+      ) : (
+        <div className="field delete-confirm-field">
+          <label htmlFor="bulk-delete-confirm">
+            Type <code>{scope}</code> to confirm
+          </label>
+          <input
+            id="bulk-delete-confirm"
+            className={`ui-input mono${typed && !matches ? ' invalid' : ''}`}
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder={scope}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {typed && !matches ? (
+            <span className="field-hint danger">Enter the scope exactly to enable deletion.</span>
+          ) : null}
+        </div>
+      )}
+
       <p className="note">This confirmation token expires in five minutes and is rejected if any selected memory or graph episode changes before you confirm.</p>
     </Modal>
   )
@@ -766,11 +839,31 @@ function PrimaryCascadeDeleteModal({
         </>
       }
     >
-      {factCount > 0 ? <>
-        <p>This memory is the primary source for <b>{factCount}</b> current graph fact{factCount === 1 ? '' : 's'}.</p>
-        <p>Deleting it permanently removes those derived facts and any graph entities left without support. Later memories may remain as records, but the primary provenance chain is intentionally removed.</p>
-      </> : <p>This live preview found no primary graph facts. Deletion still removes every graph episode recorded for this memory.</p>}
-      <div className="memory-full-text">{memory.content}</div>
+      <div className={`notice ${factCount > 0 ? 'danger' : 'warn'} delete-warning`}>
+        <div className="notice-title">
+          {factCount > 0
+            ? `Deleting this cascades ${factCount} graph fact${factCount === 1 ? '' : 's'}`
+            : 'This deletes the memory permanently'}
+        </div>
+        {factCount > 0
+          ? 'Those derived facts and any graph entities left without support are removed with it. Later memories may remain as records, but the primary provenance chain is intentionally broken.'
+          : 'There is no undo. The graph episodes recorded for this memory are removed too.'}
+      </div>
+
+      <DeleteImpact
+        rows={[
+          { label: 'Memory', value: `${memory.id.slice(0, 8)}…` },
+          { label: 'Project', value: memory.project },
+          { label: 'Graph episodes removed', value: preview.episodeCount.toLocaleString() },
+          { label: 'Graph facts cascaded', value: factCount.toLocaleString(), tone: factCount > 0 ? 'danger' : undefined },
+        ]}
+      />
+
+      <div>
+        <span className="label">Memory being deleted</span>
+        <div className="memory-full-text">{memory.content}</div>
+      </div>
+      <p className="note">This confirmation token expires in five minutes and is rejected if the memory or its graph episodes change before you confirm.</p>
     </Modal>
   )
 }
