@@ -202,7 +202,7 @@ export function ServicesClient({
     return () => window.clearInterval(id)
   }, [])
 
-  const control = async (service: ServiceStatus, action: 'start' | 'stop') => {
+  const control = async (service: ServiceStatus, action: 'start' | 'stop' | 'restart') => {
     setBusyState(`${service.service}:${action}`)
     setError(null)
     const r = await serviceControlAction(service.service, action)
@@ -232,7 +232,7 @@ export function ServicesClient({
 
   const serviceStopWarnings = (service: ServiceStatus): string[] => SELF_STOP_WARNINGS[service.service] ?? []
 
-  const requestControl = (service: ServiceStatus, action: 'start' | 'stop') => {
+  const requestControl = (service: ServiceStatus, action: 'start' | 'stop' | 'restart') => {
     if (action === 'stop') {
       const dependents = dependentsFor(service)
       const extraWarnings = serviceStopWarnings(service)
@@ -442,6 +442,19 @@ export function ServicesClient({
                   {controllable ? (
                     <>
                       <span className="status-toggle-dot" aria-hidden="true" />
+                      {active ? (
+                        <Tooltip label={`Restart ${s.service}`}>
+                          <button
+                            type="button"
+                            className="service-restart"
+                            aria-label={`Restart ${s.service}`}
+                            disabled={busy !== null}
+                            onClick={() => requestControl(s, 'restart')}
+                          >
+                            <Icon name={busy === `${s.service}:restart` ? 'hourglass_top' : 'refresh'} size={15} />
+                          </button>
+                        </Tooltip>
+                      ) : null}
                       <Tooltip label={`${toggleAction === 'stop' ? 'Stop' : 'Start'} ${s.service}`}>
                         <StatusToggle
                           checked={active}

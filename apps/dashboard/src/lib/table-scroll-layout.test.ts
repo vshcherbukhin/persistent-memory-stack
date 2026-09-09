@@ -791,7 +791,7 @@ describe('table scroll layout contract', () => {
 
     expect(memories).toContain('const [nextCursor, setNextCursor]')
     expect(memories).toContain('new IntersectionObserver')
-    expect(memories).toContain('ariaLabel="Filter by badge"')
+    expect(memories).toContain('ariaLabel="Filter by category"')
     expect(memories).toContain('<ConfidenceRangeSelect')
     expect(memories).toContain("min={scoreMin || '0.0'}")
     expect(memories).toContain("max={scoreMax || '1.0'}")

@@ -4285,7 +4285,7 @@ button.primary:hover,
 
 /* ── Overview: incident line, sparklines, activity + corpus row ───────────── */
 .overview-page { display: flex; flex-direction: column; gap: 20px; }
-.overview-grid { grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); }
+.overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .overview-card { position: relative; overflow: hidden; }
 .metric-spark { position: absolute; right: 0; bottom: 0; opacity: .5; pointer-events: none; }
 
@@ -4780,3 +4780,21 @@ button.primary:hover,
 .memory-action-button:hover { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
 .memory-action-button.danger { background: transparent; color: var(--muted); }
 .memory-action-button.danger:hover { background: var(--coral-12); border-color: var(--coral-40); color: var(--coral); }
+
+/* Per-row service restart (prototype d-services). */
+.service-restart {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--soft);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.service-restart:hover:not(:disabled) { border-color: var(--accent-40); color: var(--accent); }
+.service-restart:disabled { cursor: not-allowed; opacity: .4; }
+@media (max-width: 1120px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
