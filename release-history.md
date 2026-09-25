@@ -2,6 +2,67 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.3.0 - 2026-09-25
+
+[GitHub release v1.3.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.0)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.3.0 | Live MCP activity on Overview, memory creation from the Memories toolbar, impact-stating deletion dialogs and the completed Neural Obsidian pass. |
+| onboarding | 1.3.0 | Installation wizard rebuilt to the design, with per-field errors, per-step fault states, install step timings and a completion summary. |
+| docs | 1.3.0 | Documents the Overview live MCP activity panel. |
+| api | 1.0.2 | Existing personal memory and provider health APIs retained. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Watch live MCP activity from Overview. The panel lists the stream sessions that
+  are connected right now with their client, connection, last-seen time and idle
+  countdown. Select a session to read its live communication inside the same card,
+  then return to the list. A session leaves the list as soon as it disconnects; a
+  client that drops without disconnecting remains until its idle timeout. This
+  replaces the previous activity panel, which could not show past memory operations.
+- Overview no longer carries a manual refresh control. The page continues to
+  refresh on its own every ten seconds.
+- Create a memory directly from the Memories toolbar, open a record's details in a
+  dialog, and jump from a record to its place in the memory graph.
+- Read the exact consequences before deleting: the cascade and bulk deletion
+  dialogs name what is removed and require a typed confirmation.
+- Memories, Services, Workers, Token usage, Security, System Settings,
+  Notifications, Documentation, sign-in, profile and the Shared Memories
+  connection page complete the Neural Obsidian pass: hairline tables, rounded
+  status badges, segmented controls, toned notices and consistent empty states.
+- Install with a wizard that matches the design end to end: an environment
+  pre-check that reads the machine one probe at a time, field-level validation,
+  provider and model pickers, a highlighted environment preview that flags missing
+  values, per-step install timings, and a completion summary of what is running.
+- Fixes: a failed installation step no longer prints its message twice, and the
+  environment pre-check no longer repeats a resources-only failure as a second
+  error.
+
+Direct upgrades from public 1.0.0 through 1.2.0 preserve memories, data volumes,
+credentials and embedding configuration. This release adds no database migration
+or embedding-model change.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.3.0
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.3.0`.
+For a new installation, follow the
+[v1.3.0 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.0/README.md).
+
+Validation covers dashboard and wizard type checks and unit tests, a live review of
+every dashboard page in the local stack, and a wizard walkthrough of each step and
+its failure states against a mocked installer. Live MCP activity was verified with
+real sessions, including a session closing while its output was open. Interface
+screenshots in the documentation still show the 1.2.0 visuals, and macOS was not
+retested on this Windows development machine.
+
 ## 1.2.0 - 2026-09-08
 
 [GitHub release v1.2.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.2.0)

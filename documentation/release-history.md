@@ -3,6 +3,20 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.3.0 - 2026-09-25
+
+[GitHub release v1.3.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.0)
+
+- Documents the Overview live MCP activity panel: the connected stream sessions,
+  their idle countdown, the live output of a selected session, and when a session
+  leaves the list.
+- Describes the corpus shape panel beside it.
+- Includes version-specific
+  [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.0/README.md)
+  and the `npm run update-persistent-memory -- --release 1.3.0` update command.
+- Interface screenshots still show the 1.2.0 visuals; the dashboard and wizard
+  captures have not been rerun for this release.
+
 ## 1.2.0 - 2026-09-08
 
 [GitHub release v1.2.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.2.0)
