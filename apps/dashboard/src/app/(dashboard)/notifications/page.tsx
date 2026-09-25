@@ -88,22 +88,29 @@ export default async function NotificationsPage({
     return (
       <SettingsPageFrame>
         <SettingsLayout items={personalSettings} activeId={activeSetting}>
-          <SettingsSection
-            id="system-notifications"
-            title="System notifications"
-            description="Choose which personal dashboard events can use Chrome/browser notifications."
-          >
-            <NotifyForm
-              action={saveNotifyTargetAction}
-              current={targets[0]?.current ?? null}
-              targetKind="system"
-              teamId={null}
-              surface={surface}
-              personalMode
-            />
-            {/* What gets sent is settled above. Whether anything can arrive at all
-                is a separate question, and it is the half that usually fails. */}
-            <BrowserPushStatus />
+          <SettingsSection id="system-notifications" title="System notifications" plain>
+            {/* Prototype d-notifications: what you get told about, beside whether anything can arrive at all. */}
+            <div className="notifications-grid">
+              <section className="panel notifications-card" aria-label="What you get told about">
+                <div className="card-head">
+                  <div>
+                    <h2 className="card-title">What you get told about</h2>
+                    <p className="card-sub">Delivered as browser notifications from this dashboard only.</p>
+                  </div>
+                </div>
+                <NotifyForm
+                  action={saveNotifyTargetAction}
+                  current={targets[0]?.current ?? null}
+                  targetKind="system"
+                  teamId={null}
+                  surface={surface}
+                  personalMode
+                />
+              </section>
+              {/* What gets sent is settled on the left. Whether anything can arrive at all
+                  is a separate question, and it is the half that usually fails. */}
+              <BrowserPushStatus />
+            </div>
           </SettingsSection>
         </SettingsLayout>
       </SettingsPageFrame>

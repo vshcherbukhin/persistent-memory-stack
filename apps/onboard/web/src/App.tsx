@@ -12,7 +12,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { getJSON, postJSON, streamNDJSON } from './api'
 import { startWizardHeartbeat } from './heartbeat'
-import { ProgressBar, Field, StepList, Terminal, StatusRow, type StepState } from './components'
+import { ProgressBar, Field, StepList, Terminal, StatusRow, formatStepDuration, type StepState } from './components'
+import { Icon, Lattice, Notice, ProductMark } from './ui'
 import { PrereqProgress } from './PrereqProgress'
 import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
 import { applyTheme, dashboardThemeUrl, readTheme, type ThemePreference } from './theme'
@@ -188,16 +189,6 @@ function generateStrongPassword(): string {
   return chars.join('')
 }
 
-// ── Brand hexagon "B" mark ─────────────────────────────────────────────────────
-function HexLogo({ size = 26 }: { size?: number }) {
-  return (
-    <svg className="wiz-logo" width={size} height={size} viewBox="0 0 100 100" aria-hidden>
-      <polygon points="50,5 91,28 91,72 50,95 9,72 9,28" fill="rgba(22,167,219,.12)" stroke="#16A7DB" strokeWidth="6" strokeLinejoin="round" />
-      <text x="50" y="67" textAnchor="middle" fontSize="46" fontWeight="700" fill="#16A7DB" fontFamily="'Source Sans Pro',sans-serif">B</text>
-    </svg>
-  )
-}
-
 // ── Appearance toggle (header) ─────────────────────────────────────────────────
 // The completion link explicitly hands this choice to the dashboard.
 function ThemeToggle() {
@@ -231,7 +222,7 @@ function ThemeToggle() {
 }
 
 // ── Left step rail (per-flow phase list; jump to a visited step) ────────────────
-function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase: Phase; personalMemoryEnabled: boolean; goto: (p: Phase) => void }) {
+function Rail({ flow, phase, personalMemoryEnabled, fault, goto }: { flow: Flow; phase: Phase; personalMemoryEnabled: boolean; fault: boolean; goto: (p: Phase) => void }) {
   const seq = phasesFor(flow, { personalMemoryEnabled })
   const cur = seq.indexOf(phase)
   return (
@@ -243,7 +234,8 @@ function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase:
         style={{ ['--conduit' as string]: `${seq.length > 1 ? (Math.max(cur, 0) / (seq.length - 1)) * 100 : 0}%` }}
       >
         {seq.map((p, idx) => {
-          const state = idx < cur ? 'done' : idx === cur ? 'current' : 'todo'
+          // A step reporting a blocking fault marks its own rail node, as in the prototype's negative artboards.
+          const state = idx < cur ? 'done' : idx === cur ? (fault ? 'current fault' : 'current') : 'todo'
           const visited = idx <= cur
           return (
             <button
@@ -253,7 +245,7 @@ function Rail({ flow, phase, personalMemoryEnabled, goto }: { flow: Flow; phase:
               disabled={!visited}
               onClick={() => { if (visited) goto(p) }}
             >
-              <span className="wiz-rail-num">{state === 'done' ? '✓' : String(idx + 1)}</span>
+              <span className="wiz-rail-num">{state === 'done' ? <Icon name="check" size={12} /> : String(idx + 1)}</span>
               <span className="wiz-rail-label">{PHASE_LABEL[p]}</span>
             </button>
           )
@@ -273,6 +265,8 @@ export default function App() {
   const [remoteIdentity, setRemoteIdentity] = useState<RemoteIdentity | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [nextDisabled, setNextDisabled] = useState(false)
+  const [fault, setFault] = useState(false)
+  const [installSummary, setInstallSummary] = useState<InstallSummary | null>(null)
   const [resources, setResources] = useState<ResourceSnapshot | null>(null)
   const [resourceError, setResourceError] = useState<string | null>(null)
   const [embeddingTested, setEmbeddingTested] = useState('')
@@ -306,6 +300,7 @@ export default function App() {
   const setPhaseAndResetGate = (p: Phase | null) => {
     if (!p) return
     setNextDisabled(false)
+    setFault(false)
     setPhase(p)
   }
 
@@ -319,7 +314,7 @@ export default function App() {
   const shared = {
     answers, set, apps, setApps, appsInited, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, flow,
     resources, resourceError, refreshResources,
-    onBack: () => go('back'), onNext: () => go('next'), setNextDisabled,
+    onBack: () => go('back'), onNext: () => go('next'), setNextDisabled, setFault,
   }
 
   // Footer is hidden on the flow picker, the install run, and the done screen.
@@ -328,17 +323,21 @@ export default function App() {
   return (
     <div className="shell">
       <header className="wiz-header">
-        <HexLogo />
-        <div className="wiz-brand">
-          <span className="wiz-title">Persistent Memory</span>
-          <span className="wiz-sub">Guided install · host-only · 127.0.0.1:4319</span>
+        {/* Prototype wizard shell: product mark and brand, the appearance switch, then the host-only pill. */}
+        <div className="wiz-brand-block">
+          <span className="wiz-mark"><ProductMark /></span>
+          <div className="wiz-brand">
+            <span className="wiz-title">Persistent Memory</span>
+            <span className="wiz-sub">Guided install</span>
+          </div>
         </div>
         <ThemeToggle />
+        <span className="wiz-host"><Icon name="lock" size={13} /> host-only · 127.0.0.1:4319</span>
       </header>
 
       <div className="wiz-stage">
         <div className="wiz-card">
-          <Rail flow={flow} phase={phase} personalMemoryEnabled={personalFlow} goto={setPhaseAndResetGate} />
+          <Rail flow={flow} phase={phase} personalMemoryEnabled={personalFlow} fault={fault} goto={setPhaseAndResetGate} />
 
           <div className="wiz-col">
             <div id="wiz-content">
@@ -364,23 +363,24 @@ export default function App() {
               {phase === 'ecosystem' && <Ecosystem {...shared} />}
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
-              {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} />}
+              {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} setFault={setFault} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} onGoto={setPhaseAndResetGate} />}
               {flow !== 'full' && phase === 'shared' && <SharedConnect {...shared} />}
               {phase === 'install' && (
                 <Install
                   flow={flow}
                   body={installBody(flow, answers, apps, serverPin)}
                   onToken={setToken}
-                  onDone={() => setPhaseAndResetGate('done')}
+                  onDone={(summary) => { setInstallSummary(summary); setPhaseAndResetGate('done') }}
                   onBack={() => setPhaseAndResetGate('prereqs')}
+                  setFault={setFault}
                 />
               )}
-              {phase === 'done' && <Done flow={flow} token={token} remoteToken={answers.remoteToken} apps={apps} passwordConfigured={Boolean(answers.userPassword)} />}
+              {phase === 'done' && <Done flow={flow} token={token} remoteToken={answers.remoteToken} apps={apps} passwordConfigured={Boolean(answers.userPassword)} embedding={`${answers.embedModel} @ ${answers.embedDim}`} summary={installSummary} />}
             </div>
 
             {showFooter && (
               <footer className="wiz-footer">
-                <button type="button" className="ghost" onClick={() => go('back')}>← Back</button>
+                <button type="button" className="btn ghost" onClick={() => go('back')}><Icon name="arrow_left" size={15} /> Back</button>
                 <span className="wiz-step-count">
                   {(() => {
                     const seq = phasesFor(flow, { personalMemoryEnabled: personalFlow })
@@ -388,8 +388,8 @@ export default function App() {
                     return at < 0 ? '' : `STEP ${String(at + 1).padStart(2, '0')} / ${seq.length}`
                   })()}
                 </span>
-                <button type="button" className="primary" disabled={nextDisabled} onClick={() => go('next')}>
-                  {phase === 'review' ? 'Generate & Install' : 'Next →'}
+                <button type="button" className="btn primary" disabled={nextDisabled} onClick={() => go('next')}>
+                  {phase === 'review' ? 'Generate & Install' : 'Next'} <Icon name="arrow_right" size={15} />
                 </button>
               </footer>
             )}
@@ -399,6 +399,8 @@ export default function App() {
     </div>
   )
 }
+
+interface InstallSummary { done: number; total: number; ms: number }
 
 interface InstallBody {
   flow: Flow
@@ -458,21 +460,43 @@ interface StepProps {
   onBack: () => void
   onNext: () => void
   setNextDisabled: (b: boolean) => void
+  setFault: (b: boolean) => void
   resources: ResourceSnapshot | null
   resourceError: string | null
   refreshResources: () => Promise<void>
 }
 
 // ── Step 0: flow router ─────────────────────────────────────────────────────────
+const WELCOME_FEATURES: { icon: 'database' | 'cpu' | 'hub'; title: string; detail: string }[] = [
+  { icon: 'database', title: 'Local stack', detail: 'Postgres · FalkorDB' },
+  { icon: 'cpu', title: 'Embeddings', detail: 'Local model or API' },
+  { icon: 'hub', title: 'Stream MCP', detail: 'One agent endpoint' },
+]
+
 function FlowRouter({ onPick }: { onPick: (f: Flow, personalMemoryEnabled: boolean) => void }) {
+  // Prototype w-welcome: one committed action, the stack named in three cards, the lattice behind.
   return (
     <section className="welcome-step">
-      <h2>Welcome to Persistent Memory</h2>
-      <p>Persistent Memory gives Claude and Codex a durable local memory system for project context, decisions, fixes, and long-running work.</p>
-      <p className="welcome-copy">Install your private memory stack, dashboard, and Claude/Codex integration on this computer.</p>
-      <div className="row welcome-actions">
-        <button type="button" className="primary" onClick={() => onPick('full', true)}>Get started</button>
+      <div className="welcome-hero">
+        <span className="eyebrow accent">Welcome to Persistent Memory</span>
+        <h2>Memory that outlives the session.</h2>
+        <p className="lede">Persistent Memory gives Claude and Codex a durable local memory system for project context, decisions, fixes, and long-running work.</p>
+        <p className="lede welcome-copy">Install your private memory stack, dashboard, and Claude/Codex integration on this computer.</p>
+        <div className="welcome-features">
+          {WELCOME_FEATURES.map((feature) => (
+            <div key={feature.title} className="welcome-feature">
+              <Icon name={feature.icon} size={18} />
+              <b>{feature.title}</b>
+              <span>{feature.detail}</span>
+            </div>
+          ))}
+        </div>
+        <div className="btn-row welcome-actions">
+          <button type="button" className="btn primary lg" onClick={() => onPick('full', true)}>Get started <Icon name="arrow_right" size={16} /></button>
+          <span className="note">About 5–10 minutes · runs on this computer</span>
+        </div>
       </div>
+      <div className="welcome-art"><Lattice width={360} height={220} /></div>
     </section>
   )
 }
@@ -526,15 +550,15 @@ function PrereqCard({
   action?: string
   onInstall?: () => void
 }) {
-  const icon = status === 'ok' ? '✓' : status === 'warn' ? '!' : ''
+  const icon = status === 'ok' ? <Icon name="check" size={12} /> : status === 'warn' ? '!' : ''
   return (
     <div className={`precheck-card ${status}`}>
       <span className={`precheck-icon ${status}`} aria-hidden>{icon}</span>
       <span className="precheck-label">{label}</span>
       <span className="precheck-detail">{detail}</span>
       {status === 'warn' && action && onInstall ? (
-        <button type="button" className="precheck-action" onClick={onInstall}>{action}</button>
-      ) : null}
+        <button type="button" className="btn sm accent-quiet precheck-action" onClick={onInstall}>{action}</button>
+      ) : <span />}
     </div>
   )
 }
@@ -578,7 +602,7 @@ function prereqAction(p: PrereqResult, key: PrereqKey): string | undefined {
   return undefined
 }
 
-function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, refreshResources }: StepProps) {
+function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resourceError, refreshResources }: StepProps) {
   const [p, setP] = useState<PrereqResult | null>(null)
   const [completedChecks, setCompletedChecks] = useState(0)
   const [installing, setInstalling] = useState<PrereqKey | null>(null)
@@ -610,6 +634,10 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
   const blocked = prereqsBlocked(flow, p, { personalMemoryEnabled: answers.personalMemoryEnabled }) || !baseline?.allowed
   const brewMissing = !!(p?.homebrew && !p.homebrew.ok)
   useEffect(() => { setNextDisabled(!p || completedChecks < PREREQ_ITEMS.length || blocked) }, [p, completedChecks, blocked])
+  const scanned = !!p && completedChecks >= PREREQ_ITEMS.length
+  const failedRequired = p ? PREREQ_ITEMS.filter(item => item.key !== 'ollama' && !prereqProbe(p, item.key).ok).length : 0
+  const showFault = !installing && ((!restartRequired && blocked && scanned) || !!error)
+  useEffect(() => { setFault(showFault) }, [showFault])
   const install = async (component: PrereqKey) => {
     setInstalling(component); setLog([]); setError(null)
     setProgress({ label: p && prereqAction(p, component) === 'Start' ? 'Starting' : 'Preparing installation' })
@@ -642,7 +670,17 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
   return (
     <section>
       <h2>Environment pre-check</h2>
-      <p>Auto-checked for the local personal memory install.</p>
+      {installing ? (
+        <p className="lede">Installing <b>{PREREQ_ITEMS.find(item => item.key === installing)!.label}</b> — this can take a few minutes.</p>
+      ) : (
+        <p className="lede">Reading this machine for the local personal memory install.</p>
+      )}
+      {/* Prototype w-prereq-unreachable: when the probe itself fails, that failure leads the page. */}
+      {error && !p && !installing ? (
+        <Notice tone="fault" className="prereq-error" title="Could not read this machine" role="alert">
+          <code>GET /api/prereqs</code> failed: {error} Re-run <code>npm run install-persistent-memory</code> if the installer stopped responding.
+        </Notice>
+      ) : null}
       <div className="precheck-list">
         {PREREQ_ITEMS.map((item, idx) => {
           const isInstalling = installing === item.key
@@ -678,7 +716,16 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
           )
         })}
       </div>
-      {resources && baseline ? <ResourceSummary snapshot={resources} assessment={baseline} /> : <p className="notice warn">{resourceError ?? 'Measuring RAM and disk space…'}</p>}
+      {/* Prototype w-prereq-scan: probes resolve one at a time so the machine is visibly being read. */}
+      {!installing && !error && (!p || completedChecks < PREREQ_ITEMS.length) ? (
+        <div className="precheck-scan">
+          <ProgressBar indeterminate />
+          <p className="note precheck-scan-note">
+            Probing {Math.min(completedChecks + 1, PREREQ_ITEMS.length)} of {PREREQ_ITEMS.length} · nothing is installed or changed during a pre-check.
+          </p>
+        </div>
+      ) : null}
+      {resources && baseline ? <ResourceSummary snapshot={resources} assessment={baseline} /> : <Notice tone="warn">{resourceError ?? 'Measuring RAM and disk space…'}</Notice>}
       <p className="field-hint">The baseline assumes API keys for both embeddings and fact extraction. Ollama adds model-specific requirements in the Embeddings step.</p>
       {installing && progress ? (
         <PrereqProgress progress={progress} component={PREREQ_ITEMS.find(item => item.key === installing)!.label} />
@@ -687,19 +734,39 @@ function Prereqs({ flow, answers, setNextDisabled, resources, resourceError, ref
         <HomebrewManualCard detail={p.homebrew.detail} manual={p.homebrew.manualInstall} />
       ) : null}
       {restartRequired && !installing ? (
-        <p className="notice warn">Node 24 is installed. This wizard is still using the previous Node process. Stop it with Ctrl+C in its terminal, open a terminal where <code>node -v</code> reports v24.x, then run <code>npm run install-persistent-memory</code> again.</p>
+        <Notice tone="warn" title="Restart the installer">
+          Node 24 is installed. This wizard is still using the previous Node process. Stop it with Ctrl+C in its terminal, open a terminal where <code>node -v</code> reports v24.x, then run <code>npm run install-persistent-memory</code> again.
+        </Notice>
       ) : null}
-      {!installing && ((!restartRequired && blocked && p) || error) ? (
-        <p className="notice bad prereq-error">{error ?? 'A required check failed. Use the matching install/start action or follow its instructions, then check again.'}</p>
+      {/* A resource-only blocker is already explained by the resource summary above. */}
+      {!installing && ((!restartRequired && blocked && scanned && failedRequired > 0) || (error && p)) ? (
+        <Notice
+          tone="fault"
+          className="prereq-error"
+          title={error ? 'A repair did not finish' : `${failedRequired} required check${failedRequired === 1 ? '' : 's'} failed`}
+          role="alert"
+        >
+          {error ?? 'Use the matching install or start action next to each row, or follow its instructions, then check again. Nothing is installed until you press one of those buttons.'}
+          {!error && p && !p.ollama.ok ? <p className="note">Ollama is optional: without it you can still install using an API embedding provider.</p> : null}
+        </Notice>
       ) : null}
-      {(p || error) && !installing ? <button type="button" onClick={() => void check()}>Check again</button> : null}
-      {log.length > 0 && <div className="prereq-log"><Terminal lines={log} /></div>}
+      {scanned && !blocked && !error && !installing && !restartRequired ? (
+        <Notice tone="ok" title="Ready to configure">
+          Node, Docker and Compose are satisfied{p && p.ollama.ok ? ', and Ollama is present, so a local embedding model stays available' : ''}. Choose embeddings and extraction in the next steps.
+        </Notice>
+      ) : null}
+      {(p || error) && !installing ? (
+        <div className="btn-row">
+          <button type="button" className="btn secondary" onClick={() => void check()}><Icon name="refresh" size={15} /> Check again</button>
+        </div>
+      ) : null}
+      {log.length > 0 && <div className="prereq-log"><div className="terminal-head"><Icon name="terminal" size={13} /> installer output</div><Terminal lines={log} /></div>}
     </section>
   )
 }
 
 // ── Account — full flow collects identity; client personal flow uses the server token identity.
-function Account({ answers, set, setNextDisabled, flow, remoteIdentity, serverPin }: StepProps) {
+function Account({ answers, set, setNextDisabled, setFault, flow, remoteIdentity, serverPin }: StepProps) {
   const [confirm, setConfirm] = useState('')
   const [generated, setGenerated] = useState<string | null>(null)
   const clientPersonal = flow !== 'full'
@@ -715,6 +782,10 @@ function Account({ answers, set, setNextDisabled, flow, remoteIdentity, serverPi
   const pwMismatch = passwordRequired ? pw !== confirm : pw.length > 0 && pw !== confirm
   const weakPassword = pw.length > 0 && strength ? !strength.accepted : false
   const derived = email.includes('@') ? email.split('@')[0] : ''
+  // Prototype w-account-errors: each error sits under its own field and a summary counts them.
+  const emailInvalid = email.length > 0 && !emailValid
+  const showMismatch = pwMismatch && pw.length > 0 && confirm.length > 0
+  const invalidCount = [emailInvalid, pwMissing, weakPassword, showMismatch].filter(Boolean).length
   const createPassword = () => {
     const next = generateStrongPassword()
     set('userPassword', next)
@@ -740,72 +811,78 @@ function Account({ answers, set, setNextDisabled, flow, remoteIdentity, serverPi
     ? !remoteIdentity || !emailValid || pwMissing || pwMismatch || weakPassword
     : !emailValid || pwMismatch || weakPassword
   useEffect(() => { setNextDisabled(blocked) }, [blocked])
+  useEffect(() => { setFault(invalidCount > 0 || (clientPersonal && !remoteIdentity)) }, [invalidCount, clientPersonal, remoteIdentity])
   return (
     <section>
       <h2>Your account</h2>
       {clientPersonal ? (
-        <p>Server accepted the token. Your email is copied from the server account; choose your local dashboard alias and optional password.</p>
+        <p className="lede">Server accepted the token. Your email is copied from the server account; choose your local dashboard alias and optional password.</p>
       ) : (
-        <p>Create the local dashboard identity shown in Personal Memories. You can change profile details later.</p>
+        <p className="lede">Create the local dashboard identity shown in Personal Memories. You can change profile details later.</p>
       )}
-      {!remoteIdentity && clientPersonal ? <p className="notice bad">Connect to the server first. This step uses the token identity from <code>/whoami</code>.</p> : null}
+      {!remoteIdentity && clientPersonal ? <Notice tone="fault">Connect to the server first. This step uses the token identity from <code>/whoami</code>.</Notice> : null}
       {clientPersonal ? (
-        <>
-          <Field label="Your email" hint="Read-only: provided by the server token.">
-            <input readOnly type="email" value={remoteIdentity?.userEmail ?? ''} placeholder="Server user has no email" />
-          </Field>
-        </>
+        <Field label="Your email" hint="Read-only: provided by the server token." error={emailInvalid ? 'Enter a valid email address.' : null}>
+          <input readOnly type="email" className={emailInvalid ? 'invalid' : undefined} value={remoteIdentity?.userEmail ?? ''} placeholder="Server user has no email" />
+        </Field>
       ) : (
-        <Field label="Your email" hint="Identifies you in the dashboard.">
-          <input type="email" value={answers.userEmail} onChange={(e) => set('userEmail', e.target.value)} placeholder="you@company.com" />
+        <Field label="Your email" hint="Identifies you in the dashboard." error={emailInvalid ? 'Enter a valid email address.' : null}>
+          <input type="email" className={emailInvalid ? 'invalid' : undefined} value={answers.userEmail} onChange={(e) => set('userEmail', e.target.value)} placeholder="you@company.com" />
         </Field>
       )}
-      {email.length > 0 && !emailValid ? <p className="field-hint" style={{ color: 'var(--danger)' }}>Enter a valid email address.</p> : null}
-      <Field label={clientPersonal ? 'Display name / alias' : 'Display name (optional)'} hint={derived ? `Blank → derived from your email: “${derived}”.` : 'Blank → derived from your email.'}>
+      <Field
+        label={clientPersonal ? 'Display name / alias' : <>Display name <span className="note">(optional)</span></>}
+        hint={derived ? `Blank → derived from your email: “${derived}”.` : 'Blank → derived from your email.'}
+      >
         <input value={answers.userName} onChange={(e) => set('userName', e.target.value)} placeholder={derived || 'Your name'} />
       </Field>
       <div className="seg-group">
         <span className="seg-label">{serverUsesSso ? 'Dashboard password' : passwordRequired ? 'Dashboard password' : 'Dashboard password (optional)'} <span className="seg-hint">{serverUsesSso ? '· SSO' : passwordRequired ? '· required' : ''}</span></span>
         {serverUsesSso ? (
-          <p className="notice ok">
+          <Notice tone="ok">
             This server uses SSO for dashboard login. The wizard will keep using your token for MCP registration;
             use your work email to sign in to the dashboard.
-          </p>
+          </Notice>
         ) : (
           <>
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <button type="button" onClick={createPassword}>Generate password</button>
-            </div>
-            <Field label={passwordRequired ? 'Password' : 'Password (optional)'} hint={passwordRequired
-              ? 'Required for dashboard login. This protects the dashboard session; the token remains for MCP/API recovery.'
-              : 'Set one to require login when opening the dashboard; leave blank and it opens directly. You can add or remove it later in your profile.'}>
-              <input
-                type="password"
-                value={answers.userPassword}
-                onChange={(e) => { set('userPassword', e.target.value); setGenerated(null) }}
-                placeholder={passwordRequired ? 'required for dashboard login' : 'leave blank for no login'}
-              />
+            <Field
+              label="Password"
+              error={pwMissing ? 'Enter a dashboard password for password-mode servers.' : weakPassword ? (strength?.messages[0] ?? 'Use a stronger password before continuing.') : null}
+              hint={strength?.accepted ? 'Strong password.' : undefined}
+              hintTone={strength?.accepted ? 'ok' : undefined}
+            >
+              <div className="input-affix">
+                <input
+                  type="password"
+                  className={pwMissing || weakPassword ? 'invalid' : undefined}
+                  value={answers.userPassword}
+                  onChange={(e) => { set('userPassword', e.target.value); setGenerated(null) }}
+                  placeholder={passwordRequired ? 'required for dashboard login' : 'leave blank for no login'}
+                />
+                {generated ? <span className="affix">GENERATED</span> : null}
+              </div>
+              {strength ? <div className={`meter ${strength.level}`} aria-hidden="true"><i /><i /><i /></div> : null}
             </Field>
-            {strength ? (
-              <>
-                <div className={`password-meter ${strength.level}`} aria-hidden="true"><span /></div>
-                <p className="field-hint">{strength.accepted ? 'Strong password.' : strength.messages[0]}</p>
-              </>
-            ) : null}
             {passwordRequired || pw.length > 0 ? (
-              <Field label="Confirm password">
-                <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+              <Field label="Confirm password" error={showMismatch ? 'Passwords do not match.' : null}>
+                <input type="password" className={showMismatch ? 'invalid' : undefined} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
               </Field>
             ) : null}
-            {generated ? (
-              <p className="notice warn">Generated password shown once: <code>{generated}</code></p>
-            ) : null}
-            {pwMissing ? <p className="field-hint" style={{ color: 'var(--danger)' }}>Enter a dashboard password for password-mode servers.</p> : null}
-            {weakPassword ? <p className="field-hint" style={{ color: 'var(--danger)' }}>Use a stronger password before continuing.</p> : null}
-            {pwMismatch ? <p className="field-hint" style={{ color: 'var(--danger)' }}>Passwords do not match.</p> : null}
+            {generated ? <Notice tone="warn">Generated password shown once: <code>{generated}</code></Notice> : null}
+            <div className="btn-row">
+              <button type="button" className="btn sm secondary" onClick={createPassword}><Icon name="key" size={13} /> Generate password</button>
+            </div>
+            <span className="field-hint">{passwordRequired
+              ? 'Required for dashboard login. This protects the dashboard session; the token remains for MCP/API recovery.'
+              : 'Set one to require login when opening the dashboard; leave blank and it opens directly. You can add or remove it later in your profile.'}</span>
           </>
         )}
       </div>
+      {invalidCount > 0 ? (
+        <Notice tone="bad">
+          Fix the {invalidCount} highlighted field{invalidCount === 1 ? '' : 's'} to continue. Nothing has been written to <code>.env.persistent-memory</code> yet.
+        </Notice>
+      ) : null}
     </section>
   )
 }
@@ -826,33 +903,42 @@ function SharedConnect(props: StepProps) {
     setNextDisabled(sharedConnectEnabled && !remoteIdentity)
   }, [sharedConnectEnabled, remoteIdentity])
 
+  useEffect(() => { if (!sharedConnectEnabled) props.setFault(false) }, [sharedConnectEnabled])
+
   return (
     <section>
       <h2>Connect Shared Memories</h2>
+      {!sharedConnectEnabled ? <p className="lede">Optional. Personal Memories is already fully configured — this only adds a second, team-owned space.</p> : null}
       <label className={`checkrow flow-isolation-option${sharedConnectEnabled ? ' checked' : ''}`}>
         <input type="checkbox" checked={sharedConnectEnabled} onChange={(e) => setSharedConnectEnabled(e.target.checked)} />
-        <span className="checkbox" aria-hidden>{sharedConnectEnabled ? '✓' : ''}</span>
+        <span className="checkbox" aria-hidden>{sharedConnectEnabled ? <Icon name="check" size={11} /> : ''}</span>
         <span className="checkrow-label">Connect this local dashboard to Shared Memories</span>
         <span className="checkrow-tag">can be added later</span>
       </label>
       {sharedConnectEnabled ? (
         <div className="shared-connect-body">
-          <RemoteConnect {...props} />
+          <RemoteConnect {...props} nested />
         </div>
       ) : (
-        <p className="notice">Shared Memories can be connected later from the local dashboard.</p>
+        <>
+          <Notice>Shared Memories can be connected any time from the local dashboard under <b>Shared memories → Connection</b>. Skipping now changes nothing about your personal stack.</Notice>
+          <div className="shared-skip-art"><Lattice width={220} height={110} /></div>
+        </>
       )}
     </section>
   )
 }
 
 // ── Shared server connector token test ─────────────────────────────────────────
-function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, setNextDisabled }: StepProps) {
+type RemoteError = { kind: 'unreachable' | 'bad_token'; url: string; portHint: boolean }
+
+function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, setNextDisabled, setFault, nested = false }: StepProps & { nested?: boolean }) {
   const [testing, setTesting] = useState(false)
   const [whoami, setWhoami] = useState<RemoteIdentity | null>(remoteIdentity)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<RemoteError | null>(null)
   useEffect(() => { setWhoami(remoteIdentity) }, [remoteIdentity])
   useEffect(() => { setNextDisabled(!whoami) }, [whoami])
+  useEffect(() => { setFault(!!error) }, [error])
   const clearConnection = () => {
     setWhoami(null)
     setRemoteIdentity(null)
@@ -882,14 +968,12 @@ function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, 
     ).catch(() => ({ config: null, whoami: null, error: 'unreachable' }))
     setTesting(false)
     const pin = serverPinFromConfig(r.config)
+    const url = answers.remoteApiUrl.replace(/\/+$/, '')
     if (r.error === 'unreachable' || !pin) {
-      const portHint = missingLocalPort(answers.remoteApiUrl)
-        ? ' Local server installs need the API port, for example http://127.0.0.1:12090 for a client-managed embeddings validation server.'
-        : ''
-      setError(`Couldn’t reach ${answers.remoteApiUrl.replace(/\/+$/, '')}/config.${portHint}`)
+      setError({ kind: 'unreachable', url, portHint: missingLocalPort(answers.remoteApiUrl) })
       return
     }
-    if (r.error === 'bad_token' || !r.whoami) { setError('Server reachable, but the token was rejected.'); setServerPin(pin); return }
+    if (r.error === 'bad_token' || !r.whoami) { setError({ kind: 'bad_token', url, portHint: false }); setServerPin(pin); return }
     const identity = r.whoami
     const alias = identity.userDisplayName?.trim() || (identity.userEmail?.includes('@') ? identity.userEmail.split('@')[0] : '')
     setServerPin(pin); setWhoami(identity); setRemoteIdentity(identity)
@@ -899,17 +983,50 @@ function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, 
   }
   return (
     <section>
-      <h2>Shared Memories server</h2>
-      <p>The connector token is saved in the local dashboard as a masked secret.</p>
-      <Field label="Shared API URL" hint="The persistent-memory API URL printed by the shared server installer.">
-        <input value={answers.remoteApiUrl} onChange={(e) => setRemoteApiUrl(e.target.value)} placeholder="http://127.0.0.1:12090" />
+      {nested ? (
+        <>
+          <h3>Shared Memories server</h3>
+          <p className="note">The connector token is saved in the local dashboard as a masked secret.</p>
+        </>
+      ) : (
+        <>
+          <h2>Shared Memories server</h2>
+          <p className="lede">The connector token is saved in the local dashboard as a masked secret.</p>
+        </>
+      )}
+      <Field label="Shared API URL" hint="The Persistent Memory API URL printed by the shared server installer.">
+        <input className={`mono${error?.kind === 'unreachable' ? ' invalid' : ''}`} value={answers.remoteApiUrl} onChange={(e) => setRemoteApiUrl(e.target.value)} placeholder="http://127.0.0.1:12090" />
       </Field>
-      <Field label="Connector token" hint="Server-issued token for this local dashboard (tokenId.secret).">
-        <input type="password" value={answers.remoteToken} onChange={(e) => setRemoteToken(e.target.value)} placeholder="tokenId.secret" />
+      <Field label="Connector token" hint={<>Server-issued token for this local dashboard (<code>tokenId.secret</code>).</>}>
+        <input type="password" className={`mono${error?.kind === 'bad_token' ? ' invalid' : ''}`} value={answers.remoteToken} onChange={(e) => setRemoteToken(e.target.value)} placeholder="tokenId.secret" />
       </Field>
-      <div className="row"><button onClick={() => void test()} disabled={testing || !answers.remoteApiUrl || !answers.remoteToken}>{testing ? 'Testing…' : 'Test connection'}</button></div>
-      {error ? <p className="notice bad">{error} Check it was copied whole (<code>tokenId.secret</code>) and not expired.</p> : null}
-      {whoami ? <p className="notice ok">✓ Connected — <b>{whoami.userEmail ?? 'server user'}</b>{whoami.teamName ? <> on team <b>{whoami.teamName}</b></> : null}; role <b>{whoami.adminLevel}</b>. Server pins <code>{serverPin?.model} @ {serverPin?.dim}</code>.</p> : null}
+      <div className="btn-row">
+        <button type="button" className="btn secondary" onClick={() => void test()} disabled={testing || !answers.remoteApiUrl || !answers.remoteToken}>
+          <Icon name="cloud_sync" size={15} /> {testing ? 'Testing…' : 'Test connection'}
+        </button>
+      </div>
+      {error?.kind === 'unreachable' ? (
+        <Notice tone="fault" title={`Couldn’t reach ${error.url}/config`} role="alert">
+          {error.portHint
+            ? <>Local server installs need the API port — for example <code>http://127.0.0.1:12090</code> for a client-managed embeddings validation server.</>
+            : 'Check the URL and that the shared server is running.'}
+          <p className="note">{nested ? 'Nothing was saved. You can also clear the checkbox and connect later from the dashboard.' : 'Nothing was saved.'}</p>
+        </Notice>
+      ) : null}
+      {error?.kind === 'bad_token' ? (
+        <>
+          {serverPin ? <Notice tone="ok">Server reachable · pins <code>{serverPin.model} @ {serverPin.dim}</code></Notice> : null}
+          <Notice tone="fault" icon="lock" title="The token was rejected" role="alert">
+            Check it was copied whole (<code>tokenId.secret</code>, including the dot) and has not expired. Connector tokens are issued by a super-admin on the shared server.
+          </Notice>
+        </>
+      ) : null}
+      {whoami ? (
+        <Notice tone="ok" title="Connected">
+          <b>{whoami.userEmail ?? 'server user'}</b>{whoami.teamName ? <> on team <b>{whoami.teamName}</b></> : null}; role <b>{whoami.adminLevel}</b>.
+          <p className="note">Server pins <code>{serverPin?.model} @ {serverPin?.dim}</code>.</p>
+        </Notice>
+      ) : null}
     </section>
   )
 }
@@ -941,15 +1058,15 @@ function PullModel({ serverPin, setNextDisabled }: StepProps) {
       <h2>Local embedding model</h2>
       <p>The shared server requires <code>{model}</code> for client-managed embeddings. This local dashboard must run the <em>exact same</em> model before connecting.</p>
       <StatusRow ok={pulled} label={model} detail={pulled ? 'pulled' : pulling ? 'pulling…' : 'not pulled'} />
-      {!pulled && <div className="row"><button disabled={pulling} onClick={() => void pull()}>{pulling ? 'Pulling…' : `Pull ${model}`}</button></div>}
-      {error && <p className="notice bad">{error}</p>}
+      {!pulled && <div className="btn-row"><button type="button" className="btn secondary" disabled={pulling} onClick={() => void pull()}>{pulling ? 'Pulling…' : `Pull ${model}`}</button></div>}
+      {error && <Notice tone="fault" role="alert">{error}</Notice>}
       {log.length > 0 && <Terminal lines={log} />}
     </section>
   )
 }
 
 // ── Extraction LLM (full flow) ────────────────────────────────────────────────────
-function Extraction({ answers, set, setNextDisabled }: StepProps) {
+function Extraction({ answers, set, setNextDisabled, setFault }: StepProps) {
   // Detect saved provider keys so the user can keep them without re-pasting.
   // Generated service secrets are preserved by the server when configuration is saved.
   const [onFile, setOnFile] = useState<{ anthropic: boolean; openai: boolean }>({ anthropic: false, openai: false })
@@ -971,6 +1088,7 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
   useEffect(() => {
     setNextDisabled(extractionNextBlocked({ apiKeyAvailable: !needsKey, testPassed: extractionTestPassed }))
   }, [needsKey, extractionTestPassed])
+  useEffect(() => { setFault(testState === 'error') }, [testState])
   useEffect(() => {
     if (testedSignature && testedSignature !== testSignature) {
       setTestState('idle')
@@ -1002,12 +1120,12 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
   return (
     <section>
       <h2>Extraction LLM</h2>
-      <p>Powers the Shape gate + graph entity/edge extraction.</p>
+      <p className="lede">Powers the Shape gate and the graph entity/edge extraction that turns raw memories into a connected graph.</p>
       <div className="seg-group">
         <span className="seg-label">Provider</span>
         <div className="seg-row">
           <button type="button" className={`seg${answers.extractionProvider === 'anthropic' ? ' active' : ''}`} onClick={() => { set('extractionProvider', 'anthropic'); set('extractionModel', 'claude-haiku-4-5-20251001') }}>
-            Anthropic <span className="seg-note" style={{ display: 'inline' }}>· recommended</span>
+            Anthropic <span className="seg-note">· recommended</span>
           </button>
           <button type="button" className={`seg${answers.extractionProvider === 'openai' ? ' active' : ''}`} onClick={() => { set('extractionProvider', 'openai'); set('extractionModel', 'gpt-4o') }}>
             OpenAI
@@ -1015,7 +1133,7 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
         </div>
       </div>
       <div className="seg-group">
-        <span className="seg-label">Model <span className="seg-hint">· Haiku is the default (cheaper + faster); Sonnet 4.6 for higher quality if you have a key</span></span>
+        <span className="seg-label">Model <span className="seg-hint">{isAnthropic ? '· Haiku is the default (cheaper + faster)' : '· GPT-4o is the default'}</span></span>
         <div className="modellist">
           {models.map((m) => {
             const on = answers.extractionModel === m.id
@@ -1023,7 +1141,7 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
               <button type="button" key={m.id} className={`modelrow${on ? ' active' : ''}`} onClick={() => set('extractionModel', m.id)}>
                 <span className="modelradio" aria-hidden />
                 <span className="modelrow-main">
-                  <span className="modelrow-name">{m.id}</span> <span className="modelrow-note">· {m.note}</span>
+                  <span className="modelrow-name">{m.id}</span> <span className="modelrow-note inline">· {m.note}</span>
                 </span>
                 {m.rec ? <span className="modelrow-rec">recommended</span> : null}
               </button>
@@ -1032,28 +1150,42 @@ function Extraction({ answers, set, setNextDisabled }: StepProps) {
         </div>
       </div>
       {isAnthropic ? (
-        <Field label="ANTHROPIC_API_KEY (mandatory)" hint="Stored only in the local .env.persistent-memory; masked in the review."><input type="password" value={answers.anthropicApiKey} onChange={(e) => set('anthropicApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} /></Field>
+        <Field label="ANTHROPIC_API_KEY (mandatory)" hint={<>Stored only in the local <code>.env.persistent-memory</code>; masked in the review step.</>}>
+          <input type="password" className={testState === 'error' ? 'invalid' : keyOnFile && !typedKey?.trim() ? 'readonly' : undefined} value={answers.anthropicApiKey} onChange={(e) => set('anthropicApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} />
+        </Field>
       ) : (
-        <Field label="OPENAI_API_KEY (mandatory)" hint="Stored only in the local .env.persistent-memory; masked in the review."><input type="password" value={answers.openaiApiKey} onChange={(e) => set('openaiApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} /></Field>
+        <Field label="OPENAI_API_KEY (mandatory)" hint={<>Stored only in the local <code>.env.persistent-memory</code>; masked in the review step.</>}>
+          <input type="password" className={testState === 'error' ? 'invalid' : keyOnFile && !typedKey?.trim() ? 'readonly' : undefined} value={answers.openaiApiKey} onChange={(e) => set('openaiApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} />
+        </Field>
       )}
-      {keyOnFile && <p className="notice ok">✓ An existing <code>{isAnthropic ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'}</code> was found in your <code>.env.persistent-memory</code> — leave the field blank to keep it, or enter a new one to replace it.</p>}
-      {needsKey ? <p className="notice warn">API key is required to continue.</p> : null}
-      <div className="row">
-        <button type="button" onClick={() => void testFactExtraction()} disabled={needsKey || testState === 'testing'}>
-          {testState === 'testing' ? 'Testing...' : 'Test fact extraction'}
+      {keyOnFile && testState !== 'error' ? <Notice tone="ok">An existing <code>{isAnthropic ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'}</code> was found in your <code>.env.persistent-memory</code> — leave the field blank to keep it, or enter a new one to replace it.</Notice> : null}
+      {needsKey ? <Notice tone="warn">An API key is required to continue.</Notice> : null}
+      <div className="btn-row">
+        <button type="button" className={`btn${needsKey ? '' : ' secondary'}`} onClick={() => void testFactExtraction()} disabled={needsKey || testState === 'testing'}>
+          <Icon name={testState === 'error' ? 'refresh' : 'bolt'} size={15} /> {testState === 'testing' ? 'Testing…' : testState === 'error' ? 'Test again' : 'Test fact extraction'}
         </button>
+        {testState === 'idle' ? <span className="note">Runs one small extraction against your key.</span> : null}
       </div>
-      {testState === 'ok' ? <p className="notice ok">{testResult?.message ?? 'Fact extraction test passed.'}</p> : null}
-      {testState === 'error' ? <p className="notice bad">{testResult?.message ?? 'Fact extraction test failed.'}{testResult?.details ? <> {testResult.details}</> : null}</p> : null}
-      <p className="notice">Service secrets and database passwords are generated for you. Existing values in <code>.env.persistent-memory</code> are <b>preserved</b> so saved passwords, tokens, and data connections keep working. Only missing secrets are generated.</p>
+      {testState === 'ok' ? <Notice tone="ok" title="Fact extraction test passed">{testResult?.message}</Notice> : null}
+      {testState === 'error' ? (
+        <Notice tone="fault" title="Fact extraction test failed" role="alert">
+          {testResult?.message ?? 'The provider did not return a result.'}
+          {testResult?.details ? <p className="note">{testResult.details}</p> : null}
+          <p className="note">The key was not saved. Check it was copied whole, has not been revoked, and that the selected model is enabled for your organisation.</p>
+        </Notice>
+      ) : null}
+      {testState === 'idle' || testState === 'testing' ? (
+        <Notice>Service secrets and database passwords are generated for you. Existing values in <code>.env.persistent-memory</code> are <b>preserved</b> so saved passwords, tokens, and data connections keep working. Only missing secrets are generated.</Notice>
+      ) : null}
     </section>
   )
 }
 
 // ── Ecosystem (detected agent apps) ───────────────────────────────────────────────
 interface AppDetect { claudeCli: boolean; claudeDesktop: boolean; codexCli: boolean; codexDesktop: boolean }
-function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
+function Ecosystem({ apps, setApps, setNextDisabled, setFault, appsInited }: StepProps) {
   const [det, setDet] = useState<AppDetect | null>(null)
+  const noneDetected: AppDetect = { claudeCli: false, claudeDesktop: false, codexCli: false, codexDesktop: false }
   useEffect(() => {
     void getJSON<AppDetect>('/api/apps').then((d) => {
       setDet(d)
@@ -1063,21 +1195,30 @@ function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
         setApps({ claudeCli: d.claudeCli, claudeDesktop: d.claudeDesktop, codexCli: d.codexCli, codexDesktop: d.codexDesktop })
         if (appsInited) appsInited.current = true
       }
-    }).catch(() => setDet({ claudeCli: false, claudeDesktop: false, codexCli: false, codexDesktop: false }))
+    }).catch(() => setDet(noneDetected))
   }, [])
+  const any = Object.values(apps).some(Boolean)
+  // Prototype w-ecosystem-none: after installing an agent app, detection can run again.
+  const detectAgain = () => {
+    setDet(null)
+    void getJSON<AppDetect>('/api/apps').then((d) => {
+      setDet(d)
+      if (!any) setApps({ claudeCli: d.claudeCli, claudeDesktop: d.claudeDesktop, codexCli: d.codexCli, codexDesktop: d.codexDesktop })
+    }).catch(() => setDet(noneDetected))
+  }
   const rows: { key: keyof Apps; label: string; present: boolean }[] = det ? [
     { key: 'claudeCli', label: 'Claude CLI', present: det.claudeCli },
     { key: 'claudeDesktop', label: 'Claude Desktop', present: det.claudeDesktop },
     { key: 'codexCli', label: 'Codex CLI', present: det.codexCli },
     { key: 'codexDesktop', label: 'Codex Desktop', present: det.codexDesktop },
   ] : []
-  const any = Object.values(apps).some(Boolean)
   useEffect(() => { setNextDisabled(!any) }, [any])
+  useEffect(() => { setFault(!!det && !any) }, [det, any])
   return (
     <section>
       <h2>Register the MCP with…</h2>
-      <p>Select the agent apps you use. Detected apps are selected by default; you can also select an app installed in a custom location.</p>
-      {!det ? <p>Detecting installed apps…</p> : (
+      <p className="lede">Select the agent apps you use. Detected apps are selected by default; you can also select an app installed in a custom location.</p>
+      {!det ? <p className="note">Detecting installed apps…</p> : (
         <div className="checklist">
           {rows.map((r) => {
             const checked = apps[r.key]
@@ -1085,7 +1226,7 @@ function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
             return (
               <label key={r.key} className={`checkrow${checked ? ' checked' : ''}`}>
                 <input type="checkbox" checked={checked} onChange={(e) => setApps({ ...apps, [r.key]: e.target.checked })} />
-                <span className="checkbox" aria-hidden>{checked ? '✓' : ''}</span>
+                <span className="checkbox" aria-hidden>{checked ? <Icon name="check" size={11} /> : ''}</span>
                 <span className="checkrow-label">{r.label}</span>
                 {tag ? <span className="checkrow-tag">{tag}</span> : null}
               </label>
@@ -1093,12 +1234,25 @@ function Ecosystem({ apps, setApps, setNextDisabled, appsInited }: StepProps) {
           })}
         </div>
       )}
+      {det && !any ? (
+        <>
+          <Notice tone="fault" title="No agent app selected">
+            {det && !Object.values(det).some(Boolean) ? 'No Claude or Codex installation was found in the default locations. ' : ''}
+            Select at least one target, or install an agent app and detect again. Next stays unavailable until one is selected.
+          </Notice>
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={detectAgain}><Icon name="refresh" size={15} /> Detect again</button>
+          </div>
+        </>
+      ) : det ? (
+        <Notice tone="accent">Your other MCP servers are left untouched. Re-running the installer only updates this one entry.</Notice>
+      ) : null}
     </section>
   )
 }
 
 // ── Registration: runtime architecture + scope, driven by the apps picked in Ecosystem ──────
-function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) {
+function Registration({ answers, set, apps, setNextDisabled, setFault, flow }: StepProps) {
   const streamAvailable = true
   useEffect(() => { if (answers.mcpRuntime !== 'stream') set('mcpRuntime', 'stream') }, [answers.mcpRuntime])
   const codex = apps.codexCli || apps.codexDesktop
@@ -1123,17 +1277,18 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
   // Project scope needs ≥1 folder (Claude + Codex both write per-folder configs).
   const blocked = isProject && nonEmptyPaths.length === 0
   useEffect(() => { setNextDisabled(blocked) }, [blocked])
+  useEffect(() => { setFault(!!pickNote || blocked) }, [pickNote, blocked])
 
   return (
     <section>
       <h2>Registration</h2>
-      <p>persistent-memory is added to the MCP config of the apps you picked. Your other MCP servers are left
+      <p className="lede">persistent-memory is added to the MCP config of the apps you picked. Your other MCP servers are left
         untouched, and re-running the installer just updates this one entry. Windows files inherit their
         folder permissions; macOS files are created with owner read/write permissions.</p>
       <div className="seg-group">
         <span className="seg-label">MCP runtime</span>
         <div className="seg-row">
-          <button type="button" className="seg active" disabled={!streamAvailable} onClick={() => set('mcpRuntime', 'stream')}>Stream MCP service</button>
+          <button type="button" className="seg active" disabled={!streamAvailable} onClick={() => set('mcpRuntime', 'stream')}><Icon name="hub" size={15} /> Stream MCP service</button>
         </div>
         <span className="field-hint"><b>Stream MCP service</b> registers Claude/Codex against one local Docker-managed Streamable HTTP MCP service.</span>
       </div>
@@ -1148,35 +1303,48 @@ function Registration({ answers, set, apps, setNextDisabled, flow }: StepProps) 
           installer writes the right config for each app you picked automatically (below).</span>
       </div>
       {isProject && (
-        <div className="folders">
-          <span className="field-label">Project folders <span className="seg-hint">· pick via the system dialog, or type/paste an absolute path</span></span>
+        <div className="seg-group folders">
+          <span className="seg-label">Project folders <span className="seg-hint">· pick via the system dialog, or paste an absolute path</span></span>
           {answers.projectPaths.map((p, i) => (
-            <div key={i} className="row">
-              <input value={p} placeholder="C:\Projects\My Project or /path/to/project" onChange={(e) => setPath(i, e.target.value)} />
-              <button type="button" className="folders-choose" onClick={() => void pickFolder(i)}>📁 Choose…</button>
-              <button type="button" className="folders-del" onClick={() => delPath(i)}>✕</button>
+            <div key={i} className="folder-row">
+              <input className={`mono${!p.trim() ? ' invalid' : ''}`} value={p} aria-label={`Project folder ${i + 1}`} placeholder="C:\Projects\My Project or /path/to/project" onChange={(e) => setPath(i, e.target.value)} />
+              <button type="button" className="btn sm secondary" onClick={() => void pickFolder(i)}><Icon name="folder" size={14} /> Choose…</button>
+              <button type="button" className="icon-btn danger" aria-label="Remove folder" onClick={() => delPath(i)}><Icon name="close" size={15} /></button>
             </div>
           ))}
-          <button type="button" className="folders-add" onClick={addPath}>+ Add folder</button>
-          {pickNote && <p className="field-hint">{pickNote}</p>}
+          <button type="button" className="btn ghost sm" onClick={addPath}><Icon name="plus" size={14} /> Add folder</button>
+          {pickNote && <Notice tone="bad">{pickNote} Empty rows are ignored, and Project Level needs at least one real folder.</Notice>}
         </div>
       )}
-      <div className="notice">
-        <b>What gets registered</b>
-        <p className="field-hint">The paths below show the default locations. On Windows, <code>~</code> means your user profile folder.
+      {isProject && codex ? (
+        <Notice tone="warn">Codex writes <code>&lt;folder&gt;/.codex/config.toml</code> per folder — you must <b>trust the folder</b> in Codex for it to load.</Notice>
+      ) : null}
+      {/* Prototype w-registration: the files that change are named, not described. */}
+      <div className="wiz-card-box">
+        <span className="section-label">What gets registered</span>
+        <div className="kv">
+          {(apps.claudeCli || apps.claudeDesktop) && (
+            <div className="kv-row">
+              <span>Claude</span>
+              <span>{isProject
+                ? <><code>~/.claude.json</code> per folder (<code>projects.&lt;path&gt;</code>) · Code and Desktop folder sessions</>
+                : <><code>~/.claude.json</code> · Code and Desktop folder sessions. Standalone Desktop chat uses a Claude Custom Connector for the HTTP endpoint.</>}</span>
+            </div>
+          )}
+          {codex && (
+            <div className="kv-row">
+              <span>{codexLabel}</span>
+              <span>{isProject
+                ? <><code>&lt;folder&gt;/.codex/config.toml</code> per folder</>
+                : <code>~/.codex/config.toml</code>}</span>
+            </div>
+          )}
+          <div className="kv-row"><span>Endpoint</span><code>http://127.0.0.1:8091/mcp</code></div>
+        </div>
+        <p className="note">These are the default locations. On Windows, <code>~</code> means your user profile folder.
           Configured <code>CODEX_HOME</code> and <code>CLAUDE_CONFIG_DIR</code> locations take precedence for global files.</p>
-        {(apps.claudeCli || apps.claudeDesktop) && (
-          <div>{isProject
-            ? <>Claude (Code + Desktop folder sessions) → <code>~/.claude.json</code> per folder (<code>projects.&lt;path&gt;</code>).</>
-            : <>Claude (Code + Desktop folder sessions) → <code>~/.claude.json</code>. Standalone Desktop chat uses a Claude Custom Connector for the HTTP endpoint.</>}</div>
-        )}
-        {codex && (
-          <div>{isProject
-            ? <>{codexLabel} → <code>&lt;folder&gt;/.codex/config.toml</code> per folder — you must <b>trust the folder</b> in Codex for it to load.</>
-            : <>{codexLabel} → <code>~/.codex/config.toml</code>.</>}</div>
-        )}
       </div>
-      <p className="notice">Stream MCP entries carry only the HTTP endpoint. Connector tokens are managed by the local dashboard.</p>
+      <Notice>Stream MCP entries carry only the HTTP endpoint. Connector tokens are managed by the local dashboard.</Notice>
     </section>
   )
 }
@@ -1204,7 +1372,7 @@ function RuleStep({ answers, set, apps, setNextDisabled }: StepProps) {
     return (
       <section>
         <h2>Memory-usage rule</h2>
-        <p className="notice">Select at least one Claude or Codex target to write the memory guidance.</p>
+        <Notice>Select at least one Claude or Codex target to write the memory guidance.</Notice>
       </section>
     )
   }
@@ -1241,14 +1409,14 @@ function RuleStep({ answers, set, apps, setNextDisabled }: StepProps) {
   return (
     <section>
       <h2>Memory-usage rule</h2>
-      <p>{isProject ? 'Written to ' : 'Default locations: '}{ruleSpecs.map((s, i) => (
+      <p className="lede">{isProject ? 'Written to ' : 'Default locations: '}{ruleSpecs.map((s, i) => (
         <span key={i}>{i > 0 ? ' + ' : ''}<code>{isProject ? projPath(s.tail) : s.global}</code></span>
       ))}. Edit freely.{isProject && folders.length > 0 ? <span className="field-hint"> Hover <b>&lt;project_path&gt;</b> for the exact file per folder.</span> : null}</p>
       {!isProject && <p className="field-hint">On Windows, <code>~</code> means your user profile folder. Configured <code>CODEX_HOME</code> and <code>CLAUDE_CONFIG_DIR</code> locations also apply to these rule files.</p>}
-      <Field label={`Top memory block — inserted as the first section under ${memLabel}`} hint={`Any persistent-memory rule reference in this block is rewritten per target (${ruleRefLabel}).`}>
+      <Field label={<>Top memory block <span className="note">— inserted as the first section under {memLabel}</span></>} hint={`Any persistent-memory rule reference in this block is rewritten per target (${ruleRefLabel}).`}>
         <textarea value={answers.memoryBlock} rows={8} onChange={(e) => set('memoryBlock', e.target.value)} />
       </Field>
-      <Field label="Detailed memory rule prompt — written to persistent-memory.md">
+      <Field label={<>Detailed memory rule prompt <span className="note">— written to persistent-memory.md</span></>}>
         <textarea value={answers.ruleText} rows={14} onChange={(e) => set('ruleText', e.target.value)} />
       </Field>
     </section>
@@ -1256,7 +1424,38 @@ function RuleStep({ answers, set, apps, setNextDisabled }: StepProps) {
 }
 
 // ── Review .env (full flow) ───────────────────────────────────────────────────────
-function Review({ flow, answers, serverPin, setNextDisabled, embeddingTested, onEmbedding }: { flow: Flow; answers: Answers; serverPin: ServerPin | null; setNextDisabled: (b: boolean) => void; embeddingTested: string; onEmbedding: () => void }) {
+/** The step that supplies a required env key, for the review's "Back to …" actions. */
+function issuePhase(key: string, answers: Answers): Phase | null {
+  if (/ANTHROPIC|EXTRACTION/.test(key)) return 'extraction'
+  if (key === 'OPENAI_API_KEY') return answers.extractionProvider === 'openai' && answers.embedProvider !== 'openai' ? 'extraction' : 'embedding'
+  if (/EMBED|VOYAGE|OLLAMA/.test(key)) return 'embedding'
+  if (/USER|EMAIL|PASSWORD|TEAM/.test(key)) return 'account'
+  return null
+}
+
+/** Prototype env preview: keys in accent, values in ink, masked secrets dimmed, missing keys flagged. */
+function EnvPreview({ text, issues }: { text: string; issues: Map<string, string> }) {
+  const lines = text.replace(/\r/g, '').split('\n')
+  return (
+    <pre className="terminal">
+      {lines.map((line, index) => {
+        const eq = line.indexOf('=')
+        const key = eq > 0 ? line.slice(0, eq).trim() : ''
+        const value = eq > 0 ? line.slice(eq + 1) : ''
+        const body = !line.trim() || line.trimStart().startsWith('#')
+          ? <span className="t-dim">{line}</span>
+          : !key
+            ? line
+            : issues.has(key)
+              ? <span className="t-bad">{key}={value}    ← {issues.get(key)}</span>
+              : <><span className="t-key">{key}</span>=<span className={/[•…]/.test(value) ? 't-dim' : 't-val'}>{value}</span></>
+        return <span key={index}>{body}{index < lines.length - 1 ? '\n' : ''}</span>
+      })}
+    </pre>
+  )
+}
+
+function Review({ flow, answers, serverPin, setNextDisabled, setFault, embeddingTested, onEmbedding, onGoto }: { flow: Flow; answers: Answers; serverPin: ServerPin | null; setNextDisabled: (b: boolean) => void; setFault: (b: boolean) => void; embeddingTested: string; onEmbedding: () => void; onGoto: (p: Phase) => void }) {
   const [preview, setPreview] = useState<string | null>(null)
   const [issues, setIssues] = useState<{ key: string; message: string }[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -1296,71 +1495,153 @@ function Review({ flow, answers, serverPin, setNextDisabled, embeddingTested, on
       }
     })()
   }, [answers, flow, serverPin, setNextDisabled, needsEmbeddingTest])
+  useEffect(() => { setFault(issues.length > 0 || !!error) }, [issues.length, error])
+  // Prototype w-review-missing: each missing key names the step that supplies it.
+  const issueMessages = new Map(issues.map((issue) => [issue.key, issue.message] as const))
+  const returnPhases = [...new Set(issues.map((issue) => issuePhase(issue.key, answers)))].filter((p): p is Phase => p !== null)
+  const keyCount = preview ? preview.split('\n').filter((line) => /^[A-Z0-9_]+=/.test(line.trim())).length : 0
   return (
     <section>
-      <h2>Review .env.persistent-memory</h2>
-      <p>Secrets are masked. Written to <code>.env.persistent-memory</code> (gitignored).</p>
-      {needsEmbeddingTest ? <div className="notice warn"><p>The embedding model or API key changed after its connection test. Test the final selection before installing.</p><button type="button" onClick={onEmbedding}>Return to embedding connection test</button></div> : null}
-      {error ? <p className="notice bad">{error}</p> : null}
+      <h2>Review <code className="review-file">.env.persistent-memory</code></h2>
+      <p className="lede">Secrets are masked. Written to <code>.env.persistent-memory</code> (gitignored) when you continue.</p>
+      {needsEmbeddingTest ? (
+        <Notice tone="warn" title="The embedding test is out of date">
+          The embedding model or API key changed after its connection test. Test the final selection before installing.
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={onEmbedding}><Icon name="arrow_left" size={15} /> Return to embedding connection test</button>
+          </div>
+        </Notice>
+      ) : null}
+      {error ? <Notice tone="fault" title="Could not build the preview" role="alert">{error}</Notice> : null}
       {issues.length > 0 ? (
-        <div className="notice bad">
-          Missing required value(s): {issues.map((i) => <code key={i.key}>{i.key}</code>)}
+        <Notice tone="fault" title={`${issues.length} required value${issues.length === 1 ? ' is' : 's are'} missing`} role="alert">
+          {issues.map((i) => <code key={i.key}>{i.key}</code>)}
+          <p className="note">Go back to the matching step to supply {issues.length === 1 ? 'it' : 'them'}{returnPhases.length ? ` — ${returnPhases.map((p) => PHASE_LABEL[p]).join(' and ')}` : ''}. Nothing is written while required values are missing.</p>
+        </Notice>
+      ) : null}
+      {preview ? (
+        <div className="terminal-head">
+          <Icon name="terminal" size={13} /> preview · {issues.length > 0 ? `${issues.length} problem${issues.length === 1 ? '' : 's'}` : `${keyCount} keys`}
         </div>
       ) : null}
       <div className="review-env-terminal">
-        {preview ? <Terminal lines={[preview]} /> : needsEmbeddingTest ? null : <p>Generating…</p>}
+        {preview ? <EnvPreview text={preview} issues={issueMessages} /> : needsEmbeddingTest ? null : <p className="note">Generating…</p>}
       </div>
+      {preview && issues.length === 0 && !error ? <Notice tone="ok">All required values are present. Secrets stay masked in this preview.</Notice> : null}
+      {returnPhases.length > 0 ? (
+        <div className="btn-row">
+          {returnPhases.map((p) => (
+            <button key={p} type="button" className="btn secondary" onClick={() => onGoto(p)}><Icon name="arrow_left" size={15} /> Back to {PHASE_LABEL[p]}</button>
+          ))}
+        </div>
+      ) : null}
     </section>
   )
 }
 
 // ── Install (flow-aware body) ─────────────────────────────────────────────────────
-function Install({ flow, body, onToken, onDone, onBack }: { flow: Flow; body: InstallBody; onToken: (t: string) => void; onDone: () => void; onBack: () => void }) {
-  const [steps, setSteps] = useState<{ id: string; name: string; state: StepState }[]>([])
+function Install({ flow, body, onToken, onDone, onBack, setFault }: { flow: Flow; body: InstallBody; onToken: (t: string) => void; onDone: (summary: InstallSummary) => void; onBack: () => void; setFault: (b: boolean) => void }) {
+  const [steps, setSteps] = useState<{ id: string; name: string; state: StepState; ms?: number }[]>([])
   const [log, setLog] = useState<string[]>([])
   const [doneCount, setDoneCount] = useState(0)
   const [failed, setFailed] = useState(false)
   const [running, setRunning] = useState(true)
+  // Step timings feed the prototype's per-step durations and the Done summary.
+  const startedAt = useRef(new Map<string, number>())
+  const runStartedAt = useRef(Date.now())
+  const tally = useRef({ done: 0, total: 0 })
+  const reportedError = useRef<string | null>(null)
   useEffect(() => {
     void streamNDJSON('/api/install', body, (e) => {
       switch (e.type) {
-        case 'run-start': setSteps((e.steps as { id: string; name: string }[]).map((s) => ({ ...s, state: 'pending' }))); break
-        case 'step-start': setSteps((ss) => ss.map((s) => (s.id === e.id ? { ...s, state: 'running' } : s))); break
+        case 'run-start':
+          tally.current.total = (e.steps as { id: string; name: string }[]).length
+          setSteps((e.steps as { id: string; name: string }[]).map((s) => ({ ...s, state: 'pending' })))
+          break
+        case 'step-start':
+          startedAt.current.set(String(e.id), Date.now())
+          setSteps((ss) => ss.map((s) => (s.id === e.id ? { ...s, state: 'running' } : s)))
+          break
         case 'stdout': setLog((l) => [...l.slice(-400), String(e.chunk)]); break
-        case 'step-done': setSteps((ss) => ss.map((s) => (s.id === e.id ? { ...s, state: e.ok ? 'done' : 'failed' } : s))); if (e.ok) setDoneCount((c) => c + 1); break
+        case 'step-done': {
+          const began = startedAt.current.get(String(e.id))
+          const ms = began ? Date.now() - began : undefined
+          setSteps((ss) => ss.map((s) => (s.id === e.id ? { ...s, state: e.ok ? 'done' : 'failed', ms } : s)))
+          if (e.ok) { tally.current.done += 1; setDoneCount((c) => c + 1) }
+          break
+        }
         case 'token': if (e.token) onToken(String(e.token)); break
-        case 'error': setFailed(true); setRunning(false); if (e.message) setLog(lines => [...lines.slice(-400), String(e.message)]); break
+        case 'error':
+          setFailed(true); setRunning(false)
+          if (e.message) { reportedError.current = String(e.message); setLog(lines => [...lines.slice(-400), `${String(e.message)}\n`]) }
+          break
         case 'done':
           setRunning(false)
-          if (e.ok) onDone()
+          if (e.ok) onDone({ done: tally.current.done, total: tally.current.total, ms: Date.now() - runStartedAt.current })
           break
       }
     }).catch((error: unknown) => {
       setFailed(true)
       setRunning(false)
-      setLog((lines) => [...lines.slice(-400), error instanceof Error ? error.message : String(error)])
+      // The stream rethrows the failure it already delivered as an event; log each cause once.
+      const message = error instanceof Error ? error.message : String(error)
+      if (message !== reportedError.current) setLog((lines) => [...lines.slice(-400), `${message}\n`])
     })
   }, [])
+  useEffect(() => { setFault(failed) }, [failed])
   const total = steps.length || 1
+  const failedIndex = steps.findIndex((step) => step.state === 'failed')
   const title = failed ? 'Install failed' : running ? 'Installing' : 'Install complete'
   const sub = body.memoryInstallMode === 'personal-and-shared'
     ? 'Bringing up the local personal stack, connecting Shared Memories, then registering the stream MCP. ~5–10 min.'
     : 'Bringing up the local personal stack, then registering the stream MCP and writing the rule. ~5–10 min.'
+  const [copied, setCopied] = useState(false)
+  const copyLog = () => {
+    try { void navigator.clipboard.writeText(log.join('')) } catch { /* clipboard unavailable */ }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+  // Prototype w-install / w-install-failed: named steps carry the narrative, the log stays secondary.
   return (
-    <section>
-      <h2>{title}</h2>
-      <p>{sub}</p>
+    <section className="install-step">
+      <div className="install-head">
+        <h2 className={failed ? 'bad' : undefined}>{title}</h2>
+        {steps.length > 0 ? (
+          failed
+            ? <span className="badge bad up">{failedIndex >= 0 ? `step ${failedIndex + 1} of ${steps.length}` : 'failed'}</span>
+            : <span className="badge accent up">{doneCount} of {steps.length} complete</span>
+        ) : null}
+      </div>
+      <p className="lede">{failed
+        ? <>The install stopped at <b>{failedIndex >= 0 ? steps[failedIndex].name : 'a step'}</b>. The failure output shows the cause.</>
+        : <>{sub}{running ? ' You can leave this window open.' : ''}</>}</p>
       <ProgressBar value={doneCount / total} tone={failed ? 'danger' : 'accent'} />
-      <StepList steps={steps} />
-      <Terminal lines={log} caret={running} />
-      {failed && <p className="notice bad">A step failed — see the output above. Fix the issue and re-run <code>npm run install-persistent-memory</code>.</p>}
-      {failed ? <button type="button" onClick={onBack}>Return to environment checks</button> : null}
+      <div className="install-grid">
+        <StepList steps={steps} />
+        <div>
+          <div className={`terminal-head${failed ? ' bad' : ''}`}>
+            <Icon name={failed ? 'error_outline' : 'terminal'} size={13} /> {failed ? 'failure output' : 'live output'}
+          </div>
+          <Terminal lines={log} caret={running} />
+        </div>
+      </div>
+      {failed ? (
+        <>
+          <Notice tone="fault" title={failedIndex >= 0 ? `${steps[failedIndex].name} failed` : 'A step failed'} role="alert">
+            Fix the cause shown in the failure output, then re-run <code>npm run install-persistent-memory</code>.
+          </Notice>
+          <div className="btn-row">
+            <button type="button" className="btn primary" onClick={onBack}><Icon name="arrow_left" size={15} /> Return to environment checks</button>
+            <button type="button" className="btn secondary" onClick={copyLog}><Icon name="copy" size={15} /> {copied ? 'Copied' : 'Copy full log'}</button>
+          </div>
+        </>
+      ) : null}
     </section>
   )
 }
 
 // ── Done (flow-aware) ───────────────────────────────────────────────────────────
-function Done({ flow, token, apps, passwordConfigured }: { flow: Flow; token: string | null; remoteToken: string; apps: Apps; passwordConfigured: boolean }) {
+function Done({ flow, token, apps, passwordConfigured, embedding, summary }: { flow: Flow; token: string | null; remoteToken: string; apps: Apps; passwordConfigured: boolean; embedding: string; summary: InstallSummary | null }) {
   const [copied, setCopied] = useState(false)
   const copy = () => { if (token) { try { void navigator.clipboard.writeText(token) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1600) } }
   const go = async () => {
@@ -1368,43 +1649,64 @@ function Done({ flow, token, apps, passwordConfigured }: { flow: Flow; token: st
     void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})
     window.location.assign(dashboardThemeUrl(fin.dashboardUrl, readTheme()))
   }
+  const restart = [
+    apps.claudeCli && 'Claude CLI',
+    apps.claudeDesktop && 'Claude Desktop',
+    apps.codexCli && 'Codex CLI',
+    apps.codexDesktop && 'Codex Desktop',
+  ].filter(Boolean).join(', ')
+  // Prototype w-done / w-done-token: what now runs, any shown-once secret, and one next action.
   return (
     <section>
       <div className="done-head">
-        <div className="done-check" aria-hidden>✓</div>
-        <h2>Installed</h2>
+        <div className="done-check" aria-hidden><Icon name="check" size={24} /></div>
+        <div>
+          <h2>Installed</h2>
+          <p className="note">{summary && summary.total > 0
+            ? `${summary.done} of ${summary.total} steps completed in ${formatStepDuration(summary.ms)}`
+            : 'The local personal memory stack is running.'}</p>
+        </div>
       </div>
       {token ? (
-        <div className="notice token">
-          <strong>Bootstrap super-admin token · shown once</strong>
-          <div className="token-line">
-            <code className="tokenval">{token}</code>
-            <button type="button" className="copy-btn" onClick={copy}>{copied ? 'copied ✓' : 'copy'}</button>
+        <div className="wiz-card-box accent">
+          <div className="done-token-head">
+            <Icon name="key" size={17} />
+            <span>Bootstrap super-admin token</span>
+            <span className="badge accent up">shown once</span>
           </div>
-          <p>Use it to log into the dashboard — it won’t be shown again.</p>
+          <p className="note">Use it to log into the dashboard. It will not be shown again.</p>
+          <div className="token-well">
+            <code className="tokenval">{token}</code>
+            <button type="button" className="btn sm accent-quiet" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? 'Copied' : 'Copy'}</button>
+          </div>
         </div>
-      ) : flow === 'full' ? (
-        <p className="notice ok">
+      ) : null}
+      <div className="wiz-card-box">
+        <span className="section-label">What is now running</span>
+        <div className="kv">
+          <div className="kv-row"><span>Local dashboard</span><code>{LOCAL_DASHBOARD_URL}</code></div>
+          <div className="kv-row"><span>Stream MCP</span><code>http://127.0.0.1:8091/mcp</code></div>
+          <div className="kv-row"><span>Embeddings</span><code>{embedding}</code></div>
+          {restart ? <div className="kv-row"><span>Registered with</span><span>{restart}</span></div> : null}
+        </div>
+      </div>
+      {!token && flow === 'full' ? (
+        <Notice tone="ok">
           {passwordConfigured
             ? <>Local mode is protected. <b>Go to dashboard opens the local login screen first.</b></>
             : <>Local mode opens directly to Personal Overview with <b>no login</b>, so there’s no token to copy.</>}
-        </p>
-      ) : (
-        <p className="notice">Your MCP config was written with the token you provided.</p>
-      )}
-      {(() => {
-        const restart = [
-          apps.claudeCli && 'Claude CLI',
-          apps.claudeDesktop && 'Claude Desktop',
-          apps.codexCli && 'Codex CLI',
-          apps.codexDesktop && 'Codex Desktop',
-        ].filter(Boolean).join(', ')
-        return restart ? <p className="notice">Restart {restart} to load the new MCP + memory rule.</p> : null
-      })()}
+        </Notice>
+      ) : !token ? (
+        <Notice>Your MCP config was written with the token you provided.</Notice>
+      ) : null}
+      {restart ? <Notice tone="warn">Restart <b>{restart}</b> to load the new MCP and memory rule.</Notice> : null}
       {flow === 'full' ? (
-        <div className="row"><button className="primary" onClick={() => void go()}>Go to dashboard →</button></div>
+        <div className="btn-row">
+          <button type="button" className="btn primary lg" onClick={() => void go()}>Go to dashboard <Icon name="arrow_right" size={16} /></button>
+          {token ? <span className="note">Store the token in your password manager first.</span> : null}
+        </div>
       ) : (
-        <div className="row"><button className="primary" onClick={() => void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})}>Done</button></div>
+        <div className="btn-row"><button type="button" className="btn primary" onClick={() => void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})}>Done</button></div>
       )}
     </section>
   )

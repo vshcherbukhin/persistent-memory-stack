@@ -1,12 +1,20 @@
 'use client'
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Icon, type IconName } from '@/components/ui/Icon'
 
 export interface SettingsNavItem {
   id: string
   label: string
   description: string
   href: string
+  /** Prototype d-settings: each settings group reads as a navlink with its own glyph. */
+  icon?: IconName
+}
+
+export interface SettingsSectionBadge {
+  label: string
+  tone: 'ok' | 'warn' | 'bad' | 'neutral'
 }
 
 const SettingsActiveContext = createContext<string | null>(null)
@@ -58,7 +66,8 @@ export function SettingsLayout({
 
   return (
     <SettingsActiveContext.Provider value={currentId}>
-      <div className="settings-shell">
+      {/* A single settings group needs no navigation rail (prototype d-notifications). */}
+      <div className={`settings-shell${items.length === 1 ? ' single' : ''}`}>
         <aside className="settings-nav" aria-label="Settings sections" role="tablist">
           {items.map((item) => {
             const selected = item.id === currentId
@@ -70,11 +79,12 @@ export function SettingsLayout({
                 className={`settings-nav-item${selected ? ' active' : ''}`}
                 aria-controls={settingsPanelId(item.id)}
                 aria-selected={selected}
+                aria-description={item.description}
                 role="tab"
                 onClick={() => selectItem(item)}
               >
+                {item.icon ? <Icon name={item.icon} size={16} /> : null}
                 <span>{item.label}</span>
-                <small>{item.description}</small>
               </button>
             )
           })}
@@ -89,11 +99,17 @@ export function SettingsSection({
   id,
   title,
   description,
+  badge,
+  plain = false,
   children,
 }: {
   id: string
   title: string
   description?: string
+  /** Render the panel content without its own card chrome, for pages composed of several cards. */
+  plain?: boolean
+  /** Prototype d-settings: the card head carries the group's state, e.g. "operational" or "pinned". */
+  badge?: SettingsSectionBadge
   children: ReactNode
 }) {
   const activeId = useContext(SettingsActiveContext)
@@ -102,16 +118,21 @@ export function SettingsSection({
   return (
     <section
       id={settingsPanelId(id)}
-      className="panel settings-section"
+      className={plain ? 'settings-section plain' : 'panel settings-section'}
       aria-labelledby={settingsTabId(id)}
       hidden={!active}
       role="tabpanel"
     >
-      <div className="settings-section-head">
-        <h2 className="card-title">{title}</h2>
-        {description ? <p className="muted">{description}</p> : null}
+      {plain ? children : <>
+      <div className="card-head settings-section-head">
+        <div>
+          <h2 className="card-title">{title}</h2>
+          {description ? <p className="card-sub">{description}</p> : null}
+        </div>
+        {badge ? <span className={`badge up${badge.tone === 'neutral' ? '' : ` ${badge.tone}`}`}>{badge.label}</span> : null}
       </div>
       {children}
+      </>}
     </section>
   )
 }

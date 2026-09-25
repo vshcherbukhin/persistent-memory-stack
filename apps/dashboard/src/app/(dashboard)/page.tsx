@@ -2,15 +2,17 @@ import Link from 'next/link'
 import { requireControlPlane } from '@/lib/session'
 import { api } from '@/lib/api'
 import { isSuperuserLevel } from '@/lib/authz'
-import type { MemoryGraphActivity, MemoryGraphFacet, OverviewSummary } from '@/lib/types'
+import type { MemoryGraphFacet, OverviewSummary } from '@/lib/types'
 import { capabilityHealthPresentation } from '@/lib/capabilityHealth'
+import { streamMcpLogRef } from '@/lib/mcpSessionFormat'
+import { McpLiveSessionsPanel } from './McpLiveSessionsPanel'
 import { OverviewAutoRefresh } from './OverviewAutoRefresh'
 import {
   CorpusShapePanel,
-  MemoryActivityPanel,
   OverviewIncident,
   Sparkline,
-  hourlyBuckets,
+  dailyBuckets,
+  relativeAgo,
 } from './OverviewPanels'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +32,7 @@ function money(n: number): string {
 function serviceTone(s: OverviewSummary['services']): Tone {
   if (s.unavailable || s.failed > 0) return 'bad'
   if (s.stopped > 0 || s.total === 0) return 'warn'
-  return 'neutral'
+  return 'ok'
 }
 
 function serviceBadge(s: OverviewSummary['services']): { label: string; tone: BadgeTone } {
@@ -46,7 +48,7 @@ function workerStopped(w: OverviewSummary['workers']): number {
 function workerTone(w: OverviewSummary['workers']): Tone {
   if (!w.alive || w.failed > 0) return 'bad'
   if (workerStopped(w) > 0 || w.total === 0) return 'warn'
-  return 'neutral'
+  return 'ok'
 }
 
 function workerBadge(w: OverviewSummary['workers']): { label: string; tone: BadgeTone } {
@@ -105,10 +107,16 @@ function OverviewCard({
       </span>
       <span className={`overview-card-value${valueClassName ? ` ${valueClassName}` : ''}`}>{value}</span>
       <span className="overview-card-meta">{meta}</span>
-      <span className="overview-card-action">{actionLabel}</span>
+      <span className="overview-card-action">{actionLabel} <span aria-hidden="true">→</span></span>
       {spark}
     </Link>
   )
+}
+
+/** Prototype capability meta — "Observed 4 min ago." — from the raw health timestamps. */
+function observedLabel(health: OverviewSummary['capabilityHealth']['factExtraction'], now: number): string {
+  const at = health.state === 'healthy' ? health.lastSuccessAt ?? health.observedAt : health.lastFailureAt ?? health.observedAt
+  return at ? `Observed ${relativeAgo(at, now)}.` : 'Not observed yet.'
 }
 
 function hrefWithSpace(href: string, space: 'personal' | 'shared'): string {
@@ -140,28 +148,44 @@ export default async function OverviewPage({
   const factExtractionHealth = capabilityHealthPresentation(overview.capabilityHealth.factExtraction)
   const embeddingsHealth = capabilityHealthPresentation(overview.capabilityHealth.embeddings)
 
-  // The lower row is supplementary: the graph being unreachable must degrade these
-  // panels, never fail the whole control-plane summary.
-  const [activityResult, facetsResult, pendingResult] = await Promise.allSettled([
-    api.getMemoryGraphActivity({ projects: [], tags: [], badges: [], validity: 'all' }, space),
+  // The lower row is supplementary: an unreachable graph or service monitor must degrade
+  // these panels, never fail the whole control-plane summary.
+  const [servicesResult, facetsResult, pendingResult, recentResult, usageResult] = await Promise.allSettled([
+    // Live MCP sessions are held by the local API; the stream MCP container's log carries their output.
+    api.listServices(),
     api.getMemoryGraphFacets({}, space),
     api.pendingEmbeddings(space),
+    // Newest records first (the list API orders by createdAt desc): enough to draw the
+    // corpus trend and count the last day without a dedicated stats endpoint.
+    api.listMemories({ limit: 200 }, space),
+    api.getUsage('24h', space),
   ])
-  const activityEvents: MemoryGraphActivity[] = activityResult.status === 'fulfilled' ? activityResult.value.events ?? [] : []
+  const liveClients = servicesResult.status === 'fulfilled' ? servicesResult.value.mcpClients : []
+  const liveLogRef = servicesResult.status === 'fulfilled' ? streamMcpLogRef(servicesResult.value.services) : null
+  const liveError = servicesResult.status === 'rejected'
+    ? servicesResult.reason instanceof Error ? servicesResult.reason.message : 'The service monitor did not respond.'
+    : undefined
   const badgeFacets: MemoryGraphFacet[] = facetsResult.status === 'fulfilled' ? facetsResult.value.badges ?? [] : []
-  const activityUnavailable = activityResult.status === 'rejected'
   const facetsUnavailable = facetsResult.status === 'rejected'
   const now = Date.now()
-  const writeBuckets = hourlyBuckets(activityEvents.filter((e) => e.kind !== 'read'), now)
-  const writesLastDay = writeBuckets.reduce((sum, n) => sum + n, 0)
+  const recentRecords = recentResult.status === 'fulfilled' ? recentResult.value.results ?? [] : []
+  const createdTimes = recentRecords.map((m) => m.createdAt)
+  const writeBuckets = dailyBuckets(createdTimes, now)
+  const writesLastDay = createdTimes.filter((t) => now - Date.parse(t) < 86_400_000).length
+  // A full page entirely inside the last day means the true count is higher.
+  const writesCapped = recentRecords.length >= 200 && writesLastDay >= recentRecords.length
+  const usageTrend = usageResult.status === 'fulfilled' ? (usageResult.value.trend ?? []).map((p) => p.tokens) : []
   const entityCount = facetsResult.status === 'fulfilled' ? facetsResult.value.tags?.length ?? 0 : 0
   const projectCount = facetsResult.status === 'fulfilled' ? facetsResult.value.projects?.length ?? 0 : 0
   const pendingEmbedding = pendingResult.status === 'fulfilled' ? pendingResult.value.memories : 0
   // Prototype meta: recent writes plus anything still waiting to be searchable.
+  const newestWrite = createdTimes[0]
   const savedMemoriesMeta = [
-    writesLastDay > 0 ? `+${writesLastDay} in the last 24h` : null,
+    writesLastDay > 0
+      ? `+${writesCapped ? `${writesLastDay}+` : writesLastDay} in the last 24h`
+      : newestWrite ? `No writes in 24h · last ${relativeAgo(newestWrite, now)}` : null,
     pendingEmbedding > 0 ? `${pendingEmbedding} awaiting embedding` : null,
-  ].filter(Boolean).join(' · ') || 'Browse, search, verify, and edit memory records'
+  ].filter(Boolean).join(' · ') || 'No memories yet — your agents write here'
 
   // One incident line, highest severity first, so a degraded stack states itself
   // before the reader has to interpret six cards.
@@ -273,6 +297,7 @@ export default async function OverviewPage({
           tone="neutral"
           badge="24h"
           badgeTone="neutral"
+          spark={<Sparkline points={usageTrend} tone="var(--accent-2)" />}
         />
         <OverviewCard
           href={hrefWithSpace(`/memories?surface=${space}&tab=graph`, space)}
@@ -288,14 +313,16 @@ export default async function OverviewPage({
       </section>
 
       {showSettingsLink ? (
-        <section className="overview-runtime-grid" aria-label="Model settings">
+        <section className="overview-capabilities">
+        <div className="section-label">Model capabilities</div>
+        <div className="overview-runtime-grid" role="group" aria-label="Model settings">
           <OverviewCard
             href={hrefWithSpace('/settings?setting=fact-extraction', space)}
             label="Fact extraction"
             value={overview.settings.factExtractionModel}
-            meta={`${factExtractionHealth.message} Observed ${factExtractionHealth.observedAt}.`}
+            meta={`${factExtractionHealth.message} ${observedLabel(overview.capabilityHealth.factExtraction, now)}`}
             tone={factExtractionHealth.tone}
-            badge={factExtractionHealth.badge}
+            badge={factExtractionHealth.badge === 'healthy' ? 'operational' : factExtractionHealth.badge}
             badgeTone={factExtractionHealth.tone}
             actionLabel="Open settings"
             compact
@@ -306,30 +333,24 @@ export default async function OverviewPage({
             href={hrefWithSpace('/settings?setting=embeddings', space)}
             label="Embeddings"
             value={`${overview.settings.activeEmbedModel} @ ${overview.settings.activeEmbedDim}`}
-            meta={`${embeddingsHealth.message} Observed ${embeddingsHealth.observedAt}.`}
+            meta={`${embeddingsHealth.message} ${observedLabel(overview.capabilityHealth.embeddings, now)}`}
             tone={embeddingsHealth.tone}
-            badge={embeddingsHealth.badge}
+            badge={embeddingsHealth.badge === 'healthy' ? 'operational' : embeddingsHealth.badge}
             badgeTone={embeddingsHealth.tone}
             actionLabel="Open settings"
             compact
             valueClassName="overview-card-model mono"
             dataHealthState={overview.capabilityHealth.embeddings.state}
           />
+        </div>
         </section>
       ) : null}
 
-      <section className="overview-lower" aria-label="Memory activity and corpus shape">
-        <MemoryActivityPanel
-          events={activityEvents}
-          now={now}
-          unavailable={activityUnavailable}
-          href={hrefWithSpace(`/memories?surface=${space}&tab=graph`, space)}
-        />
+      <section className="overview-lower" aria-label="Live MCP activity and corpus shape">
+        <McpLiveSessionsPanel initialClients={liveClients} initialLogRef={liveLogRef} initialError={liveError} />
         <CorpusShapePanel
           badges={badgeFacets}
-          total={overview.counts.memories}
           unavailable={facetsUnavailable}
-          href={hrefWithSpace(`/memories?surface=${space}`, space)}
         />
       </section>
     </div>

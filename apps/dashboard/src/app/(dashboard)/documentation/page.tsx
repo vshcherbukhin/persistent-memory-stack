@@ -39,6 +39,9 @@ export default async function DocumentationPage({
             <Icon name="open_in_new" size={17} />
             Stack documentation
           </a>
+          <span className="dashboard-docs-nav-group">
+            {selectedSpace === 'local-personal' ? 'Personal memories' : selectedSpace === 'local-shared-client' ? 'Shared memories' : 'Shared server'}
+          </span>
           <nav>
             {topics.map((item) => (
               <Link
@@ -54,7 +57,7 @@ export default async function DocumentationPage({
           </nav>
         </aside>
         <DocumentationArticle topicSlug={topic.slug}>
-          <VisualGuide markdown={topic.markdown} summary={topic.summary} />
+          <VisualGuide markdown={topic.markdown} summary={topic.summary} eyebrow="Dashboard guide" />
         </DocumentationArticle>
       </div>
     </div>

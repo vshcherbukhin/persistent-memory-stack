@@ -91,7 +91,8 @@ export function ConfidenceRangeSelect({ min, max, onChange }: { min: string; max
         aria-label="Filter by confidence range"
         onClick={() => setOpen((current) => !current)}
       >
-        <span>Confidence {min} – {max}</span>
+        {/* Prototype d-memories: an untouched range reads as "Any confidence". */}
+        <span>{min === '0.0' && max === '1.0' ? 'Any confidence' : `Confidence ${min} – ${max}`}</span>
         <span className="ui-select-caret" aria-hidden><Icon name="keyboard_arrow_down" size={18} /></span>
       </button>
       {panel && typeof document !== 'undefined' ? createPortal(panel, document.body) : null}

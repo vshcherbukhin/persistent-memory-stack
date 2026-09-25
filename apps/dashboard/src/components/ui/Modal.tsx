@@ -12,6 +12,8 @@ import { Tooltip } from './Tooltip'
  */
 export function Modal({
   title,
+  icon,
+  headActions,
   onClose,
   children,
   footer,
@@ -21,6 +23,10 @@ export function Modal({
   bodyClassName,
 }: {
   title?: ReactNode
+  /** Leading glyph in the head that names the record type (prototype `.modal-head`). */
+  icon?: ReactNode
+  /** Record-level actions in the head, placed before the close button. */
+  headActions?: ReactNode
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
@@ -46,7 +52,9 @@ export function Modal({
       >
         {title != null ? (
           <div className="modal-head">
+            {icon ? <span className="modal-head-icon" aria-hidden="true">{icon}</span> : null}
             <h2>{title}</h2>
+            {headActions ? <div className="modal-head-actions">{headActions}</div> : null}
             <Tooltip label="Close">
               <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
                 <Icon name="close" size={17} />

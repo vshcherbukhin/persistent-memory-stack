@@ -4,6 +4,8 @@ import { useActionState, useEffect, useState } from 'react'
 import { Modal } from './ui/Modal'
 import { Avatar } from './ui/Avatar'
 import { Checkbox } from './ui/Checkbox'
+import { Icon } from './ui/Icon'
+import { logoutAction } from '@/app/login/actions'
 import { ThemeSwitch } from './ui/ThemeSwitch'
 import { updateProfileAction, type ProfileActionState } from '@/app/(dashboard)/profile/actions'
 import { assessPasswordStrength, generateStrongPassword } from '@/lib/passwordStrength'
@@ -86,24 +88,43 @@ export function ProfileModal({
   const name = displayName || profile.email || 'You'
 
   return (
-    <Modal title="Your profile" onClose={onClose}>
-      {/* Identity */}
-      <div className="row" style={{ gap: 14, alignItems: 'center' }}>
-        <Avatar name={name} email={profile.email ?? undefined} size={56} />
+    <Modal
+      title="Your profile"
+      onClose={onClose}
+      width={540}
+      footer={
+        <>
+          {!localMode || profile.hasPassword ? (
+            <form action={logoutAction}>
+              <button type="submit" className="btn ghost">
+                <Icon name={localMode ? 'lock' : 'logout'} size={14} /> {localMode ? 'Lock dashboard' : 'Sign out'}
+              </button>
+            </form>
+          ) : null}
+          <span className="modal-foot-spacer" aria-hidden="true" />
+          <button type="button" className="btn secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" form="profile-form" className="btn primary" disabled={!canSave}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </>
+      }
+    >
+      {/* Identity (prototype a-profile) */}
+      <div className="profile-identity">
+        <Avatar name={name} email={profile.email ?? undefined} size={52} />
         <div>
-          <div style={{ fontWeight: 800 }}>{name}</div>
-          <div className="muted" style={{ fontSize: 12 }}>{profile.email ?? 'No email set'}</div>
+          <div className="profile-identity-name">{name}</div>
+          <div className="note">{profile.email ?? 'No email set'}</div>
+          {localMode ? <span className="badge accent up">local dashboard</span> : null}
         </div>
       </div>
 
       {/* Details + password */}
-      <form action={saveAction} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <form id="profile-form" action={saveAction} className="profile-form">
         <div className="field">
-          <label htmlFor="pm-name">Display name</label>
+          <label className="field-label" htmlFor="pm-name">Display name</label>
           <input id="pm-name" name="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="ui-input" placeholder="Your name" />
         </div>
         <div className="field">
-          <label htmlFor="pm-email">Email</label>
+          <label className="field-label" htmlFor="pm-email">Email</label>
           <input id="pm-email" name="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="ui-input" placeholder="you@company.com" />
         </div>
 
@@ -114,7 +135,7 @@ export function ProfileModal({
           </div>
         ) : null}
 
-        <div className="seg-group" style={{ borderTop: '1px solid var(--divider-section)', paddingTop: 14 }}>
+        <div className="seg-group profile-section">
           <span className="section-label">Appearance</span>
           <p className="note" style={{ margin: '0 0 8px' }}>
             Stored in this browser. It changes how the dashboard looks for you on this computer only.
@@ -122,18 +143,21 @@ export function ProfileModal({
           <ThemeSwitch compact />
         </div>
 
-        <div className="seg-group" style={{ borderTop: '1px solid var(--divider-section)', paddingTop: 14 }}>
+        <div className="seg-group profile-section">
           <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}>
             <span className="section-label">Dashboard password</span>
-            <button type="button" className="secondary" onClick={createPassword}>Generate password</button>
+            <button type="button" className="btn sm secondary" onClick={createPassword}>Generate password</button>
           </div>
-          <p className="note" style={{ margin: '0 0 8px' }}>
-            {profile.hasPassword
-              ? 'Change your dashboard password by entering the current password and a strong new one.'
-              : localMode
-                ? 'No password is set. Set one to require dashboard login on this local stack.'
-                : 'No password is set. Ask a super-admin for a reset if you cannot create one here.'}
-          </p>
+          <div className={`notice with-icon ${profile.hasPassword ? 'ok' : 'warn'}`}>
+            <span className="n-ic"><Icon name="lock" size={16} /></span>
+            <span className="n-body">
+              {profile.hasPassword
+                ? 'A password is set. Change it by entering the current password and a strong new one.'
+                : localMode
+                  ? 'No password is set. Set one to require dashboard login on this local stack.'
+                  : 'No password is set. Ask a super-admin for a reset if you cannot create one here.'}
+            </span>
+          </div>
           {profile.passwordTemporary ? (
             <div className="notice warn" style={{ margin: 0 }}>
               Your current password is temporary. Change it before continuing normal work.
@@ -148,7 +172,7 @@ export function ProfileModal({
             <>
               {profile.hasPassword ? (
                 <div className="field">
-                  <label htmlFor="pm-current-pw">Current password</label>
+                  <label className="field-label" htmlFor="pm-current-pw">Current password</label>
                   <input
                     id="pm-current-pw"
                     name="currentPassword"
@@ -162,7 +186,7 @@ export function ProfileModal({
                 </div>
               ) : null}
               <div className="field">
-                <label htmlFor="pm-pw">{profile.hasPassword ? 'New password' : 'Password'}</label>
+                <label className="field-label" htmlFor="pm-pw">{profile.hasPassword ? 'New password' : 'Password'}</label>
                 <input
                   id="pm-pw"
                   name="password"
@@ -185,7 +209,7 @@ export function ProfileModal({
               </div>
               {pw.length > 0 ? (
                 <div className="field">
-                  <label htmlFor="pm-pwc">Confirm password</label>
+                  <label className="field-label" htmlFor="pm-pwc">Confirm password</label>
                   <input id="pm-pwc" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="ui-input" autoComplete="new-password" />
                   {pwMismatch ? <span className="field-hint" style={{ color: 'var(--coral)' }}>Passwords do not match.</span> : null}
                 </div>
@@ -195,7 +219,7 @@ export function ProfileModal({
                   <div className="notice-title">Generated password shown once</div>
                   <div className="update-command-row">
                     <code>{generated}</code>
-                    <button type="button" className="secondary" onClick={() => void copyGenerated()}>{copied ? 'Copied' : 'Copy'}</button>
+                    <button type="button" className="btn sm secondary" onClick={() => void copyGenerated()}>{copied ? 'Copied' : 'Copy'}</button>
                   </div>
                 </div>
               ) : null}
@@ -213,15 +237,12 @@ export function ProfileModal({
             </p>
             <div className="update-command-row">
               <code>{save.recoveryToken}</code>
-              <button type="button" className="secondary" onClick={() => void copyRecovery()}>
+              <button type="button" className="btn sm secondary" onClick={() => void copyRecovery()}>
                 {recoveryCopied ? 'Copied' : 'Copy'}
               </button>
             </div>
           </div>
         ) : null}
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <button type="submit" className="primary" disabled={!canSave}>{saving ? 'Saving…' : 'Save changes'}</button>
-        </div>
       </form>
     </Modal>
   )

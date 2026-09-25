@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { FileInput } from '@/components/ui/FileInput'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { memoryImportNotice } from '@/lib/memoryImportResult'
@@ -40,24 +41,37 @@ export interface DashboardToolsProps {
  * (imported memories embed in the background; this forces a re-embed).
  */
 export function DashboardTools(props: DashboardToolsProps) {
+  // Prototype d-tools: the three safe tools side by side, the destructive one on its own row.
   return (
     <div className="memory-tools-stack">
       {props.canManageAdminTools ? <>
-        <section className="panel panel-pad memory-tool-card">
-          <h2 className="card-title">Export memory</h2>
+        <section className="panel tool-card">
+          <div className="card-head">
+            <h2 className="card-title"><Icon name="download" size={16} /> Export memory</h2>
+          </div>
           <ExportTab {...props} />
         </section>
-        <section className="panel panel-pad memory-tool-card">
-          <h2 className="card-title">Import memory</h2>
+        <section className="panel tool-card">
+          <div className="card-head">
+            <h2 className="card-title"><Icon name="upload" size={16} /> Import memory</h2>
+          </div>
           <ImportTab {...props} />
         </section>
-        <section className="panel panel-pad memory-tool-card">
-          <h2 className="card-title">Rebuild memory graph</h2>
+        <section className="panel tool-card">
+          <div className="card-head">
+            <h2 className="card-title"><Icon name="hub" size={16} /> Rebuild memory graph</h2>
+          </div>
           <GraphRebuildTab {...props} />
         </section>
       </> : null}
-      <section className="panel panel-pad memory-tool-card">
-        <h2 className="card-title">Bulk delete</h2>
+      <section className="panel tool-card tool-card-danger">
+        <div className="card-head">
+          <div>
+            <h2 className="card-title"><Icon name="delete" size={16} /> Bulk delete</h2>
+            <div className="card-sub">Scoped, previewed, and irreversible. Always shows the graph cascade before confirming.</div>
+          </div>
+          <span className="badge bad up">destructive</span>
+        </div>
         <DeleteTab {...props} />
       </section>
     </div>
@@ -98,45 +112,37 @@ function GraphRebuildTab({ surface, teams, users, projectScopes, localTeamId, is
       <p className="tool-desc">
         Queue a one-time worker job that replays existing memories through Graphiti. Normal memory writes keep syncing automatically; this repairs or populates graph data for the selected slice.
       </p>
-      <div className="tool-row">
-        {!isPersonalSurface && !localTeamId && isSuper ? (
-          <label className="tool-field">
-            <span>Team</span>
-            <div style={{ minWidth: 200 }}>
-              <Select
-                ariaLabel="Graph rebuild team"
-                value={team}
-                onChange={(v) => {
-                  setTeam(v)
-                  setProject('')
-                }}
-                options={[{ value: '', label: 'All teams' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              />
-            </div>
-          </label>
-        ) : null}
+      {!isPersonalSurface && !localTeamId && isSuper ? (
         <label className="tool-field">
-          <span>Project</span>
-          <div style={{ minWidth: 200 }}>
-            <Select ariaLabel="Graph rebuild project" value={project} onChange={setProject} options={projectOptions} />
-          </div>
+          <span>Team</span>
+          <Select
+            ariaLabel="Graph rebuild team"
+            value={team}
+            onChange={(v) => {
+              setTeam(v)
+              setProject('')
+            }}
+            options={[{ value: '', label: 'All teams' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+          />
         </label>
-        <label className="tool-field">
-          <span>Author</span>
-          <div style={{ minWidth: 220 }}>
-            <Select
-              ariaLabel="Graph rebuild author"
-              value={createdById}
-              onChange={setCreatedById}
-              options={[{ value: '', label: 'All authors' }, ...users.map((u) => ({ value: u.id, label: u.label }))]}
-            />
-          </div>
-        </label>
-        <button type="button" className="btn primary" disabled={busy || running} onClick={() => void doRebuild()}>
-          {running ? 'Queueing…' : 'Run graph rebuild'}
-        </button>
-      </div>
-      {status ? <div className={`notice${status.kind === 'error' ? ' danger' : ' ok'}`} style={{ marginTop: 14 }}>{status.text}</div> : null}
+      ) : null}
+      <label className="tool-field">
+        <span>Project</span>
+        <Select ariaLabel="Graph rebuild project" value={project} onChange={setProject} options={projectOptions} />
+      </label>
+      <label className="tool-field">
+        <span>Author</span>
+        <Select
+          ariaLabel="Graph rebuild author"
+          value={createdById}
+          onChange={setCreatedById}
+          options={[{ value: '', label: 'All authors' }, ...users.map((u) => ({ value: u.id, label: u.label }))]}
+        />
+      </label>
+      <button type="button" className="btn secondary block tool-card-action" disabled={busy || running} onClick={() => void doRebuild()}>
+        <Icon name="refresh" size={15} /> {running ? 'Queueing…' : 'Rebuild graph'}
+      </button>
+      {status ? <div className={`notice${status.kind === 'error' ? ' danger' : ' ok'}`}>{status.text}</div> : null}
     </>
   )
 }
@@ -212,46 +218,38 @@ function ExportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
       <p className="tool-desc">
         Save a re-importable memory file for <b>{scope}</b>. Vectors are excluded — re-importing re-embeds them.
       </p>
-      <div className="tool-row">
-        {!isPersonalSurface && !localTeamId && isSuper ? (
-          <label className="tool-field">
-            <span>Team</span>
-            <div style={{ minWidth: 200 }}>
-              <Select ariaLabel="Export team" value={team} onChange={onTeamChange} options={[{ value: '', label: 'All teams' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} />
-            </div>
-          </label>
-        ) : null}
+      {!isPersonalSurface && !localTeamId && isSuper ? (
         <label className="tool-field">
-          <span>Project</span>
-          <div style={{ minWidth: 200 }}>
-            <Select ariaLabel="Export project" value={project} onChange={setProject} options={projectOptions} />
-          </div>
+          <span>Team</span>
+          <Select ariaLabel="Export team" value={team} onChange={onTeamChange} options={[{ value: '', label: 'All teams' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} />
         </label>
-        <label className="tool-field">
-          <span>Export type</span>
-          <div style={{ minWidth: 180 }}>
-            <Select
-              ariaLabel="Export type"
-              value={exportType}
-              onChange={(v) => setExportType(v === 'standard' ? 'standard' : 'secure')}
-              options={[
-                { value: 'secure', label: 'Secure (.pm)' },
-                { value: 'standard', label: 'Standard JSON' },
-              ]}
-            />
-          </div>
-        </label>
-        {exportType === 'secure' ? (
-          <label className="tool-field">
-            <span>Passphrase</span>
-            <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} style={{ minWidth: 220 }} />
-          </label>
-        ) : null}
-        <button type="button" className="btn primary" disabled={busy || saving} onClick={() => void doExport()}>
-          Export
-        </button>
+      ) : null}
+      <label className="tool-field">
+        <span>Project</span>
+        <Select ariaLabel="Export project" value={project} onChange={setProject} options={projectOptions} />
+      </label>
+      <div className="tool-field">
+        <span>Export type</span>
+        <SegmentedControl
+          ariaLabel="Export type"
+          value={exportType}
+          onChange={setExportType}
+          options={[
+            { value: 'secure', label: 'Secure .pm' },
+            { value: 'standard', label: 'JSON' },
+          ]}
+        />
       </div>
-      {status ? <div className={`notice${status.kind === 'error' ? ' danger' : ''}`} style={{ marginTop: 14 }}>{status.text}</div> : null}
+      {exportType === 'secure' ? (
+        <label className="tool-field">
+          <span>Passphrase</span>
+          <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} placeholder="required for .pm" />
+        </label>
+      ) : null}
+      <button type="button" className="btn primary block tool-card-action" disabled={busy || saving} onClick={() => void doExport()}>
+        <Icon name="download" size={15} /> {saving ? 'Exporting…' : 'Export memories'}
+      </button>
+      {status ? <div className={`notice${status.kind === 'error' ? ' danger' : ' ok'}`}>{status.text}</div> : null}
     </>
   )
 }
@@ -385,85 +383,127 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
   return (
     <>
       <p className="tool-desc">
-        Import a previously-exported JSON or secure .pm file. First verify the package, then import and re-embed.{' '}
+        Import a previously-exported JSON or secure .pm file. Verify the package first; nothing is written until you confirm.{' '}
         {isPersonalSurface ? 'Memories are imported into personal memories.' : localTeamId ? 'Memories are imported into your team.' : isSuper ? 'Pick a target team, or keep each row’s team from the file.' : 'Memories are imported into your team.'}
       </p>
-      <ImportProgress phase={phase} draft={draft} result={result} />
-      <div className="tool-row" style={{ marginBottom: 12 }}>
-        <FileInput accept=".json,.pm,application/json,application/octet-stream" buttonLabel="Choose file…" onFile={(picked) => void onPickFile(picked)} />
+      <div className="tool-field">
+        <span>File</span>
+        <FileInput
+          variant="dropzone"
+          accept=".json,.pm,application/json,application/octet-stream"
+          dropLabel={<>Drop a <code>.pm</code> or <code>.json</code> export here</>}
+          onFile={(picked) => void onPickFile(picked)}
+        />
       </div>
-      <div className="tool-row">
-        {!isPersonalSurface && !localTeamId && isSuper ? (
-          <label className="tool-field">
-            <span>Target team</span>
-            <div style={{ minWidth: 190 }}>
-              <Select
-                ariaLabel="Import target team"
-                value={team}
-                onChange={(v) => {
-                  setTeam(v)
-                  setProject('')
-                  setResult(null)
-                }}
-                options={[{ value: '', label: 'team from file' }, ...teams.map((t) => ({ value: t.id, label: `→ ${t.name}` }))]}
-              />
-            </div>
-          </label>
-        ) : null}
+      {!isPersonalSurface && !localTeamId && isSuper ? (
         <label className="tool-field">
-          <span>Target project</span>
-          <div style={{ minWidth: 200 }}>
-            <Select ariaLabel="Import target project" value={project} onChange={(v) => { setProject(v); setResult(null) }} options={projectOptions} />
-          </div>
+          <span>Target team</span>
+          <Select
+            ariaLabel="Import target team"
+            value={team}
+            onChange={(v) => {
+              setTeam(v)
+              setProject('')
+              setResult(null)
+            }}
+            options={[{ value: '', label: 'team from file' }, ...teams.map((t) => ({ value: t.id, label: `→ ${t.name}` }))]}
+          />
         </label>
-        {file?.name.toLowerCase().endsWith('.pm') ? (
-          <label className="tool-field">
-            <span>Passphrase</span>
-            <Input type="password" value={passphrase} onChange={(e) => { setPassphrase(e.target.value); clearLoadedState(); setStatus(file ? { kind: 'ok', text: 'Passphrase changed. Load and verify the file again.' } : null) }} style={{ minWidth: 220 }} />
-          </label>
-        ) : null}
-        <button type="button" className="btn secondary" disabled={!file || busy || loading || importing} onClick={() => void doLoadAndVerify()}>
-          {loading ? 'Verifying…' : 'Load & verify'}
-        </button>
-        <button type="button" className="btn primary" disabled={!draft || busy || loading || importing} onClick={() => void doImport()}>
-          {importing ? 'Importing…' : 'Import & re-embed'}
-        </button>
-      </div>
-      {draft ? (
-        <div className="import-summary" aria-live="polite">
-          <div><span>File</span><b>{draft.fileName}</b></div>
-          <div><span>Memories</span><b>{draft.memories.length.toLocaleString()}</b></div>
-          <div><span>Format</span><b>{draft.secure ? 'Secure .pm' : 'Standard JSON'}</b></div>
-          {isPersonalSurface ? null : <div><span>Target team</span><b>{selectedTeamLabel}</b></div>}
-          <div><span>Target project</span><b>{selectedProjectLabel}</b></div>
-          {draft.exportedAt ? <div><span>Exported</span><b>{new Date(draft.exportedAt).toLocaleString()}</b></div> : null}
-        </div>
       ) : null}
-      {status ? <div className={noticeClass(status.kind)} style={{ marginTop: 14 }}>{status.text}</div> : null}
-      <ImportErrorDetails localDetails={localDetails} resultDetails={result?.details ?? []} totalErrors={result?.errors ?? localDetails.length} />
-
-      <div className="notice" style={{ marginTop: 16 }}>
-        <div className="notice-title">Embedding status</div>
-        Imported memories embed in the background.{' '}
-        <b style={{ color: pending && pending.memories + pending.chunks > 0 ? 'var(--marigold)' : 'var(--soft)' }}>
-          {pending ? `${pending.memories} memories · ${pending.chunks} chunks` : '—'}
-        </b>{' '}
-        pending{pending && pending.embeddingMode !== 'server' ? ' (client-managed: the MCP client embeds these)' : ''}.
-        {canRunBackfill ? (
-          <div style={{ marginTop: 10 }}>
-            <Tooltip label={pending && pending.embeddingMode !== 'server' ? 'Client-managed embeddings run on the client side' : 'Re-embed pending rows now'}>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy || (pending != null && pending.embeddingMode !== 'server')}
-                onClick={onBackfill}
-              >
+      <label className="tool-field">
+        <span>Target project</span>
+        <Select ariaLabel="Import target project" value={project} onChange={(v) => { setProject(v); setResult(null) }} options={projectOptions} />
+      </label>
+      {file?.name.toLowerCase().endsWith('.pm') ? (
+        <label className="tool-field">
+          <span>Passphrase</span>
+          <Input type="password" value={passphrase} onChange={(e) => { setPassphrase(e.target.value); clearLoadedState(); setStatus(file ? { kind: 'ok', text: 'Passphrase changed. Load and verify the file again.' } : null) }} />
+        </label>
+      ) : null}
+      <button type="button" className="btn secondary block tool-card-action" disabled={!file || busy || loading || importing} onClick={() => void doLoadAndVerify()}>
+        {loading ? 'Verifying…' : 'Load & verify'}
+      </button>
+      {!draft && status ? <div className={noticeClass(status.kind)}>{status.text}</div> : null}
+      {!draft ? <ImportErrorDetails localDetails={localDetails} resultDetails={result?.details ?? []} totalErrors={result?.errors ?? localDetails.length} /> : null}
+      {!draft && pending && pending.memories + pending.chunks > 0 ? (
+        <div className="tool-card-foot">
+          <span className="note">
+            {pending.memories.toLocaleString()} memor{pending.memories === 1 ? 'y' : 'ies'} · {pending.chunks.toLocaleString()} chunks awaiting embedding
+          </span>
+          {canRunBackfill ? (
+            <Tooltip label={pending.embeddingMode !== 'server' ? 'Client-managed embeddings run on the client side' : 'Re-embed pending rows now'}>
+              <button type="button" className="btn sm ghost" disabled={busy || pending.embeddingMode !== 'server'} onClick={onBackfill}>
                 Run backfill now
               </button>
             </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
+
+      {draft ? (
+        // Prototype d-tools-import: the staged package is reviewed before anything is written.
+        <div className="import-review" aria-live="polite">
+          <div className="card-head">
+            <div>
+              <h3 className="card-title"><Icon name="upload" size={16} /> Review import</h3>
+              <div className="card-sub">{phase === 'done' ? 'Import finished. Embeddings continue in the background.' : 'Nothing is written until you confirm.'}</div>
+            </div>
+            <span className={`badge up ${phase === 'done' ? 'ok' : phase === 'error' ? 'bad' : 'accent'}`}>
+              {phase === 'done' ? 'imported' : phase === 'importing' ? 'importing' : phase === 'error' ? 'failed' : 'staged'}
+            </span>
           </div>
-        ) : null}
-      </div>
+          <div className="import-review-grid">
+            <ImportProgress phase={phase} draft={draft} result={result} />
+            <div className="import-summary">
+              <div><span>File</span><b>{draft.fileName}</b></div>
+              <div><span>Memories</span><b>{draft.memories.length.toLocaleString()}</b></div>
+              <div><span>Format</span><b>{draft.secure ? 'Secure .pm' : 'Standard JSON'}</b></div>
+              {isPersonalSurface ? null : <div><span>Target team</span><b>{selectedTeamLabel}</b></div>}
+              <div><span>Target project</span><b>{selectedProjectLabel}</b></div>
+              {draft.exportedAt ? <div><span>Exported</span><b>{new Date(draft.exportedAt).toLocaleString()}</b></div> : null}
+            </div>
+          </div>
+          {status ? <div className={noticeClass(status.kind)}>{status.text}</div> : null}
+          <ImportErrorDetails localDetails={localDetails} resultDetails={result?.details ?? []} totalErrors={result?.errors ?? localDetails.length} />
+          <div className={`notice with-icon${pending && pending.memories + pending.chunks > 0 ? ' warn' : ''}`}>
+            <span className="n-ic"><Icon name={pending && pending.memories + pending.chunks > 0 ? 'warning' : 'info'} size={16} /></span>
+            <span className="n-body">
+              <span className="notice-title">Embedding status</span>
+              Imported memories embed in the background.{' '}
+              <b>{pending ? `${pending.memories} memories · ${pending.chunks} chunks` : '—'}</b>{' '}
+              pending{pending && pending.embeddingMode !== 'server' ? ' (client-managed: the MCP client embeds these)' : ''}.
+            </span>
+          </div>
+          <div className="btn-row">
+            <button type="button" className="btn primary" disabled={busy || loading || importing || phase === 'done'} onClick={() => void doImport()}>
+              {importing ? 'Importing…' : 'Import & re-embed'}
+            </button>
+            {canRunBackfill ? (
+              <Tooltip label={pending && pending.embeddingMode !== 'server' ? 'Client-managed embeddings run on the client side' : 'Re-embed pending rows now'}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={busy || (pending != null && pending.embeddingMode !== 'server')}
+                  onClick={onBackfill}
+                >
+                  Run backfill now
+                </button>
+              </Tooltip>
+            ) : null}
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={importing}
+              onClick={() => {
+                clearLoadedState()
+                setStatus(null)
+              }}
+            >
+              {phase === 'done' ? 'Done' : 'Cancel'}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }
@@ -473,20 +513,22 @@ function ImportProgress({ phase, draft, result }: { phase: ImportPhase; draft: I
   const importState = phase === 'importing' ? 'active' : result && result.imported > 0 ? 'done' : phase === 'error' && draft ? 'error' : 'idle'
   const embedState = phase === 'importing' ? 'active' : result ? (result.pending > 0 ? 'queued' : 'done') : 'idle'
   return (
-    <div className="import-steps" aria-label="Import progress">
-      <ImportStep number="1" state={phase === 'idle' && !draft ? 'active' : 'done'} title="Select file" detail={draft?.fileName ?? 'Choose a .json or .pm export'} />
-      <ImportStep number="2" state={verifiedState} title="Load & verify" detail={draft ? `${draft.memories.length.toLocaleString()} memories verified` : 'Parse, decrypt, and validate rows'} />
-      <ImportStep number="3" state={importState} title="Import rows" detail={result ? `${result.imported.toLocaleString()} imported, ${result.errors.toLocaleString()} errors` : 'Write memories by id'} />
-      <ImportStep number="4" state={embedState} title="Re-embed" detail={result ? `${result.embedded.toLocaleString()} embedded, ${result.pending.toLocaleString()} pending` : 'Embed now or queue backfill'} />
+    <div className="import-steps steplist" aria-label="Import progress">
+      <ImportStep state={phase === 'idle' && !draft ? 'current' : 'done'} title="Select file" detail={draft?.fileName ?? 'Choose a .json or .pm export'} />
+      <ImportStep state={verifiedState} title="Load & verify" detail={draft ? `${draft.memories.length.toLocaleString()} memories verified` : 'Parse, decrypt, and validate rows'} />
+      <ImportStep state={draft && importState === 'idle' ? 'current' : importState} title="Import rows" detail={result ? `${result.imported.toLocaleString()} imported, ${result.errors.toLocaleString()} errors` : 'Write memories by id'} />
+      <ImportStep state={embedState} title="Re-embed" detail={result ? `${result.embedded.toLocaleString()} embedded, ${result.pending.toLocaleString()} pending` : 'Embed now or queue backfill'} />
     </div>
   )
 }
 
-function ImportStep({ number, state, title, detail }: { number: string; state: 'idle' | 'active' | 'done' | 'queued' | 'error'; title: string; detail: string }) {
+/** Prototype `.steprow`: finished steps tick, the running one spins, a failure is named. */
+function ImportStep({ state, title, detail }: { state: 'idle' | 'current' | 'active' | 'done' | 'queued' | 'error'; title: string; detail: string }) {
+  const tone = { idle: '', current: ' current', active: ' running', done: ' done', queued: ' queued', error: ' failed' }[state]
   return (
-    <div className={`import-step ${state}`}>
-      <span className="import-step-index">{state === 'done' ? <Icon name="check" size={13} /> : number}</span>
-      <span>
+    <div className={`steprow${tone}`}>
+      <span className="st-ic" aria-hidden="true">{state === 'done' ? <Icon name="check" size={11} /> : state === 'error' ? '!' : null}</span>
+      <span className="steprow-text">
         <b>{title}</b>
         <small>{detail}</small>
       </span>
@@ -731,29 +773,31 @@ function DeleteTab({ surface, projectScopes, localTeamId, teamName, canManageAdm
       : []
   return (
     <>
-      <p className="tool-desc" style={{ color: 'var(--coral-soft)' }}>
-        Permanently delete memories{isPersonalSurface ? ' in Personal Memories' : canManageAdminTools ? ' in your current team' : ' that you created in your current team'}, optionally scoped to a single project. A live graph-impact review is required before anything is removed.
-      </p>
-      <div className="tool-row">
+      <div className="tool-row tool-row-danger">
         {!isPersonalSurface ? <div><span>Team</span><b>{teamName ?? 'Your team'}</b></div> : null}
-        <label className="tool-field">
+        <label className="tool-field tool-field-grow">
           <span>Project</span>
-          <div style={{ minWidth: 180 }}>
-            <Select
-              ariaLabel="Project to bulk-delete"
-              value={project}
-              onChange={setProject}
-              disabled={!canReview}
-              options={
-                canReview
-                  ? [{ value: '', label: 'All projects' }, ...teamProjects.map((p) => ({ value: p, label: p }))]
-                  : [{ value: '', label: 'No team available' }]
-              }
-            />
-          </div>
+          <Select
+            ariaLabel="Project to bulk-delete"
+            value={project}
+            onChange={setProject}
+            disabled={!canReview}
+            options={
+              canReview
+                ? [{ value: '', label: 'All projects' }, ...teamProjects.map((p) => ({ value: p, label: p }))]
+                : [{ value: '', label: 'No team available' }]
+            }
+          />
         </label>
-        <button type="button" className="btn danger" disabled={!canReview || busy} onClick={() => onRequestBulkDelete(project || undefined)}>Review bulk delete</button>
+        <button type="button" className="btn danger" disabled={!canReview || busy} onClick={() => onRequestBulkDelete(project || undefined)}>
+          <Icon name="delete" size={15} /> Review bulk delete
+        </button>
       </div>
+      {!isPersonalSurface ? (
+        <p className="field-hint tool-card-hint">
+          Deletes memories {canManageAdminTools ? 'in your current team' : 'that you created in your current team'}, optionally limited to one project.
+        </p>
+      ) : null}
     </>
   )
 }

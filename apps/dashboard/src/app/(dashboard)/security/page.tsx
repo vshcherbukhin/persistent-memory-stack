@@ -55,71 +55,77 @@ export default async function SecurityPage({
 
   return (
     <div className="page-fill security-page">
-      {/* The app header already titles this page; a second <h1> just repeated it. */}
-      <p className="muted" style={{ maxWidth: 720 }}>
-        Open DLP findings — PII (Presidio) and secrets (gitleaks) detected in stored memories
-        or blocked document ingests. You see your team&apos;s findings; super-admins see all
-        teams. The flagged value is never stored, only its type + location.
-      </p>
-
+      {/* Prototype d-security: three metric cards — tone on the edge, state in the badge. */}
       <section className="security-metrics" aria-label="Security summary">
         <div className={`panel security-metric ${highest}`}>
-          <div className="section-label">Open findings</div>
+          <div className="security-metric-head">
+            <span className="section-label">Open findings</span>
+            <span className={`badge up ${highest === 'ok' ? 'ok' : 'bad'}`}>{highest === 'ok' ? 'clear' : 'action needed'}</span>
+          </div>
           <div className="security-metric-value">{alerts.length}</div>
           <div className="muted">{severityLine || 'nothing needs attention'}</div>
         </div>
         <div className="panel security-metric">
-          <div className="section-label">Resolved</div>
+          <div className="security-metric-head">
+            <span className="section-label">Resolved</span>
+          </div>
           <div className="security-metric-value">{resolved.length}</div>
           <div className="muted">kept as history, never re-opened automatically</div>
         </div>
         <div className="panel security-metric">
-          <div className="section-label">Detectors</div>
+          <div className="security-metric-head">
+            <span className="section-label">Detectors</span>
+          </div>
           <div className="security-metric-value security-metric-small">Presidio · gitleaks</div>
-          <div className="muted">every stored memory and document ingest is scanned</div>
+          <div className="muted">every stored memory and document ingest is scanned; values are never stored</div>
         </div>
       </section>
 
       {alerts.length === 0 ? (
-        <div className="security-clear">
-          <Icon name="verified_user" size={34} className="security-clear-icon" />
-          <strong>No open security findings</strong>
+        <div className="panel security-clear">
+          <Icon name="shield" size={34} className="security-clear-icon" />
+          <strong>No open security alerts</strong>
           <span>
-            Persistent Memory scans stored memory text and document ingests for PII and secret
-            patterns. Findings appear here with their type and a redacted location — never the
-            value itself.
+            Persistent Memory scans stored memory text and document ingests for PII and secret patterns. Findings appear
+            here with their type and a redacted location — never the value itself.
           </span>
           {resolved.length > 0 ? (
             <span className="security-clear-foot">{resolved.length} finding{resolved.length === 1 ? '' : 's'} resolved previously.</span>
           ) : null}
         </div>
       ) : (
-        <>
-          <div className="section-label" style={{ margin: '12px 0 10px' }}>
-            {alerts.length} open finding{alerts.length === 1 ? '' : 's'} · highest severity first
+        <section className="security-alerts" aria-label="Open alerts">
+          <div className="section-label">
+            Open alerts · {alerts.length} · highest severity first
           </div>
           <div className="table-scroll security-scroll-list">
-            {sorted.map((a) => (
-              <div key={a.id} className={`panel security-alert sev-${a.severity}`}>
-                <span className={`role-badge ${sevClass(a.severity)}`}>{a.severity}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {a.detector} · {a.findingType}
+            {sorted.map((a) => {
+              const tone = a.severity === 'high' ? 'bad' : a.severity === 'medium' ? 'warn' : 'neutral'
+              return (
+                <article key={a.id} className={`panel security-alert sev-${a.severity} tone-${tone}`}>
+                  <span className="security-alert-icon" aria-hidden="true">
+                    <Icon name={a.severity === 'high' ? 'error_outline' : 'warning'} size={18} />
+                  </span>
+                  <div className="security-alert-body">
+                    <div className="security-alert-title">
+                      <b>{a.detector} · {a.findingType}</b>
+                      <span className={`badge up${tone === 'neutral' ? '' : ` ${tone}`}`}>{a.severity}</span>
+                    </div>
+                    {a.redactedExcerpt ? <p className="note">{a.redactedExcerpt}</p> : null}
+                    <div className="cell-mono security-alert-meta">
+                      {a.sourceKind}
+                      {a.rowId ? ` ${a.rowId.slice(0, 8)}` : ''} · {a.project}
+                    </div>
+                    <div className="btn-row">
+                      <ResolveAlertForm id={a.id} surface={surface} />
+                      <span className="note security-alert-when">{new Date(a.createdAt).toLocaleString()}</span>
+                    </div>
                   </div>
-                  <div className="muted mono" style={{ fontSize: 12.5, marginTop: 2 }}>
-                    {a.sourceKind}
-                    {a.rowId ? ` ${a.rowId.slice(0, 8)}` : ''} · {a.project} ·{' '}
-                    {new Date(a.createdAt).toLocaleString()}
-                  </div>
-                  {a.redactedExcerpt ? (
-                    <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{a.redactedExcerpt}</div>
-                  ) : null}
-                </div>
-                <ResolveAlertForm id={a.id} surface={surface} />
-              </div>
-            ))}
+                </article>
+              )
+            })}
           </div>
-        </>
+        </section>
       )}
     </div>
   )

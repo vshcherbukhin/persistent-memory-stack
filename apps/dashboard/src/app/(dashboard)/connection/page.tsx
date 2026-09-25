@@ -32,9 +32,7 @@ export default async function ConnectionPage() {
 
   return (
     <div className="page-scroll connection-page">
-      <div className="panel">
-        <SharedConnectionForm current={current} />
-      </div>
+      <SharedConnectionForm current={current} />
     </div>
   )
 }

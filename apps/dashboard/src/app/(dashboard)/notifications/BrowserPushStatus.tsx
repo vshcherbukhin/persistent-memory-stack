@@ -19,7 +19,7 @@ const COPY: Record<Permission, { tone: 'ok' | 'warn' | 'danger'; label: string; 
   default: {
     tone: 'warn',
     label: 'Not requested',
-    detail: 'Turn browser notifications on below and the browser will ask for permission.',
+    detail: 'Turn browser notifications on and save; the browser will ask for permission.',
   },
   unsupported: {
     tone: 'warn',
@@ -29,9 +29,9 @@ const COPY: Record<Permission, { tone: 'ok' | 'warn' | 'danger'; label: string; 
 }
 
 /**
- * Delivery status for browser push. The settings below decide WHAT gets sent;
- * this says whether anything can arrive at all, which is where this usually
- * goes wrong — and lets the reader prove it with a real notification.
+ * Delivery status for browser push (prototype d-notifications "Browser permission").
+ * The switches decide WHAT gets sent; this says whether anything can arrive at all,
+ * which is where this usually goes wrong — and lets the reader prove it with a real notification.
  */
 export function BrowserPushStatus() {
   const [permission, setPermission] = useState<Permission | null>(null)
@@ -79,27 +79,32 @@ export function BrowserPushStatus() {
 
   if (permission === null) return null
   const copy = COPY[permission]
+  const badgeTone = copy.tone === 'danger' ? 'bad' : copy.tone
 
   return (
     <section className="panel push-status" aria-label="Browser notification delivery">
-      <div className="section-label">Delivery</div>
-      <div className={`notice ${copy.tone} push-status-notice`}>
-        <div className="notice-title">Browser permission: {copy.label}</div>
-        {copy.detail}
+      <div className="card-head">
+        <h2 className="card-title">Browser permission</h2>
+        <span className={`badge up ${badgeTone}`}>{copy.label}</span>
       </div>
-      <dl className="push-status-facts">
-        <div>
-          <dt>Origin</dt>
-          <dd className="mono">{origin || '—'}</dd>
-        </div>
-        <div>
-          <dt>Service worker</dt>
-          <dd>{worker === null ? '—' : worker ? 'Registered' : 'Not registered'}</dd>
-        </div>
-      </dl>
+      <div className={`notice with-icon ${copy.tone} push-status-notice`}>
+        <span className="n-ic">
+          <Icon name={permission === 'granted' ? 'check' : permission === 'denied' ? 'block' : 'info'} size={16} />
+        </span>
+        <span className="n-body">
+          {permission === 'granted' ? (
+            <>
+              Granted for <code>{origin || 'this dashboard'}</code> · service worker{' '}
+              {worker === null ? 'checking…' : worker ? 'registered' : 'not registered'}.
+            </>
+          ) : (
+            copy.detail
+          )}
+        </span>
+      </div>
       <button
         type="button"
-        className="btn secondary"
+        className="btn secondary block"
         disabled={busy || permission !== 'granted'}
         onClick={() => void sendTest()}
       >
@@ -109,9 +114,7 @@ export function BrowserPushStatus() {
         <div className={`notice ${result.ok ? 'ok' : 'danger'} push-status-notice`} role="status">{result.message}</div>
       ) : null}
       {permission !== 'granted' ? (
-        <p className="note" style={{ marginTop: 8 }}>
-          A test can only be sent once this browser has granted permission.
-        </p>
+        <p className="note">A test can only be sent once this browser has granted permission.</p>
       ) : null}
     </section>
   )

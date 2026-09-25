@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react'
 import { saveMcpSessionTimeoutAction, type SettingsState } from '@/app/(dashboard)/settings/actions'
+import { Input } from '@/components/ui/Input'
 import type { Settings } from '@/lib/types'
 
 const initial: SettingsState = {}
@@ -27,28 +28,34 @@ export function McpSessionTimeoutForm({ current, showHeader = true }: { current:
           </p>
         </>
       ) : null}
-      <div className="field" style={{ maxWidth: 320 }}>
-        <label htmlFor="mcp-session-timeout">Session timeout (minutes)</label>
-        <input
-          id="mcp-session-timeout"
-          name="mcpSessionIdleTimeoutMinutes"
-          type="number"
-          min="1"
-          max="1440"
-          step="1"
-          value={minutes}
-          onChange={(event) => setMinutes(event.target.value)}
-        />
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          Default is 15 minutes. Saving restarts the Stream MCP service so the new timeout is applied.
+      {/* Prototype d-settings: a compact mono number field with its consequence stated underneath. */}
+      <div className="settings-form-stack">
+        <div className="field">
+          <label className="field-label" htmlFor="mcp-session-timeout">Session timeout (minutes)</label>
+          <Input
+            id="mcp-session-timeout"
+            name="mcpSessionIdleTimeoutMinutes"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            value={minutes}
+            onChange={(event) => setMinutes(event.target.value)}
+            className="mono settings-number-input"
+          />
+          <span className="field-hint">
+            Default is 15 minutes. Saving restarts the Stream MCP service so the new timeout is applied.
+          </span>
+        </div>
+        {state.error ? <div className="notice danger">{state.error}</div> : null}
+        {state.warning ? <div className="notice warn">{state.warning}</div> : null}
+        {state.ok ? <div className="notice ok">Saved.</div> : null}
+        <div className="btn-row">
+          <button type="submit" className="btn primary" disabled={pending || !dirty}>
+            {pending ? 'Saving…' : 'Save timeout'}
+          </button>
         </div>
       </div>
-      {state.error ? <div className="notice danger" style={{ marginTop: 8 }}>{state.error}</div> : null}
-      {state.warning ? <div className="notice warn" style={{ marginTop: 8 }}>{state.warning}</div> : null}
-      {state.ok ? <div className="notice ok" style={{ marginTop: 8 }}>Saved.</div> : null}
-      <button type="submit" className="btn primary" disabled={pending || !dirty} style={{ marginTop: 10 }}>
-        {pending ? 'Saving...' : 'Save timeout'}
-      </button>
     </form>
   )
 }

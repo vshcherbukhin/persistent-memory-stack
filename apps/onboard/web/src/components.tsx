@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { Icon } from './ui'
 
 export function ProgressBar({ value, indeterminate, tone }: { value?: number; indeterminate?: boolean; tone?: 'accent' | 'warn' | 'danger' }) {
   const toneClass = tone && tone !== 'accent' ? ` ${tone}` : ''
@@ -18,12 +19,21 @@ export function ProgressBar({ value, indeterminate, tone }: { value?: number; in
   )
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+export function Field({ label, hint, error, hintTone, children }: {
+  label: React.ReactNode
+  hint?: React.ReactNode
+  error?: string | null
+  hintTone?: 'ok'
+  children: React.ReactNode
+}) {
+  // Prototype field: an error replaces the hint, directly under the control it belongs to.
   return (
     <label className="field">
       <span className="field-label">{label}</span>
       {children}
-      {hint ? <span className="field-hint">{hint}</span> : null}
+      {error
+        ? <span className="field-error"><Icon name="error_outline" size={13} /> {error}</span>
+        : hint ? <span className={`field-hint${hintTone ? ` ${hintTone}` : ''}`}>{hint}</span> : null}
     </label>
   )
 }
@@ -188,16 +198,25 @@ export function Select({
 
 export type StepState = 'pending' | 'running' | 'done' | 'failed'
 
-const STEP_GLYPH: Record<StepState, string> = { pending: '○', running: '◐', done: '✓', failed: '✗' }
+const STEP_TONE: Record<StepState, string> = { pending: '', running: ' running', done: ' done', failed: ' failed' }
 
-export function StepList({ steps }: { steps: { id: string; name: string; state: StepState }[] }) {
+/** Install step timing in the prototype's compact form: 0.4s, 18s, 2m 11s. */
+export function formatStepDuration(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  const minutes = Math.floor(ms / 60_000)
+  return `${minutes}m ${Math.floor((ms - minutes * 60_000) / 1000)}s`
+}
+
+/** Prototype `.steprow`: finished steps tick, the running one spins, a failure is marked. */
+export function StepList({ steps }: { steps: { id: string; name: string; state: StepState; ms?: number }[] }) {
   return (
     <ul className="steplist">
       {steps.map((s) => (
-        <li key={s.id} className={`step step-${s.state}`}>
-          <span className="step-dot" aria-hidden>{STEP_GLYPH[s.state]}</span>
+        <li key={s.id} className={`steprow step-${s.state}${STEP_TONE[s.state]}`} aria-label={`${s.name}: ${s.state}`}>
+          <span className="st-ic" aria-hidden>{s.state === 'done' ? <Icon name="check" size={11} /> : s.state === 'failed' ? '!' : null}</span>
           <span className="step-name">{s.name}</span>
-          <span className="step-state">{s.state}</span>
+          <span className="st-time" aria-hidden>{s.ms != null ? formatStepDuration(s.ms) : ''}</span>
         </li>
       ))}
     </ul>
@@ -235,7 +254,7 @@ export function Terminal({ lines, caret }: { lines: string[]; caret?: boolean })
       {terminalSegments(lines).map((segment, idx) => (
         <span key={`${idx}-${segment.tone}`} className={`terminal-line ${segment.tone}`}>{segment.text}</span>
       ))}
-      {caret ? <span className="terminal-caret">▋</span> : null}
+      {caret ? <span className="terminal-caret" aria-hidden /> : null}
     </pre>
   )
 }
@@ -243,7 +262,7 @@ export function Terminal({ lines, caret }: { lines: string[]; caret?: boolean })
 export function StatusRow({ ok, label, detail }: { ok: boolean | null; label: string; detail?: string }) {
   return (
     <div className={`statusrow ${ok === null ? 'pending' : ok ? 'ok' : 'bad'}`}>
-      <span className="statusrow-icon" aria-hidden>{ok === null ? '…' : ok ? '✓' : '✗'}</span>
+      <span className="statusrow-icon" aria-hidden>{ok === null ? null : <Icon name={ok ? 'check' : 'close'} size={12} />}</span>
       <span className="statusrow-label">{label}</span>
       {detail ? <span className="statusrow-detail">{detail}</span> : null}
     </div>

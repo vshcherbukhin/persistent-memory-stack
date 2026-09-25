@@ -37,12 +37,30 @@ The first row contains clickable summary cards. A large value gives the count or
 
 Overview refreshes automatically, so there is no manual refresh control.
 
+## Live MCP activity
+
+The lower row shows what is connected right now and where memory is accumulating.
+
+Live MCP activity lists the stream sessions the MCP service is holding at this moment.
+
+| Column | How to read it |
+| --- | --- |
+| Client | The connected agent application, with its session identifier below |
+| Connection | The transport the session uses, normally streamable-http |
+| Last seen | How long ago the MCP service last heard from that session |
+| Terminates at | Time left before an idle session closes, and the clock time it closes |
+
+Select a session to read its live communication inside the same card, then select **All sessions** to return to the list. A session leaves the list as soon as its connection closes, and the card returns to the list if the session you are watching disconnects. An agent that stops without closing its session stays listed until its idle timeout, which you set in System Settings.
+
+Corpus shape, beside it, ranks the categories your saved memories fall into.
+
 ## Actions
 
 1. Select any **Open details** link to open its exact destination.
 2. Use the MCP card to open the **MCP sessions** tab in Services, not the application-service list.
 3. Use **Open settings** on Fact extraction or Embeddings to open that exact System Settings section.
-4. Investigate error or attention badges before making unrelated configuration changes.
+4. Select a session in **Live MCP activity** to watch its requests, and **All sessions** to go back.
+5. Investigate error or attention badges before making unrelated configuration changes.
 
 ## States
 
@@ -71,3 +89,6 @@ The model and usage values may reveal operational metadata. Share screenshots on
 | MCP session count is zero | Open **MCP sessions** and confirm the client is connected and has not reached its idle timeout. |
 | Worker count shows an error | Open Workers and inspect the failed row's last-run log. |
 | A count changed but Overview did not | Wait for automatic refresh, or leave and reopen Overview. |
+| Live MCP activity shows no sessions | No agent is connected. Start Claude or Codex, or confirm the stream MCP registration in Services. |
+| Live sessions are unavailable | The Docker control sidecar is not answering. Open Services and read its notice. |
+| A session shows no output yet | The session has not sent a request since it connected. Its output appears with the next call. |

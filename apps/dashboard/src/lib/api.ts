@@ -261,6 +261,16 @@ export const api = {
   },
   searchMemories: (b: { query: string; teamId?: string; project?: string; category?: string; scoreMin?: number; scoreMax?: number; limit?: number }, surface: MemorySurface = 'personal') =>
     callMemory<{ results: Memory[]; total: number }>(surface, '/dashboard/memories/search', { method: 'POST', body: JSON.stringify(b) }),
+  /** POST /memories — the Shape-gated write path agents use, reused for hand-written memories. */
+  createMemory: (
+    b: { content: string; project: string; metadata: { category: string; entities: string[]; source: string } },
+    surface: MemorySurface = 'personal',
+  ) =>
+    callMemory<{ id: string; shape: string; category: string; project: string; embeddingStatus: 'pending' | 'embedded' }>(
+      surface,
+      '/memories',
+      { method: 'POST', body: JSON.stringify(b) },
+    ),
   getMemory: (id: string, surface: MemorySurface = 'personal') => callMemory<Memory>(surface, `/dashboard/memories/${id}`),
   updateMemory: (
     id: string,

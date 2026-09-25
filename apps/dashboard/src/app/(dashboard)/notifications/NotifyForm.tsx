@@ -4,6 +4,7 @@ import { useActionState, useEffect, useMemo, useState } from 'react'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { SwitchRow } from '@/components/ui/SwitchRow'
 import { useToast } from '@/components/ui/Toast'
 import {
   DEFAULT_BROWSER_NOTIFICATION_TYPES,
@@ -180,36 +181,39 @@ export function NotifyForm({
   if (personalMode) {
     return (
       <div className="settings-form-stack browser-notification-settings">
-        <Checkbox
+        {/* Prototype d-notifications: every choice is a labelled switch row. */}
+        <SwitchRow
+          label="Enable Chrome/browser notifications"
+          hint="The browser asks for permission the first time this is saved on."
           checked={draftBrowserNotifications}
           onChange={toggleBrowserNotificationsDraft}
-          label="Enable Chrome/browser notifications"
           disabled={browserBusy}
+          emphasis
         />
 
-        <div className="seg-group personal-notification-types">
+        <div className="personal-notification-types">
           <span className="section-label">Notify me about</span>
-          <div className="notification-checks">
+          <div className="switch-list">
             {PERSONAL_NOTIFICATION_TYPES.map((option) => (
-              <Checkbox
+              <SwitchRow
                 key={option.id}
+                label={option.label}
                 checked={draftBrowserNotificationTypes.includes(option.id)}
                 onChange={(v) => toggleBrowserNotificationType(option.id, v)}
-                label={option.label}
                 disabled={browserNotificationTypesLocked}
               />
             ))}
           </div>
-          <div className="personal-notification-actions">
-            <button
-              type="button"
-              className="primary"
-              disabled={!browserSettingsDirty || browserBusy}
-              onClick={() => void saveBrowserNotificationSettings()}
-            >
-              {browserBusy ? 'Saving…' : 'Save'}
-            </button>
-          </div>
+        </div>
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!browserSettingsDirty || browserBusy}
+            onClick={() => void saveBrowserNotificationSettings()}
+          >
+            {browserBusy ? 'Saving…' : 'Save'}
+          </button>
         </div>
       </div>
     )

@@ -13,6 +13,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
 import { StatusToggle } from '@/components/ui/StatusToggle'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { formatMcpTerminateCountdown, formatMcpTerminateTime, formatSeenAgo } from '@/lib/mcpSessionFormat'
 import { serviceIsActive, serviceStatusKind, type ServiceStatusKind } from '@/lib/serviceStatus'
 import { listServicesAction, serviceLogsAction, serviceControlAction } from './actions'
 
@@ -77,6 +78,17 @@ const SELF_STOP_WARNINGS: Record<string, string[]> = {
 }
 
 const MODEL_CAPABILITY_SERVICE_IDS = new Set(['fact-extraction', 'embeddings'])
+// Prototype d-services lists the stores (and the control sidecar) apart from application containers.
+const DATA_SERVICE_IDS = new Set(['postgres', 'qdrant', 'redis', 'minio', 'falkordb', 'neo4j', 'docker-control'])
+
+/** Row dot tone — colour is repeated by the status badge, so it never carries meaning alone. */
+function statusDotTone(kind: ServiceStatusKind): 'ok' | 'warn' | 'bad' | 'idle' {
+  const value: string = kind
+  if (value === 'running' || value === 'healthy') return 'ok'
+  if (value === 'stopped' || value === 'starting') return 'warn'
+  if (value === 'error') return 'bad'
+  return 'idle'
+}
 
 function isModelCapabilityService(service: ServiceStatus): boolean {
   return MODEL_CAPABILITY_SERVICE_IDS.has(service.service)
@@ -99,34 +111,6 @@ function prepareLogs(raw: string, target: LogTarget): string {
   if (target.mode === 'mcp-service') return filterMcpServiceLogs(raw)
   if (target.mode === 'mcp-session') return filterMcpSessionLogs(raw, target.sessionId ?? '')
   return raw
-}
-
-function formatMcpTerminateCountdown(terminatesAt: string | null, nowMs: number): string {
-  if (!terminatesAt) return 'not managed'
-  const deadlineMs = Date.parse(terminatesAt)
-  if (!Number.isFinite(deadlineMs)) return 'unknown'
-  const remainingMs = deadlineMs - nowMs
-  if (remainingMs <= 0) return 'terminating...'
-  const totalSeconds = Math.ceil(remainingMs / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60)
-    const restMinutes = minutes % 60
-    return `${hours}h ${restMinutes}m`
-  }
-  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
-}
-
-function formatMcpTerminateTime(terminatesAt: string | null): string {
-  if (!terminatesAt) return ''
-  const date = new Date(terminatesAt)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function isStringRef(ref: string | null | undefined): ref is string {
-  return Boolean(ref)
 }
 
 export function ServicesClient({
@@ -152,8 +136,6 @@ export function ServicesClient({
   const busyRef = useRef<string | null>(null)
   const [logsFor, setLogsFor] = useState<LogTarget | null>(null)
   const [logs, setLogs] = useState<string>('')
-  const [serviceLogPreviews, setServiceLogPreviews] = useState<Record<string, string>>({})
-  const serviceLogPreviewInFlight = useRef(false)
   const [credentialsFor, setCredentialsFor] = useState<ServiceStatus | null>(null)
   const [pendingControl, setPendingControl] = useState<PendingServiceControl | null>(null)
   const [copiedCredential, setCopiedCredential] = useState<string | null>(null)
@@ -250,22 +232,6 @@ export function ServicesClient({
     setLogs(prepareLogs(raw, target) || (target.mode === 'mcp-session' ? 'No session communication yet.' : '(no output)'))
   }, [])
 
-  const loadServiceLogPreviews = useCallback(async (serviceRefs: string[]) => {
-    if (serviceLogPreviewInFlight.current || serviceRefs.length === 0) return
-    serviceLogPreviewInFlight.current = true
-    try {
-      const entries = await Promise.all(
-        serviceRefs.map(async (ref) => {
-          const r = await serviceLogsAction(ref, 40)
-          return [ref, r.error ? `ERROR: ${r.error}` : r.logs] as const
-        }),
-      )
-      setServiceLogPreviews((current) => ({ ...current, ...Object.fromEntries(entries) }))
-    } finally {
-      serviceLogPreviewInFlight.current = false
-    }
-  }, [])
-
   useEffect(() => {
     if (!logsFor) return
     const id = window.setInterval(() => void loadLogs(logsFor), 4_000)
@@ -319,31 +285,9 @@ export function ServicesClient({
     if (client.connectionType === 'stream') return streamMcpService?.id ?? null
     return null
   }
-  const hasPreviewLogs = (ref: string | null | undefined): ref is string => (
-    typeof ref === 'string' && ref.length > 0 && Object.prototype.hasOwnProperty.call(serviceLogPreviews, ref)
-  )
-  const servicePreviewLogs = (service: ServiceStatus): string | null => {
-    if (!hasPreviewLogs(service.id)) return null
-    const raw = serviceLogPreviews[service.id]
-    return service.service === 'mcp' ? filterMcpServiceLogs(raw) : raw
-  }
-  const mcpSessionPreviewLogs = (client: McpClientStatus, logRef: string | null): string | null => {
-    if (!hasPreviewLogs(logRef)) return null
-    return filterMcpSessionLogs(serviceLogPreviews[logRef], client.id)
-  }
-
-  useEffect(() => {
-    const refs = activeTab === 'application'
-      ? stackServices.map((service) => service.id).filter(isStringRef)
-      : [...new Set([
-          streamMcpService?.id,
-          ...mcpServices.map((service) => service.id),
-        ].filter(isStringRef))]
-    if (refs.length === 0) return
-    void loadServiceLogPreviews(refs)
-    const id = window.setInterval(() => void loadServiceLogPreviews(refs), 4_000)
-    return () => window.clearInterval(id)
-  }, [activeTab, services, loadServiceLogPreviews])
+  const applicationServices = stackServices.filter((s) => !DATA_SERVICE_IDS.has(s.service))
+  const dataServices = stackServices.filter((s) => DATA_SERVICE_IDS.has(s.service))
+  const runningCount = stackServices.filter((s) => serviceIsActive(s)).length
 
   // The 503/degraded notice is driven from the existing error state.
   const degraded = error != null && /docker_unavailable|socket|docker_control|503/i.test(error)
@@ -359,19 +303,20 @@ export function ServicesClient({
     }
   }
 
-  const cols = 'minmax(210px, 1fr) 176px 220px minmax(360px, 2fr)'
+  // Prototype d-services: Service · Status · Details · Actions.
+  const cols = 'minmax(0, 1.1fr) 188px minmax(0, 1.4fr) 196px'
   const modelCapabilityCols = 'minmax(210px, 1fr) 140px minmax(245px, 1fr) minmax(300px, 1.5fr)'
   const renderServiceTable = (
     rows: ServiceStatus[],
     emptyText: string,
-    { activityColumnLabel = 'Logs', columns = cols }: { activityColumnLabel?: string; columns?: string } = {},
+    { activityColumnLabel = 'Actions', columns = cols }: { activityColumnLabel?: string; columns?: string } = {},
   ) => (
     <div className="gt table-scroll">
       <div className="gt-head" style={{ gridTemplateColumns: columns }}>
         <div>Service</div>
         <div>Status</div>
         <div>Details</div>
-        {activityColumnLabel === 'Logs' ? <div>Logs</div> : <div>{activityColumnLabel}</div>}
+        <div className={activityColumnLabel === 'Actions' ? 'gt-head-actions' : undefined}>{activityColumnLabel}</div>
       </div>
       <div className="gt-scroll-body">
         {rows.map((s) => {
@@ -387,44 +332,47 @@ export function ServicesClient({
           return (
             <div className="gt-row" key={`${s.service}:${s.id || s.name}`} style={{ gridTemplateColumns: columns }}>
               <div className="service-cell">
+                <i className={`dot ${statusDotTone(statusKind)}`} aria-hidden="true" />
+                <div className="service-cell-text">
                   <div className="service-title-row">
                     <div style={{ minWidth: 0 }}>
                       {s.ui ? (
                         <Tooltip label={`Open ${s.ui.label}`}>
-                          <a className="svc-name-link" href={publicHref(s.ui.url)} target="_blank" rel="noreferrer">
+                          <a className="svc-name-link cell-strong" href={publicHref(s.ui.url)} target="_blank" rel="noreferrer">
                             {s.service}
                           </a>
                         </Tooltip>
-                    ) : (
-                      <span style={{ color: 'var(--body)' }}>{serviceLabel(s)}</span>
-                    )}
+                      ) : (
+                        <span className="cell-strong">{serviceLabel(s)}</span>
+                      )}
+                    </div>
+                    <div className="service-title-actions">
+                      {dependencyWarnings.length > 0 ? (
+                        <Tooltip label={dependencyWarnings.join(' ')}>
+                          <span className="service-impact-indicator" tabIndex={0} aria-label={dependencyWarnings.join(' ')}>
+                            <Icon name="priority_high" size={16} />
+                          </span>
+                        </Tooltip>
+                      ) : null}
+                      {hasCredentials ? (
+                        <Tooltip label="Show credentials">
+                          <button
+                            type="button"
+                            className="svc-credential-button"
+                            aria-label={`Show ${s.service} credentials`}
+                            onClick={() => {
+                              setCopiedCredential(null)
+                              setCredentialsFor(s)
+                            }}
+                          >
+                            <Icon name="key" size={15} />
+                          </button>
+                        </Tooltip>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="service-title-actions">
-                    {dependencyWarnings.length > 0 ? (
-                      <Tooltip label={dependencyWarnings.join(' ')}>
-                        <span className="service-impact-indicator" tabIndex={0} aria-label={dependencyWarnings.join(' ')}>
-                          <Icon name="priority_high" size={16} />
-                        </span>
-                      </Tooltip>
-                    ) : null}
-                    {hasCredentials ? (
-                      <Tooltip label="Show credentials">
-                        <button
-                          type="button"
-                          className="svc-credential-button"
-                          aria-label={`Show ${s.service} credentials`}
-                          onClick={() => {
-                            setCopiedCredential(null)
-                            setCredentialsFor(s)
-                          }}
-                        >
-                          <Icon name="key" size={15} />
-                        </button>
-                      </Tooltip>
-                    ) : null}
-                  </div>
+                  <div className="cell-mono service-image">{s.name}</div>
                 </div>
-                <div className="mono" style={{ color: 'var(--dim)', fontSize: 10.5 }}>{s.name}</div>
               </div>
               <div>
                 <div className="service-status-cell">
@@ -442,19 +390,6 @@ export function ServicesClient({
                   {controllable ? (
                     <>
                       <span className="status-toggle-dot" aria-hidden="true" />
-                      {active ? (
-                        <Tooltip label={`Restart ${s.service}`}>
-                          <button
-                            type="button"
-                            className="service-restart"
-                            aria-label={`Restart ${s.service}`}
-                            disabled={busy !== null}
-                            onClick={() => requestControl(s, 'restart')}
-                          >
-                            <Icon name={busy === `${s.service}:restart` ? 'hourglass_top' : 'refresh'} size={15} />
-                          </button>
-                        </Tooltip>
-                      ) : null}
                       <Tooltip label={`${toggleAction === 'stop' ? 'Stop' : 'Start'} ${s.service}`}>
                         <StatusToggle
                           checked={active}
@@ -469,30 +404,42 @@ export function ServicesClient({
               </div>
               <div className="service-runtime-detail">
                 <div>{formatServiceDetail(s)}</div>
-                  {!s.controllable ? <div>read-only</div> : null}
+                {!s.controllable ? <div>read-only</div> : null}
               </div>
               <div>
-                {statusDescription ? (
+                {statusDescription && activityColumnLabel !== 'Actions' ? (
                   <div className="service-status-description">{statusDescription}</div>
-                ) : logsUnavailable ? (
-                  <div className="service-log-unavailable">Logs unavailable</div>
                 ) : (
-                  <button
-                    type="button"
-                    className="worker-log-cell service-log-cell"
-                    onClick={() => void showLogs({
-                      ref: s.id,
-                      title: `${serviceLabel(s)} · ${s.name}`,
-                      mode: s.service === 'mcp' ? 'mcp-service' : 'raw',
-                    })}
-                  >
-                    <LogOutput
-                      text={servicePreviewLogs(s)}
-                      fallback={s.service === 'mcp' && hasPreviewLogs(s.id) ? 'No internal service logs yet.' : 'Loading logs...'}
-                      variant="preview"
-                      maxLines={4}
-                    />
-                  </button>
+                  <div className="row-actions">
+                    {controllable && active ? (
+                      <button
+                        type="button"
+                        className="btn sm secondary"
+                        aria-label={`Restart ${s.service}`}
+                        disabled={busy !== null}
+                        onClick={() => requestControl(s, 'restart')}
+                      >
+                        <Icon name={busy === `${s.service}:restart` ? 'hourglass_top' : 'refresh'} size={12} /> Restart
+                      </button>
+                    ) : null}
+                    {logsUnavailable ? (
+                      <Tooltip label={statusDescription ?? 'This row has no container logs.'}>
+                        <span className="service-log-unavailable" tabIndex={0}>{s.id ? 'Logs unavailable' : 'Host-managed'}</span>
+                      </Tooltip>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn sm ghost service-log-cell"
+                        onClick={() => void showLogs({
+                          ref: s.id,
+                          title: `${serviceLabel(s)} · ${s.name}`,
+                          mode: s.service === 'mcp' ? 'mcp-service' : 'raw',
+                        })}
+                      >
+                        <Icon name="terminal" size={12} /> Logs
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -503,9 +450,10 @@ export function ServicesClient({
     </div>
   )
 
-  const mcpCols = 'minmax(260px, 1fr) 132px 170px 154px minmax(340px, 2fr)'
+  // Prototype d-services-mcp: who is connected, how, and when the session ends.
+  const mcpCols = 'minmax(0, 1fr) 190px 130px 170px 110px'
   const renderMcpClients = () => (
-    <div className="gt table-scroll">
+    <div className="gt table-scroll mcp-sessions-table">
       <div className="gt-head" style={{ gridTemplateColumns: mcpCols }}>
         <div>Client</div>
         <div>Connection</div>
@@ -518,30 +466,27 @@ export function ServicesClient({
           const logRef = mcpClientLogRef(client)
           return (
             <div className="gt-row" key={client.id} style={{ gridTemplateColumns: mcpCols }}>
-              <div>
-                <div style={{ color: 'var(--body)' }}>{client.clientName}</div>
-                <div className="mono" style={{ color: 'var(--dim)', fontSize: 10.5 }}>{client.id}</div>
-              </div>
-              <div>
-                <span className={`badge mcp-connection-cell ${client.connectionType === 'stream' ? 'ok-badge' : ''}`}>
-                  {client.connectionType === 'stream' ? 'stream service' : 'legacy local'}
-                </span>
-              </div>
-              <div className="mcp-time-cell">{new Date(client.lastSeenAt).toLocaleString()}</div>
-              <div className="mcp-time-cell">
-                <div className="mono" style={{ color: client.terminatesAt ? 'var(--body)' : 'var(--dim)', fontSize: 11.5 }}>
-                  {formatMcpTerminateCountdown(client.terminatesAt, nowMs)}
+              <div className="service-cell">
+                <i className={`dot ${client.connectionType === 'stream' ? 'ok live' : 'warn'}`} aria-hidden="true" />
+                <div className="service-cell-text">
+                  <span className="cell-strong">{client.clientName}</span>
+                  <span className="cell-mono service-image">{client.id}</span>
                 </div>
+              </div>
+              <div className="cell-mono mcp-connection-cell">
+                {client.connectionType === 'stream' ? 'streamable-http' : 'legacy local stdio'}
+              </div>
+              <div className="mcp-time-cell cell-mono">{formatSeenAgo(client.lastSeenAt, nowMs)}</div>
+              <div className="mcp-time-cell">
+                <div className="cell-mono">{formatMcpTerminateCountdown(client.terminatesAt, nowMs)}</div>
                 {client.terminatesAt ? (
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {formatMcpTerminateTime(client.terminatesAt)}
-                  </div>
+                  <div className="note">{formatMcpTerminateTime(client.terminatesAt)}</div>
                 ) : null}
               </div>
-              <div>
+              <div className="row-actions">
                 <button
                   type="button"
-                  className="worker-log-cell service-log-cell"
+                  className="btn sm ghost service-log-cell"
                   disabled={!logRef}
                   onClick={() => logRef ? void showLogs({
                     ref: logRef,
@@ -550,12 +495,7 @@ export function ServicesClient({
                     sessionId: client.id,
                   }) : undefined}
                 >
-                  <LogOutput
-                    text={mcpSessionPreviewLogs(client, logRef)}
-                    fallback={logRef ? (hasPreviewLogs(logRef) ? 'No session communication yet.' : 'Loading logs...') : 'MCP service logs unavailable'}
-                    variant="preview"
-                    maxLines={4}
-                  />
+                  <Icon name="terminal" size={12} /> View
                 </button>
               </div>
             </div>
@@ -564,26 +504,24 @@ export function ServicesClient({
 
         {mcpServices.map((s) => (
           <div className="gt-row" key={`${s.service}:${s.id || s.name}`} style={{ gridTemplateColumns: mcpCols }}>
-            <div>
-              <div style={{ color: 'var(--body)' }}>{s.service}</div>
-              <div className="mono" style={{ color: 'var(--dim)', fontSize: 10.5 }}>{s.name}</div>
+            <div className="service-cell">
+              <i className="dot warn" aria-hidden="true" />
+              <div className="service-cell-text">
+                <span className="cell-strong">{s.service}</span>
+                <span className="cell-mono service-image">{s.name}</span>
+              </div>
             </div>
-            <div><span className="badge mcp-connection-cell warn-badge">legacy docker stdio</span></div>
-            <div className="mcp-time-cell">{formatServiceDetail(s)}</div>
-            <div className="mcp-time-cell">not managed</div>
-            <div>
+            <div className="cell-mono mcp-connection-cell">legacy docker stdio</div>
+            <div className="mcp-time-cell cell-mono">{formatServiceDetail(s)}</div>
+            <div className="mcp-time-cell cell-mono">not managed</div>
+            <div className="row-actions">
               <button
                 type="button"
-                className="worker-log-cell service-log-cell"
+                className="btn sm ghost service-log-cell"
                 disabled={!s.id}
                 onClick={() => void showLogs({ ref: s.id, title: `${s.service} · ${s.name}`, mode: 'raw' })}
               >
-                <LogOutput
-                  text={s.id ? serviceLogPreviews[s.id] : null}
-                  fallback={s.id ? 'Loading logs...' : '(logs unavailable)'}
-                  variant="preview"
-                  maxLines={4}
-                />
+                <Icon name="terminal" size={12} /> View
               </button>
             </div>
           </div>
@@ -605,7 +543,7 @@ export function ServicesClient({
         className={`service-view-button${activeTab === 'application' ? ' active' : ''}`}
         onClick={() => selectServiceTab('application')}
       >
-        Application Services
+        <Icon name="dns" size={15} /> Services
       </button>
       <span className="service-view-separator" aria-hidden="true" />
       <button
@@ -615,94 +553,82 @@ export function ServicesClient({
         className={`service-view-button${activeTab === 'mcp' ? ' active' : ''}`}
         onClick={() => selectServiceTab('mcp')}
       >
-        MCP sessions
+        <Icon name="hub" size={15} /> MCP sessions
       </button>
     </div>
   )
 
   return (
     <div className="page-fill services-page">
-      {error ? (
-        degraded ? (
-          <div className="notice danger" role="alert">
-            <div className="row" style={{ gap: 9, justifyContent: 'space-between' }}>
-              <span className="inline-icon-label" style={{ fontSize: 15, fontWeight: 600 }}>
-                <Icon name="error" size={17} />
-                Service control unavailable
+      {/* Prototype d-services: the view switch leads a flush toolbar; tables sit in their own inset. */}
+      <div className="memory-toolbar services-toolbar">
+        {serviceViewSwitcher}
+        <span className="memory-toolbar-note">
+          {activeTab === 'application'
+            ? `${runningCount} of ${stackServices.length} running${canControl ? '' : ' · start and stop are superuser-only'}`
+            : `${mcpClients.length + mcpServices.length} active client${mcpClients.length + mcpServices.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+      <div className="services-body">
+        {error ? (
+          degraded ? (
+            <div className="notice with-icon fault" role="alert">
+              <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+              <span className="n-body">
+                <span className="notice-title">Docker control sidecar unavailable</span>
+                The <code className="code-inline">docker-control</code> sidecar is not answering, so service state cannot be read
+                and start/stop actions are disabled. The services themselves keep running — state below is <b>unknown</b>, not stopped.
+                <span className="notice-detail">
+                  Check the Docker socket is mounted and <code className="code-inline">DOCKER_CONTROL_TOKEN</code> is set (on native Linux,
+                  set <code className="code-inline">DOCKER_GID</code> to the host docker-group gid), then try{' '}
+                  <code className="code-inline">docker compose --env-file .env.persistent-memory up -d docker-control</code>.
+                </span>
+                <span className="notice-detail mono">{error}</span>
               </span>
-              <code className="code-inline" style={{ color: 'var(--coral)' }}>503 docker_unavailable</code>
             </div>
-            <p style={{ margin: '9px 0 0', fontSize: 13.5, color: 'var(--body)', lineHeight: 1.55 }}>
-              The <code className="code-inline">docker-control</code> sidecar couldn&apos;t reach the Docker socket — it fails closed.
-              Check the socket is mounted and <code className="code-inline">DOCKER_CONTROL_TOKEN</code> is set
-              (on native Linux, set <code className="code-inline">DOCKER_GID</code> to the host docker-group gid).
-            </p>
-            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>{error}</p>
-            {/* State is unknown, not false: the containers may well be running.
-                Say so, and give the reader a way to re-probe without a reload. */}
-            <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--body)' }}>
-              Service state below is <b>unknown</b> while this is down — the containers themselves may still be running.
-              Start and stop actions are disabled until the sidecar answers.
-            </p>
-            <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void refresh(true)}>
-                <Icon name="refresh" size={15} /> Retry connection
-              </button>
+          ) : (
+            <div className="notice with-icon danger" role="alert">
+              <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+              <span className="n-body">{error}</span>
             </div>
+          )
+        ) : null}
+
+        {activeTab === 'application' ? (
+          <div className="services-section-stack" role="tabpanel">
+            <section className="services-section">
+              <div className="section-label">Application services</div>
+              {renderServiceTable(applicationServices, 'No application services found.')}
+            </section>
+            <section className="services-section">
+              <div className="section-label">Data services</div>
+              {renderServiceTable(dataServices, 'No data services found.')}
+            </section>
+            <section className="services-section services-section-capabilities" aria-label="Model capabilities">
+              <div className="section-label">Model capabilities</div>
+              {renderServiceTable(modelCapabilityServices, 'No model capabilities found.', { activityColumnLabel: 'Status updates', columns: modelCapabilityCols })}
+            </section>
           </div>
         ) : (
-          <div className="notice danger">{error}</div>
-        )
-      ) : null}
+          <section className="services-section" role="tabpanel">
+            <div className="notice with-icon accent">
+              <span className="n-ic"><Icon name="info" size={16} /></span>
+              <span className="n-body">
+                Stream MCP is the only runtime. Idle sessions end automatically after the timeout set in System Settings; each row
+                shows when its session will close.
+              </span>
+            </div>
+            {renderMcpClients()}
+          </section>
+        )}
 
-      {activeTab === 'application' ? (
-        <div className="services-section-stack" role="tabpanel">
-          <section className="services-section services-section-primary">
-            <div className="services-section-head">
-              <div>
-                <div className="section-label">Application services</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {stackServices.length} stack and host rows
-                </div>
-              </div>
-              {serviceViewSwitcher}
-              <span className="services-section-head-spacer" aria-hidden="true" />
-            </div>
-            {renderServiceTable(stackServices, 'No application services found.')}
-          </section>
-          <section className="services-section services-section-capabilities" aria-label="Model capabilities">
-            <div className="services-section-head services-section-head-secondary">
-              <div>
-                <div className="section-label">Model capabilities</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Read-only health observed from real requests, backfill, and System Settings tests
-                </div>
-              </div>
-            </div>
-            {renderServiceTable(modelCapabilityServices, 'No model capabilities found.', { activityColumnLabel: 'Status updates', columns: modelCapabilityCols })}
-          </section>
-        </div>
-      ) : (
-        <section className="services-section services-section-primary" role="tabpanel">
-          <div className="services-section-head">
-            <div>
-              <div className="section-label">MCP sessions</div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {mcpClients.length + mcpServices.length > 0 ? `${mcpClients.length + mcpServices.length} active clients` : 'No active clients'}
-              </div>
-            </div>
-            {serviceViewSwitcher}
-            <span className="services-section-head-spacer" aria-hidden="true" />
+        {degraded ? (
+          <div className="btn-row">
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void refresh(true)}>
+              <Icon name="refresh" size={15} /> Retry connection
+            </button>
           </div>
-          {renderMcpClients()}
-        </section>
-      )}
-
-      <div className="status-legend">
-        <span><Icon name="play_circle" size={15} className="legend-icon running" /> running service</span>
-        <span><Icon name="pause_circle" size={15} className="legend-icon stopped" /> stopped or starting</span>
-        <span><Icon name="error" size={15} className="legend-icon error" /> error · unhealthy</span>
-        {!canControl ? <span className="legend-muted"><Icon name="lock" size={14} /> start/stop is superuser-only</span> : null}
+        ) : null}
       </div>
 
       {logsFor ? (

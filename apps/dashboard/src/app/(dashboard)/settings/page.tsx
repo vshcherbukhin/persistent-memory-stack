@@ -65,18 +65,21 @@ export default async function SettingsPage({
       label: 'Fact extraction',
       description: 'Shape-gate model and API key',
       href: settingsSettingHref('fact-extraction'),
+      icon: 'auto_awesome',
     },
     {
       id: 'embeddings',
       label: 'Embeddings',
       description: 'Model pin and vector dimension',
       href: settingsSettingHref('embeddings'),
+      icon: 'memory',
     },
     {
       id: 'stream-sessions',
       label: 'Stream sessions',
       description: 'MCP idle timeout',
       href: settingsSettingHref('stream-sessions'),
+      icon: 'schedule',
     },
     ...(!personalMode
       ? [{
@@ -84,6 +87,7 @@ export default async function SettingsPage({
           label: 'Dashboard login',
           description: 'Password or SSO login mode',
           href: settingsSettingHref('dashboard-login'),
+          icon: 'lock' as const,
         }]
       : []),
     {
@@ -91,6 +95,7 @@ export default async function SettingsPage({
       label: 'Appearance',
       description: 'Obsidian or Porcelain theme',
       href: settingsSettingHref('appearance'),
+      icon: 'contrast',
     },
   ]
   const activeSetting = settingsItems.some((item) => item.id === requestedSetting)
@@ -103,12 +108,14 @@ export default async function SettingsPage({
         <SettingsSection
           id="fact-extraction"
           title="Fact extraction"
+          badge={healthBadge(settings.capabilityHealth.factExtraction)}
           description="Memory Shape-gate model and provider key. Saves use a backend seeded probe unless this form was tested successfully first."
         >
           <FactExtractionForm current={settings} showHeader={false} />
         </SettingsSection>
         <SettingsSection
           id="embeddings"
+          badge={settings.embeddingMode === 'client-bridge' ? { label: 'client-managed', tone: 'warn' } : { label: 'pinned', tone: 'warn' }}
           title={settings.embeddingMode === 'client-bridge' ? 'Client-managed embedding pin' : 'Embeddings'}
           description={
             settings.embeddingMode === 'client-bridge'
@@ -152,6 +159,14 @@ export default async function SettingsPage({
       </SettingsLayout>
     </SettingsPageFrame>
   )
+}
+
+/** Prototype d-settings: a capability card states its health in the head badge. */
+function healthBadge(health: Settings['capabilityHealth']['factExtraction']): { label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' } {
+  if (health.state === 'healthy') return { label: 'operational', tone: 'ok' }
+  const presentation = capabilityHealthPresentation(health)
+  const tone: string = presentation.tone
+  return { label: presentation.badge, tone: tone === 'bad' ? 'bad' : tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : 'neutral' }
 }
 
 function settingsSettingHref(setting: string): string {

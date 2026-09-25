@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react'
 import { saveDashboardLoginModeAction, type SettingsState } from '@/app/(dashboard)/settings/actions'
-import { Select } from '@/components/ui/Select'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import type { DashboardLoginMode, Settings } from '@/lib/types'
 
 const INIT: SettingsState = {}
@@ -22,30 +22,34 @@ export function DashboardLoginModeForm({ current, showHeader = true }: { current
           </p>
         </>
       ) : null}
-      <div className="field" style={{ maxWidth: 360 }}>
-        <label>Login mode</label>
-        <Select
-          name="dashboardLoginMode"
-          ariaLabel="Dashboard login mode"
-          value={mode}
-          onChange={(next) => setMode(next as DashboardLoginMode)}
-          options={[
-            { value: 'password', label: 'Password' },
-            { value: 'sso', label: 'SSO' },
-          ]}
-        />
-      </div>
-      {mode === 'sso' ? (
-        <div className="notice warn">
-          Keep a valid super-admin recovery token before enabling SSO. The login page will offer token recovery if the identity provider is unavailable.
+      {/* Prototype d-settings: a two-way mode reads as a segmented control, not a dropdown. */}
+      <div className="settings-form-stack">
+        <div className="field">
+          <span className="field-label">Login mode</span>
+          <input type="hidden" name="dashboardLoginMode" value={mode} />
+          <SegmentedControl
+            ariaLabel="Dashboard login mode"
+            className="settings-mode-switch"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: 'password', label: 'Password' },
+              { value: 'sso', label: 'SSO' },
+            ]}
+          />
         </div>
-      ) : null}
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        {state.error ? <span className="field-hint" style={{ color: 'var(--coral)' }}>{state.error}</span> : null}
-        {state.ok ? <span className="field-hint" style={{ color: 'var(--grass)' }}>Saved.</span> : null}
-        <button type="submit" className="primary" disabled={!dirty || pending}>
-          {pending ? 'Saving...' : 'Save login mode'}
-        </button>
+        {mode === 'sso' ? (
+          <div className="notice warn">
+            Keep a valid super-admin recovery token before enabling SSO. The login page will offer token recovery if the identity provider is unavailable.
+          </div>
+        ) : null}
+        <div className="btn-row">
+          <button type="submit" className="btn primary" disabled={!dirty || pending}>
+            {pending ? 'Saving…' : 'Save login mode'}
+          </button>
+          {state.error ? <span className="field-hint" style={{ color: 'var(--coral)' }}>{state.error}</span> : null}
+          {state.ok ? <span className="field-hint" style={{ color: 'var(--grass)' }}>Saved.</span> : null}
+        </div>
       </div>
     </form>
   )

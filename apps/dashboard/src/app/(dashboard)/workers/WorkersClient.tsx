@@ -11,6 +11,8 @@ import { LogOutput } from '@/components/LogOutput'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Select } from '@/components/ui/Select'
 import { StatusToggle } from '@/components/ui/StatusToggle'
 import { Tooltip } from '@/components/ui/Tooltip'
 import type { WorkerStatus, WorkerLiveness, WorkerLog, WorkerAction } from '@/lib/types'
@@ -60,6 +62,21 @@ function fmtDuration(ms: number | null): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
+/** Prototype "Last / next run": one mono line — "2m ago · in 8m", or the failure and its retry. */
+function runLine(w: WorkerStatus): string {
+  const failed = w.status === 'failed' || Boolean(w.lastError)
+  const last = w.lastRunAt
+    ? `${failed ? 'failed ' : ''}${fmtAgo(w.lastRunAt)}${w.lastDurationMs != null ? ` (${fmtDuration(w.lastDurationMs)})` : ''}`
+    : 'never ran'
+  const next = !w.enabled ? 'stopped' : !w.nextRunAt ? '—' : failed ? `retry ${fmtNext(w.nextRunAt)}` : fmtNext(w.nextRunAt)
+  return `${last} · ${next}`
+}
+
+/** Keep a non-standard saved value selectable instead of silently snapping it to a preset. */
+function withCurrent(values: string[], current: string): string[] {
+  return values.includes(current) ? values : [...values, current].sort((a, b) => Number(a) - Number(b))
+}
+
 function workerLogText(l: WorkerLog): string {
   return [
     `INFO: job ${l.name}`,
@@ -107,7 +124,10 @@ export function WorkersClient({
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [logsFor, setLogsFor] = useState<string | null>(null)
   const [logs, setLogs] = useState<string>('')
+  // Prototype d-workers: one job is selected and its last run reads in the terminal card below.
+  const [selectedName, setSelectedName] = useState<string | null>(null)
   const inFlight = useRef(false)
+  const runAllRef = useRef<() => void>(() => {})
 
   const setBusyState = (key: string | null) => {
     busyRef.current = key
@@ -200,6 +220,13 @@ export function WorkersClient({
     await loadLogs(name)
   }
 
+  // The top bar owns the prototype's "Run all now"; it signals this page.
+  useEffect(() => {
+    const onRunAll = () => runAllRef.current()
+    window.addEventListener('pm:workers-run-all', onRunAll)
+    return () => window.removeEventListener('pm:workers-run-all', onRunAll)
+  }, [])
+
   const scheduleWorker = scheduleFor ? workers.find((w) => w.name === scheduleFor) ?? null : null
   const schedulePreview = scheduleWorker && scheduleDraft ? buildSchedulePreview(scheduleDraft, scheduleWorker.cron) : null
   const scheduleChanged = Boolean(
@@ -227,37 +254,58 @@ export function WorkersClient({
     void refresh()
   }
 
-  const cols = 'minmax(220px, .9fr) minmax(300px, 1fr) 176px 170px minmax(360px, 2fr)'
+  // Prototype d-workers: Job · Schedule · Status · Last / next run · Logs.
+  const cols = 'minmax(0, 1fr) minmax(210px, .8fr) 130px 210px 150px'
   const workerProcessDown = liveness !== null && !liveness.alive
   const failingWorkers = workers.filter((w) => w.status === 'failed' || w.lastError)
+  const selectedWorker = workers.find((w) => w.name === selectedName) ?? failingWorkers[0] ?? workers[0] ?? null
+  const selectedFailed = Boolean(selectedWorker && (selectedWorker.status === 'failed' || selectedWorker.lastError))
+  runAllRef.current = () => {
+    if (!canControl || workerProcessDown || busyRef.current) return
+    void (async () => {
+      for (const job of workers.filter((w) => w.enabled)) await act(job.name, 'run-now')
+    })()
+  }
   const saveDisabled =
     !scheduleWorker || !schedulePreview || !schedulePreview.valid || !scheduleChanged || busy !== null || !canControl
 
   return (
     <div className="page-fill workers-page">
-      {error ? <div className="notice danger">{error}</div> : null}
+      {error ? (
+        <div className="notice with-icon danger" role="alert">
+          <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+          <span className="n-body">{error}</span>
+        </div>
+      ) : null}
 
       {/* A failing schedule needs to say what stops working, not just colour a row. */}
       {workerProcessDown ? (
-        <div className="notice danger worker-incident" role="status">
-          <div className="notice-title">The worker process is not reporting</div>
-          No scheduled job can run — embedding backfill and graph consolidation are both stalled.
-          Stored memories are unaffected, but new records stay unembedded until the process is back.
+        <div className="notice with-icon fault worker-incident" role="status">
+          <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+          <span className="n-body">
+            <span className="notice-title">The worker process is not reporting</span>
+            No scheduled job can run — embedding backfill and graph consolidation are both stalled.
+            Stored memories are unaffected, but new records stay unembedded until the process is back.
+          </span>
         </div>
       ) : failingWorkers.length > 0 ? (
-        <div className="notice danger worker-incident" role="status">
-          <div className="notice-title">
-            {failingWorkers.length === 1
-              ? `${failingWorkers[0]!.name} has failed its last run`
-              : `${failingWorkers.length} jobs have failed their last run`}
-          </div>
-          {failingWorkers.map((w) => (
-            <div key={w.name} className="worker-incident-item">
-              <b>{w.name}</b> — {w.lastError ?? 'failed without an error message'}
-              {w.errorCount > 1 ? ` (${w.errorCount} consecutive failures)` : ''}
-              {w.enabled && w.nextRunAt ? `; retries ${fmtNext(w.nextRunAt)}` : '; paused, no retry scheduled'}
-            </div>
-          ))}
+        <div className="notice with-icon fault worker-incident" role="status">
+          <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+          <span className="n-body">
+            <span className="notice-title">
+              {failingWorkers.length === 1
+                ? failingWorkers[0]!.errorCount > 1
+                  ? `${failingWorkers[0]!.name} has failed ${failingWorkers[0]!.errorCount} runs in a row`
+                  : `${failingWorkers[0]!.name} has failed its last run`
+                : `${failingWorkers.length} jobs have failed their last run`}
+            </span>
+            {failingWorkers.map((w) => (
+              <span key={w.name} className="worker-incident-item">
+                <b>{w.name}</b> — {w.lastError ?? 'failed without an error message'}
+                {w.enabled && w.nextRunAt ? `; retries ${fmtNext(w.nextRunAt)}` : '; paused, no retry scheduled'}
+              </span>
+            ))}
+          </span>
         </div>
       ) : null}
 
@@ -266,7 +314,7 @@ export function WorkersClient({
           <div>Job</div>
           <div>Schedule</div>
           <div>Status</div>
-          <div>Last / Next run</div>
+          <div>Last / next run</div>
           <div>Logs</div>
         </div>
         <div className="gt-scroll-body">
@@ -275,15 +323,28 @@ export function WorkersClient({
             const toggleBusy = busy === `${w.name}:pause` || busy === `${w.name}:resume`
             const statusKind = w.status === 'failed' || w.lastError ? 'error' : w.enabled ? 'running' : 'stopped'
             const runBusy = busy === `${w.name}:run-now`
+            const selected = selectedWorker?.name === w.name
             return (
               <div
-                className={`gt-row worker-row${statusKind === 'error' ? ' worker-row-failed' : ''}`}
+                className={`gt-row worker-row${statusKind === 'error' ? ' worker-row-failed' : ''}${selected ? ' selected' : ''}`}
                 key={w.name}
                 style={{ gridTemplateColumns: cols }}
+                onClick={() => setSelectedName(w.name)}
               >
-                <div>
-                  <div style={{ color: 'var(--body)' }}>{w.name}</div>
-                  <div style={{ color: 'var(--dim)', fontSize: 11 }}>{w.description}</div>
+                <div className="worker-job-cell">
+                  {statusKind === 'error' ? <i className="dot bad" aria-hidden="true" /> : null}
+                  <div className="service-cell-text">
+                    <button
+                      type="button"
+                      className="worker-job-select"
+                      aria-pressed={selected}
+                      aria-label={`Show the last run of ${w.name}`}
+                      onClick={() => setSelectedName(w.name)}
+                    >
+                      {w.name}
+                    </button>
+                    <span className="note worker-job-desc">{w.description}</span>
+                  </div>
                 </div>
                 <div>
                   <div className="worker-schedule-cell">
@@ -298,9 +359,12 @@ export function WorkersClient({
                           className="worker-icon-button"
                           aria-label={`Edit schedule for ${w.name}`}
                           disabled={busy !== null}
-                          onClick={() => openSchedule(w)}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openSchedule(w)
+                          }}
                         >
-                          <Icon name="settings" size={17} />
+                          <Icon name="settings" size={15} />
                         </button>
                       </Tooltip>
                     ) : null}
@@ -308,62 +372,57 @@ export function WorkersClient({
                 </div>
                 <div>
                   <div className="worker-status-cell">
-                    <div>
-                      {toggleBusy ? (
-                        <span
-                          className="worker-status-progress"
-                          aria-label={`${toggleAction === 'pause' ? 'Stopping' : 'Starting'} ${w.name}`}
-                        >
-                          <span />
-                        </span>
-                      ) : (
-                        <span className={`worker-status-badge ${statusKind}`}>
-                          {statusKind}
-                        </span>
-                      )}
-                    </div>
-                    {canControl ? (
-                      <>
-                        <span className="status-toggle-dot" aria-hidden="true" />
-                        <Tooltip label={`${w.enabled ? 'Stop' : 'Start'} ${w.name}`}>
-                          <StatusToggle
-                            checked={w.enabled}
-                            ariaLabel={`${w.enabled ? 'Stop' : 'Start'} ${w.name}`}
-                            disabled={busy !== null}
-                            onClick={() => void act(w.name, toggleAction)}
-                          />
-                        </Tooltip>
-                        {/* run-now was already a supported WorkerAction; the UI
-                            simply never offered it, so a failed job could only be
-                            retried by waiting for its next scheduled tick. */}
-                        <Tooltip label={`Run ${w.name} now`}>
-                          <button
-                            type="button"
-                            className="worker-run-now"
-                            aria-label={`Run ${w.name} now`}
-                            disabled={busy !== null || workerProcessDown}
-                            onClick={() => void act(w.name, 'run-now')}
-                          >
-                            <Icon name={runBusy ? 'hourglass_top' : 'play_arrow'} size={15} />
-                          </button>
-                        </Tooltip>
-                      </>
-                    ) : null}
+                    {toggleBusy ? (
+                      <span
+                        className="worker-status-progress"
+                        aria-label={`${toggleAction === 'pause' ? 'Stopping' : 'Starting'} ${w.name}`}
+                      >
+                        <span />
+                      </span>
+                    ) : (
+                      <span className={`worker-status-badge ${statusKind}`}>
+                        {statusKind === 'running' ? 'enabled' : statusKind === 'error' ? (w.errorCount > 1 ? `${w.errorCount} failures` : 'failed') : 'stopped'}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <div className="worker-run-cell">
-                  <div className="muted">ran {fmtAgo(w.lastRunAt)}{w.lastDurationMs != null ? ` (${fmtDuration(w.lastDurationMs)})` : ''}</div>
-                  <div style={{ color: 'var(--dim)' }}>{w.enabled ? `next ${fmtNext(w.nextRunAt)}` : 'stopped'}</div>
-                </div>
-                <div>
-                  <button type="button" className="worker-log-cell" onClick={() => void showLogs(w.name)}>
-                    <LogOutput
-                      text={w.logTail ?? (w.lastError ? `ERROR: ${w.lastError}` : null)}
-                      fallbackTimestamp={w.lastFinishAt ?? w.lastRunAt}
-                      variant="preview"
-                      maxLines={4}
-                    />
-                  </button>
+                <div className={`worker-run-cell cell-mono${statusKind === 'error' ? ' failed' : ''}`}>{runLine(w)}</div>
+                <div className="row-actions" onClick={(event) => event.stopPropagation()}>
+                  {canControl ? (
+                    <>
+                      <Tooltip label={`${w.enabled ? 'Stop' : 'Start'} ${w.name}`}>
+                        <StatusToggle
+                          checked={w.enabled}
+                          ariaLabel={`${w.enabled ? 'Stop' : 'Start'} ${w.name}`}
+                          disabled={busy !== null}
+                          onClick={() => void act(w.name, toggleAction)}
+                        />
+                      </Tooltip>
+                      {/* run-now was already a supported WorkerAction; the UI simply never offered it,
+                          so a failed job could only be retried by waiting for its next scheduled tick. */}
+                      <Tooltip label={`Run ${w.name} now`}>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={`Run ${w.name} now`}
+                          disabled={busy !== null || workerProcessDown}
+                          onClick={() => void act(w.name, 'run-now')}
+                        >
+                          <Icon name={runBusy ? 'hourglass_top' : 'play_arrow'} size={15} />
+                        </button>
+                      </Tooltip>
+                    </>
+                  ) : null}
+                  <Tooltip label={`Open live logs for ${w.name}`}>
+                    <button
+                      type="button"
+                      className="icon-btn worker-log-cell"
+                      aria-label={`Open live logs for ${w.name}`}
+                      onClick={() => void showLogs(w.name)}
+                    >
+                      <Icon name="terminal" size={15} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             )
@@ -374,27 +433,55 @@ export function WorkersClient({
         </div>
       </div>
 
-      <div className="status-legend">
-        <span><Icon name="play_circle" size={15} className="legend-icon running" /> running schedule</span>
-        <span><Icon name="pause_circle" size={15} className="legend-icon stopped" /> stopped schedule</span>
-        <span><Icon name="error" size={15} className="legend-icon error" /> failed last run</span>
-        {!canControl ? <span className="legend-muted"><Icon name="lock" size={14} /> start/stop/schedule edits are superuser-only</span> : null}
-      </div>
+      {selectedWorker ? (
+        <section className={`card flush worker-terminal-card${selectedFailed ? ' failed' : ''}`} aria-label={`Last run of ${selectedWorker.name}`}>
+          <div className="terminal-head">
+            <Icon name={selectedFailed ? 'error_outline' : 'terminal'} size={13} />
+            worker · {selectedWorker.name} · {selectedFailed ? 'last failure' : 'last run'}
+          </div>
+          <LogOutput
+            text={selectedWorker.logTail ?? (selectedWorker.lastError ? `ERROR: ${selectedWorker.lastError}` : null)}
+            fallback={selectedWorker.lastRunAt ? '(no output recorded for the last run)' : 'This job has not run yet.'}
+            fallbackTimestamp={selectedWorker.lastFinishAt ?? selectedWorker.lastRunAt}
+            variant="terminal"
+            className="worker-terminal"
+          />
+        </section>
+      ) : null}
+
+      {selectedWorker && selectedFailed && canControl ? (
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy !== null || workerProcessDown}
+            onClick={() => void act(selectedWorker.name, 'run-now')}
+          >
+            <Icon name="play_arrow" size={15} /> Run now
+          </button>
+          <button type="button" className="btn secondary" disabled={busy !== null} onClick={() => openSchedule(selectedWorker)}>
+            <Icon name="schedule" size={15} /> Edit schedule
+          </button>
+        </div>
+      ) : null}
+
+      {!canControl ? <p className="note">Start, stop, run-now and schedule edits are superuser-only.</p> : null}
 
       {scheduleWorker && scheduleDraft && schedulePreview ? (
         <Modal
-          title={`Schedule — ${scheduleWorker.name}`}
+          icon={<Icon name="schedule" size={18} />}
+          title={`Schedule · ${scheduleWorker.name}`}
           onClose={() => {
             setScheduleFor(null)
             setScheduleDraft(null)
           }}
-          width={760}
+          width={600}
           className="worker-schedule-modal"
           footer={
             <>
               <button
                 type="button"
-                className="secondary"
+                className="btn secondary"
                 onClick={() => {
                   setScheduleFor(null)
                   setScheduleDraft(null)
@@ -402,27 +489,20 @@ export function WorkersClient({
               >
                 Cancel
               </button>
-              <button type="button" disabled={saveDisabled} onClick={() => void saveSchedule()}>
-                {busy === `${scheduleWorker.name}:edit` ? 'Saving…' : 'Save'}
+              <button type="button" className="btn primary" disabled={saveDisabled} onClick={() => void saveSchedule()}>
+                {busy === `${scheduleWorker.name}:edit` ? 'Saving…' : 'Save schedule'}
               </button>
             </>
           }
         >
           <div className="cron-builder">
-            <div className="cron-tabs" role="tablist" aria-label="Schedule frequency">
-              {SCHEDULE_MODES.map((mode) => (
-                <button
-                  type="button"
-                  key={mode.id}
-                  role="tab"
-                  aria-selected={scheduleDraft.mode === mode.id}
-                  className={`cron-tab${scheduleDraft.mode === mode.id ? ' active' : ''}`}
-                  onClick={() => updateDraft({ mode: mode.id })}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              ariaLabel="Schedule frequency"
+              className="cron-modes"
+              value={scheduleDraft.mode}
+              onChange={(mode) => updateDraft({ mode })}
+              options={SCHEDULE_MODES.map((mode) => ({ value: mode.id, label: mode.label }))}
+            />
 
             {scheduleDraft.mode === 'never' ? (
               <div className="cron-empty">This job will stay stopped. The cron value remains saved so you can start it again later.</div>
@@ -466,26 +546,27 @@ export function WorkersClient({
             ) : null}
 
             {['daily', 'weekly', 'monthly', 'yearly'].includes(scheduleDraft.mode) ? (
-              <div className="cron-two-col">
-                <div className="cron-section">
-                  <div className="cron-section-title">Hour</div>
-                  <div className="cron-grid cron-grid-hours">
-                    {HOURS.map((h) => (
-                      <CronButton key={h} selected={scheduleDraft.hour === h} onClick={() => updateDraft({ hour: h })}>
-                        {h}
-                      </CronButton>
-                    ))}
-                  </div>
-                </div>
-                <div className="cron-section">
-                  <div className="cron-section-title">Minute</div>
-                  <div className="cron-grid cron-grid-minutes">
-                    {COMMON_MINUTES.map((m) => (
-                      <CronButton key={m} selected={scheduleDraft.minute === m} onClick={() => updateDraft({ minute: m })}>
-                        {m}
-                      </CronButton>
-                    ))}
-                  </div>
+              <div className="cron-section">
+                <div className="section-label">Cadence</div>
+                <div className="cron-field-row">
+                  <label className="tool-field">
+                    <span>Hour</span>
+                    <Select
+                      ariaLabel="Hour"
+                      value={scheduleDraft.hour}
+                      onChange={(hour) => updateDraft({ hour })}
+                      options={withCurrent(HOURS, scheduleDraft.hour).map((h) => ({ value: h, label: h }))}
+                    />
+                  </label>
+                  <label className="tool-field">
+                    <span>Minute</span>
+                    <Select
+                      ariaLabel="Minute"
+                      value={scheduleDraft.minute}
+                      onChange={(minute) => updateDraft({ minute })}
+                      options={withCurrent(COMMON_MINUTES, scheduleDraft.minute).map((m) => ({ value: m, label: m }))}
+                    />
+                  </label>
                 </div>
               </div>
             ) : null}
@@ -530,24 +611,29 @@ export function WorkersClient({
               </div>
             ) : null}
 
-            {scheduleDraft.mode === 'custom' ? (
-              <label className="field">
-                <span>Cron pattern</span>
+            <label className="tool-field cron-pattern-field">
+              <span>Cron pattern</span>
+              {scheduleDraft.mode === 'custom' ? (
                 <Input
                   value={scheduleDraft.customCron}
                   onChange={(e) => updateDraft({ customCron: e.target.value })}
                   placeholder="0 3 * * *"
                   className="mono"
                 />
-              </label>
-            ) : null}
-
-            <div className={`cron-summary${schedulePreview.valid ? '' : ' error'}`}>
-              <span>{schedulePreview.text}</span>
-              <code>{schedulePreview.cron}</code>
-            </div>
+              ) : (
+                <Input value={schedulePreview.cron} readOnly aria-readonly="true" className="mono" />
+              )}
+              <span className={`field-hint${schedulePreview.valid ? '' : ' danger'}`}>
+                <b>{schedulePreview.text}</b>
+              </span>
+            </label>
             {schedulePreview.error ? <div className="field-hint danger">{schedulePreview.error}</div> : null}
-            {scheduleError ? <div className="notice danger">{scheduleError}</div> : null}
+            {scheduleError ? (
+              <div className="notice with-icon danger">
+                <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+                <span className="n-body">{scheduleError}</span>
+              </div>
+            ) : null}
           </div>
         </Modal>
       ) : null}

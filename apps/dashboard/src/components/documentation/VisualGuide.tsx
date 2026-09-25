@@ -18,7 +18,7 @@ const guideUrlTransform: UrlTransform = (url, key, node) => {
   return defaultUrlTransform(url)
 }
 
-export function VisualGuide({ markdown, summary }: { markdown: string; summary: string }) {
+export function VisualGuide({ markdown, summary, eyebrow }: { markdown: string; summary: string; eyebrow?: string }) {
   return createElement(
     'div',
     { className: 'visual-guide' },
@@ -33,6 +33,7 @@ export function VisualGuide({ markdown, summary }: { markdown: string; summary: 
             return createElement(
               'header',
               { className: 'dashboard-docs-article-head' },
+              eyebrow ? createElement('span', { className: 'dashboard-docs-eyebrow' }, eyebrow) : null,
               createElement('h1', null, children),
               createElement('p', null, summary),
             )

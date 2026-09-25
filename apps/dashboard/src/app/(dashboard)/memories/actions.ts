@@ -269,3 +269,26 @@ export async function importMemoriesAction(memories: unknown[], teamId?: string,
     throw err
   }
 }
+
+export async function createMemoryAction(
+  input: { content: string; project: string; category: string; entities: string[]; source: string },
+  surfaceInput?: MemorySurface,
+): Promise<{ ok: true; id: string; embeddingStatus: 'pending' | 'embedded' } | { ok: false; error: string }> {
+  const surface = normalizeMemorySurface(surfaceInput)
+  await requireSession()
+  try {
+    const created = await api.createMemory(
+      {
+        content: input.content,
+        project: input.project,
+        metadata: { category: input.category, entities: input.entities, source: input.source },
+      },
+      surface,
+    )
+    return { ok: true, id: created.id, embeddingStatus: created.embeddingStatus }
+  } catch (err) {
+    // A 422 from the Shape gate carries its rewrite guidance in the message.
+    if (err instanceof ApiError) return { ok: false, error: err.message }
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}

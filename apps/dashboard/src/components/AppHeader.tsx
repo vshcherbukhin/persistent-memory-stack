@@ -313,14 +313,32 @@ export function AppHeader({
         <div className="head-titles">
           {/* Prototype: the space names the context above the page title. */}
           <div className="head-crumb">{sharedSpace ? 'Shared memories' : 'Personal memories'}</div>
-          <div className="head-title" title={sub}>{title}</div>
+          <Tooltip as="div" className="head-title" label={sub}>{title}</Tooltip>
         </div>
         <div className="head-tabs" />
         <div className="head-actions">
-          <span className={`runtime-pill${runtimeDegraded ? ' degraded' : ''}`} title={runtimeDegraded ? 'A service or worker needs attention' : 'Stream MCP service is running'}>
-            <i className="runtime-dot" aria-hidden="true" />
-            stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
-          </span>
+          {/* Prototype d-workers: run every enabled job from the top bar (superuser control). */}
+          {seg === 'workers' && roleClass === 'super' ? (
+            <button type="button" className="btn secondary head-refresh" onClick={() => window.dispatchEvent(new CustomEvent('pm:workers-run-all'))}>
+              <Icon name="play_arrow" size={15} /> Run all now
+            </button>
+          ) : null}
+          {/* Prototype d-memories: the primary action for the page lives in the top bar. */}
+          {pathname.startsWith('/memories') && (searchParams.get('tab') ?? 'list') === 'list' ? (
+            <button
+              type="button"
+              className="btn primary head-new-memory"
+              onClick={() => window.dispatchEvent(new CustomEvent('pm:new-memory'))}
+            >
+              <Icon name="add" size={16} /> New memory
+            </button>
+          ) : null}
+          <Tooltip label={runtimeDegraded ? 'A service or worker needs attention' : 'Stream MCP service is running'}>
+            <span className={`runtime-pill${runtimeDegraded ? ' degraded' : ''}`}>
+              <i className="runtime-dot" aria-hidden="true" />
+              stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
+            </span>
+          </Tooltip>
           {teamName && !localMode ? <span className="head-badge head-team">{teamName}</span> : null}
           {!localMode ? <span className={`role-badge ${roleClass} head-role`}>{roleLabel}</span> : null}
           {showLogout ? (

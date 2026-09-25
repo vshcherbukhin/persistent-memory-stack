@@ -225,7 +225,7 @@ export function Nav({
                 {attention.visible ? (
                   <>
                     <span className="nav-grow" />
-                    <span className="nav-attention-marker" role="status" aria-label={attention.label} title={attention.label}>!</span>
+                    <Tooltip label={attention.label}><span className="nav-attention-marker" role="status" aria-label={attention.label}>!</span></Tooltip>
                   </>
                 ) : null}
               </Link>

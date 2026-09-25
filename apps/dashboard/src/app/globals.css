@@ -4798,3 +4798,675 @@ button.primary:hover,
 .service-restart:hover:not(:disabled) { border-color: var(--accent-40); color: var(--accent); }
 .service-restart:disabled { cursor: not-allowed; opacity: .4; }
 @media (max-width: 1120px) { .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Overview cards (d-overview) and Memories list (d-memories)
+   Values taken from .local/documents/design-2026-09/src/system.css.
+   ========================================================================== */
+.overview-card { border-radius: var(--radius); gap: 6px; min-height: 0; padding: 16px 20px 20px; }
+.overview-card-label { font-size: 10.5px; }
+.overview-card-value { font-weight: 400; }
+.overview-card-action { margin-top: 2px; }
+/* .metric.quiet: neutral cards carry a faint edge; only health tones take colour. */
+.overview-card.neutral::before { background: var(--border-strong); opacity: .5; }
+
+.memory-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-shrink: 0;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 0 0 12px;
+}
+.memory-toolbar .memory-page-tabs { align-self: auto; margin: 0; padding: 0; }
+.memory-toolbar-note { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.service-view-switcher .service-view-button,
+.memory-page-tabs .service-view-button {
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  height: 30px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 13px;
+}
+
+.memory-filter-row { flex-wrap: nowrap; gap: 8px; }
+.memory-filter-row > .ui-input-wrap { flex: 1 1 auto; max-width: 420px; }
+.memory-filter-row .memory-search-input,
+.memory-filter-row .ui-select-trigger { min-height: 34px; }
+.memory-project-filter,
+.memory-badge-filter { flex: 0 0 170px; width: 170px; }
+.memory-filter-row > .confidence-range-select { flex: 0 0 180px; min-width: 180px; width: 180px; }
+.memory-filter-spacer { flex: 1 1 auto; }
+.memory-filter-count:disabled { opacity: .55; }
+
+.memory-row > div:first-child { min-width: 0; overflow: hidden; }
+.memory-row > div:first-child .ui-tooltip { display: block; max-width: 100%; }
+.memory-content-trigger {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-row .chip-category { border-radius: 4px; font-size: 10.5px; padding: 2px 7px; }
+.memory-flag { padding: 2px 6px; }
+.memory-actions { gap: 2px; }
+.memory-action-button,
+.memory-action-button.danger {
+  border-color: transparent;
+  color: var(--muted);
+  height: 28px;
+  width: 28px;
+}
+
+.head-new-memory { gap: 6px; height: 32px; padding: 0 14px; }
+
+.new-memory-field { display: flex; flex-direction: column; gap: 6px; }
+.new-memory-grid { display: grid; gap: 14px; grid-template-columns: 1.4fr 1fr 1fr; }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — shared atoms and record modals (d-memory-detail, d-memory-delete)
+   ========================================================================== */
+.chip {
+  align-items: center;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--soft);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  gap: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.chip.chip-category { background: var(--accent-10); border-color: var(--accent-40); color: var(--accent); font-family: var(--font-sans); font-weight: 700; letter-spacing: .03em; }
+.chip.chip-entity { background: rgba(139, 92, 246, .10); border-color: rgba(139, 92, 246, .32); color: var(--node-entity); }
+
+.kv { display: flex; flex-direction: column; }
+.kv-row { align-items: baseline; border-bottom: 1px solid var(--divider-soft); display: flex; font-size: 12.5px; gap: 12px; padding: 7px 0; }
+.kv-row:last-child { border-bottom: 0; }
+.kv-row > span:first-child { color: var(--muted); flex: none; font-size: 11.5px; min-width: 132px; }
+.kv-row > *:last-child { color: var(--text); }
+.kv-row > .warn { color: var(--marigold); }
+.kv-row > .danger { color: var(--coral); }
+
+.notice.with-icon { align-items: flex-start; display: flex; gap: 12px; }
+.notice .n-ic { color: var(--muted); display: inline-flex; flex: none; margin-top: 1px; }
+.notice.danger .n-ic, .notice.fault .n-ic { color: var(--coral); }
+.notice.warn .n-ic { color: var(--marigold); }
+.notice.accent .n-ic { color: var(--accent); }
+.notice .n-body { min-width: 0; }
+.notice.fault {
+  background: repeating-linear-gradient(135deg, rgba(255, 95, 106, .07) 0 6px, transparent 6px 14px), var(--coral-12);
+  border-color: var(--coral-40);
+  border-left-color: var(--coral);
+}
+
+.modal-head { align-items: center; gap: 12px; padding: 16px 20px; }
+.modal-head h2 { align-items: center; display: flex; flex: 1 1 auto; font-size: 15px; font-weight: 600; gap: 8px; min-width: 0; }
+.modal-head h2 code { color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; }
+.modal-head-icon { color: var(--accent); display: inline-flex; flex: none; }
+.modal-head-icon .tone-danger { color: var(--coral); }
+.modal-head-actions { align-items: center; display: flex; flex: none; gap: 8px; }
+.modal-body { padding: 20px; }
+.modal-foot { gap: 8px; padding: 12px 20px; }
+.modal-close { background: transparent; border-color: transparent; border-radius: 6px; color: var(--muted); height: 28px; width: 28px; }
+.modal-close:hover { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
+.btn.sm { font-size: 10.5px; gap: 5px; height: 28px; min-height: 28px; padding: 0 10px; }
+
+.memory-blank-art { margin-bottom: 4px; opacity: .8; }
+.memory-footnote { margin: 12px 0 0; }
+.memory-footnote b { color: var(--text); }
+
+/* Memories is a flush page (prototype pageClass 'flush'): the toolbar rule runs
+   edge to edge and each band carries its own 24px inset. */
+.page-fill.memories-page { padding: 0; }
+.memories-page > .memory-toolbar { height: 52px; margin: 0; padding: 0 24px; }
+.memories-page .memory-list-pane > .memory-filter-row { margin: 0; padding: 16px 24px; }
+.memories-page .memory-list-pane > .gt { margin: 0 24px; }
+.memories-page .memory-list-pane > .memory-footnote { margin: 12px 24px 20px; }
+.memories-page > .memory-graph-shell { border: 0; border-radius: 0; }
+.memories-page > .memory-tools-stack { padding: 24px; }
+
+/* Metric edge: tones at .55, quiet cards barely there (prototype .metric / .metric.quiet). */
+.overview-card::before { opacity: .55; }
+.overview-card.neutral::before { background: var(--border-strong); opacity: .18; }
+
+/* Memory record modal (d-memory-detail) */
+.memory-record-section > .section-label { display: block; margin-bottom: 8px; }
+.memory-full-text { font-size: 12.5px; line-height: 1.65; padding: 14px 16px; }
+.memory-delete-excerpt { max-height: 104px; overflow: hidden; }
+.memory-detail-badges { gap: 6px; }
+.memory-detail-badges .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.memory-ego-graph { background: var(--bg-deep); border-radius: var(--radius); margin: 0; padding: 0; }
+.memory-ego-graph svg { height: 186px; }
+.memory-ego-graph line { stroke: var(--graph-edge); }
+.memory-ego-center { fill: var(--node-memory); }
+.memory-ego-entity { fill: var(--node-entity); }
+.memory-ego-graph > small { padding: 0 0 8px; }
+.memory-delete-summary { color: var(--body); font-size: 12.5px; margin: 0; }
+.memory-delete-summary b { color: var(--text); }
+.kv.delete-impact { border: 0; border-radius: 0; margin: 0; padding: 0; }
+.field-error { align-items: center; color: var(--coral); display: flex; font-size: 11.5px; font-weight: 600; gap: 6px; margin-top: 6px; }
+
+/* Overview · Model capabilities band (prototype section-label + 2-up metric grid) */
+.overview-capabilities { display: flex; flex-direction: column; gap: 10px; }
+.overview-capabilities > .section-label { margin: 0; }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Memories · Tools (d-tools, d-tools-import)
+   ========================================================================== */
+.card-head { align-items: center; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 16px; }
+.card-head .card-title { align-items: center; display: inline-flex; gap: 8px; }
+.card-head .card-title .ui-icon { color: var(--accent); }
+.card-sub { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 3px 0 0; }
+.btn.block { justify-content: center; width: 100%; }
+.btn-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+
+.memory-tools-stack { align-content: start; display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tool-card { display: flex; flex-direction: column; margin: 0; min-width: 0; padding: 20px; }
+.tool-card .tool-desc { margin: 0 0 16px; }
+.tool-card .tool-field { margin: 0 0 16px; min-width: 0; }
+.tool-card .tool-field .ui-select-trigger { width: 100%; }
+.tool-card-action { margin-top: auto; }
+.tool-card > .notice { margin: 12px 0 0; }
+.tool-card-foot { align-items: center; border-top: 1px solid var(--divider-soft); display: flex; gap: 8px; justify-content: space-between; margin-top: 14px; padding-top: 12px; }
+.tool-card-danger { border-color: rgba(255, 95, 106, .28); grid-column: 1 / -1; order: 2; }
+.tool-card-danger .card-title,
+.tool-card-danger .card-head .card-title .ui-icon { color: var(--coral); }
+.tool-card:has(.import-review) { grid-column: 1 / -1; order: 1; }
+.tool-row-danger { align-items: flex-end; flex-wrap: nowrap; gap: 12px; }
+.tool-row-danger > .tool-field-grow { flex: 1 1 auto; margin: 0; }
+.tool-row-danger > div { display: flex; flex-direction: column; gap: 6px; min-width: 160px; }
+.tool-row-danger > div > span { color: var(--soft); font-size: 12px; font-weight: 600; }
+.tool-row-danger > div > b { align-items: center; color: var(--text); display: flex; font-size: 13px; font-weight: 600; height: 40px; }
+
+.seg-control { background: var(--inset); border: 1px solid var(--border); border-radius: var(--radius); display: flex; gap: 6px; padding: 4px; }
+.seg-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--soft);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 1;
+  font: 600 12.5px/1.2 var(--font-sans);
+  gap: 7px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 12px;
+}
+.seg-option:hover:not(.active):not(:disabled) { color: var(--text); }
+.seg-option.active { background: var(--panel); border-color: var(--accent-40); box-shadow: var(--shadow-card); color: var(--text); }
+.seg-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ui-file.dropzone {
+  align-items: center;
+  background: var(--inset);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 6px;
+  justify-content: center;
+  padding: 20px 12px;
+  text-align: center;
+  width: 100%;
+}
+.ui-file.dropzone:hover,
+.ui-file.dropzone.dragging { background: var(--accent-10); border-color: var(--accent-40); }
+.ui-file.dropzone .dropzone-icon { color: var(--dim); }
+.ui-file.dropzone.has-file .dropzone-icon { color: var(--accent); }
+.ui-file.dropzone .dropzone-label { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.ui-file.dropzone.has-file .dropzone-label { color: var(--text); font-family: var(--font-mono); font-size: 11.5px; }
+.ui-file.dropzone .dropzone-hint { color: var(--accent); font-size: 11.5px; font-weight: 600; }
+
+.import-review { border-top: 1px solid var(--divider-soft); display: flex; flex-direction: column; gap: 14px; margin-top: 18px; padding-top: 18px; }
+.import-review .card-head { margin: 0; }
+.import-review-grid { display: grid; gap: 20px; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); }
+.import-steps.steplist { display: flex; flex-direction: column; gap: 1px; margin: 0; }
+.steprow { align-items: center; border-radius: 7px; color: var(--muted); display: flex; font-size: 12.5px; gap: 12px; padding: 8px 12px; }
+.steprow .st-ic { align-items: center; border: 1.5px solid var(--border-strong); border-radius: 50%; color: var(--dim); display: inline-flex; flex: none; font-size: 11px; font-weight: 800; height: 16px; justify-content: center; width: 16px; }
+.steprow-text { display: flex; flex-direction: column; min-width: 0; }
+.steprow-text b { color: inherit; font-weight: 600; }
+.steprow-text small { color: var(--dim); font-size: 11px; }
+.steprow.done { color: var(--body); }
+.steprow.done .st-ic { background: var(--grass-12); border-color: var(--grass); color: var(--grass); }
+.steprow.current,
+.steprow.running { background: var(--accent-10); color: var(--text); }
+.steprow.running .st-ic { animation: pmStepSpin 900ms linear infinite; border-color: var(--accent); border-right-color: transparent; }
+.steprow.queued .st-ic { border-color: var(--marigold); color: var(--marigold); }
+.steprow.failed { background: var(--coral-12); color: var(--coral); }
+.steprow.failed .st-ic { border-color: var(--coral); color: var(--coral); }
+@keyframes pmStepSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .steprow.running .st-ic { animation: none; } }
+
+/* The staged-import summary reads as the prototype key/value list. */
+.import-review .import-summary { background: transparent; border: 0; display: flex; flex-direction: column; gap: 0; }
+.import-review .import-summary > div { align-items: baseline; background: transparent; border-bottom: 1px solid var(--divider-soft); display: flex; gap: 12px; padding: 7px 0; }
+.import-review .import-summary > div:last-child { border-bottom: 0; }
+.import-review .import-summary span { color: var(--muted); flex: none; font-size: 11.5px; letter-spacing: 0; margin: 0; min-width: 132px; text-transform: none; }
+.import-review .import-summary b { color: var(--text); font-size: 12.5px; font-weight: 500; }
+
+@media (max-width: 1180px) {
+  .memory-tools-stack { grid-template-columns: minmax(0, 1fr); }
+  .import-review-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Prototype .metric-value.model: a model identifier reads as code, not as a headline figure. */
+.overview-card-value.overview-card-model { font-family: var(--font-mono); font-size: 13.5px; font-weight: 400; letter-spacing: 0; line-height: 1.4; word-break: break-all; }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Services (d-services, d-services-mcp, d-services-down)
+   ========================================================================== */
+.dot { background: var(--muted); border-radius: 50%; display: inline-block; flex: none; height: 7px; width: 7px; }
+.dot.ok { background: var(--grass); box-shadow: 0 0 0 3px var(--grass-12); }
+.dot.warn { background: var(--marigold); box-shadow: 0 0 0 3px var(--marigold-12); }
+.dot.bad { background: var(--coral); box-shadow: 0 0 0 3px var(--coral-12); }
+.dot.accent { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-10); }
+.dot.idle { background: var(--dim); box-shadow: none; }
+.dot.live { animation: pmDotPulse 2.4s ease-in-out infinite; }
+@keyframes pmDotPulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+@media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+
+.cell-strong { color: var(--text); font-weight: 600; }
+.cell-mono { color: var(--soft); font-family: var(--font-mono); font-size: 11.5px; }
+.row-actions { align-items: center; display: flex; gap: 6px; justify-content: flex-end; }
+.gt-head-actions,
+.mcp-sessions-table .gt-head > div:last-child { text-align: right; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--soft); }
+.btn.ghost:hover:not(:disabled) { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
+.notice-detail { color: var(--muted); display: block; font-size: 12px; margin-top: 6px; }
+
+.page-fill.services-page { padding: 0; }
+.services-page > .services-toolbar { height: 52px; margin: 0; padding: 0 24px; }
+.services-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 20px; min-height: 0; overflow-y: auto; padding: 24px; }
+.services-body > .notice { margin: 0; }
+.services-page .services-section-stack { display: flex; flex: none; flex-direction: column; gap: 20px; min-height: auto; }
+.services-page .services-section { display: flex; flex: none; flex-direction: column; gap: 10px; min-height: auto; }
+.services-page .services-section > .section-label { margin: 0; }
+.services-page .services-section > .notice { margin: 0; }
+.services-page .services-section > .gt.table-scroll { flex: none; max-height: none; }
+.services-page .gt-scroll-body { max-height: none; overflow: visible; }
+.services-page .service-cell { align-items: center; display: flex; gap: 10px; min-width: 0; }
+.service-cell-text { display: flex; flex: 1 1 auto; flex-direction: column; gap: 1px; min-width: 0; }
+.services-page .svc-name-link.cell-strong { color: var(--text); }
+.services-page .svc-name-link.cell-strong:hover { color: var(--accent); }
+.service-image { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.services-page .service-runtime-detail > div:first-child { color: var(--soft); font-family: var(--font-mono); font-size: 11.5px; }
+.services-page .service-log-unavailable { color: var(--dim); font-size: 11px; }
+.services-page .mcp-connection-cell { background: transparent; border: 0; padding: 0; }
+
+/* Status badge as the prototype pill: uppercase, toned, redundant with the row dot. */
+.worker-status-badge { border: 1px solid var(--border); border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; line-height: 1.4; padding: 2px 8px; text-transform: uppercase; }
+.worker-status-badge.running,
+.worker-status-badge.healthy { background: var(--grass-12); border-color: rgba(61, 214, 140, .32); color: var(--grass); }
+.worker-status-badge.stopped { background: var(--marigold-12); border-color: var(--marigold-40); color: var(--marigold); }
+.worker-status-badge.error { background: var(--coral-12); border-color: var(--coral-40); color: var(--coral); }
+.worker-status-badge.unknown { background: var(--hover-tint); color: var(--muted); }
+
+.tool-card-hint { margin: 10px 0 0; }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Workers (d-workers, d-workers-schedule, d-workers-failed)
+   ========================================================================== */
+.icon-btn { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); cursor: pointer; display: inline-flex; height: 28px; justify-content: center; padding: 0; width: 28px; }
+.icon-btn:hover:not(:disabled) { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
+.icon-btn:disabled { cursor: not-allowed; opacity: .4; }
+
+.workers-page { gap: 16px; }
+.workers-page > .notice { margin: 0; }
+.workers-page .worker-incident-item { display: block; margin-top: 4px; }
+.workers-page .gt-head > div:last-child { text-align: right; }
+.workers-page .worker-row { cursor: pointer; }
+.workers-page .worker-row.selected { background: var(--accent-10); box-shadow: inset 2px 0 0 var(--accent); }
+.workers-page .worker-row-failed.selected { background: var(--coral-12); box-shadow: inset 2px 0 0 var(--coral); }
+.worker-job-cell { align-items: center; display: flex; gap: 9px; min-width: 0; }
+.worker-job-select { background: none; border: 0; color: var(--text); cursor: pointer; font: inherit; font-weight: 600; padding: 0; text-align: left; }
+.worker-job-select:hover { color: var(--accent); }
+.worker-job-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.worker-job-desc { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workers-page .worker-schedule-copy .code-inline { background: transparent; border: 0; color: var(--soft); padding: 0; }
+.workers-page .worker-schedule-desc { color: var(--muted); font-size: 10.5px; }
+.workers-page .worker-run-cell { color: var(--soft); font-size: 11.5px; }
+.workers-page .worker-run-cell.failed { color: var(--coral); }
+
+.worker-terminal-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); flex: none; overflow: hidden; }
+.terminal-head { align-items: center; background: var(--header-strip); border-bottom: 1px solid var(--border); color: var(--muted); display: flex; font-size: 10.5px; font-weight: 700; gap: 8px; letter-spacing: var(--track-caps); padding: 7px 12px; text-transform: uppercase; }
+.worker-terminal-card.failed .terminal-head { color: var(--coral); }
+.worker-terminal-card .log-output-terminal { border: 0; border-radius: 0; max-height: 200px; }
+
+.worker-schedule-modal .cron-modes { margin-bottom: 18px; }
+.worker-schedule-modal .cron-section > .section-label { display: block; margin-bottom: 8px; }
+.worker-schedule-modal .cron-field-row { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.worker-schedule-modal .cron-field-row .tool-field { margin: 0; }
+.cron-pattern-field { display: flex; flex-direction: column; gap: 6px; margin: 16px 0 0; }
+.cron-pattern-field .field-hint b { color: var(--text); font-weight: 600; }
+
+/* Services polish: the status column carries the badge and the switch only; credentials sit beside the name. */
+.services-page .status-toggle-dot { display: none; }
+.services-page .service-status-cell { gap: 10px; }
+.services-page .service-title-row { gap: 6px; justify-content: flex-start; }
+.services-page .service-title-actions { gap: 2px; }
+.services-page .svc-credential-button { background: transparent; border-color: transparent; color: var(--muted); height: 22px; width: 22px; }
+.services-page .svc-credential-button:hover { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Token usage (d-usage)
+   ========================================================================== */
+.usage-page { gap: 16px; }
+.usage-page > .notice { margin: 0; }
+.usage-chart-controls { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.win-bar { background: transparent; border: 0; display: inline-flex; gap: 6px; padding: 0; }
+.win-pill { align-items: center; background: transparent; border: 1px solid var(--border); border-radius: 999px; color: var(--soft); cursor: pointer; display: inline-flex; font: 600 11.5px/1 var(--font-sans); height: 28px; padding: 0 12px; }
+.win-pill:hover:not(.active) { border-color: var(--border-strong); color: var(--text); }
+.win-pill.active { background: var(--accent-10); border-color: var(--accent-40); color: var(--accent); }
+.win-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.usage-kpis { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.usage-kpi { display: flex; flex-direction: column; gap: 6px; margin: 0; overflow: hidden; padding: 16px 20px 20px; position: relative; }
+.usage-kpi::before { background: var(--border-strong); content: ''; height: 1px; left: 0; opacity: .18; position: absolute; right: 0; top: 0; }
+.usage-kpi .section-label { color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: var(--track-caps); margin: 0; text-transform: uppercase; }
+.usage-kpi-value,
+.usage-kpi-value.accent { color: var(--text); font-family: var(--font-display); font-size: 30px; font-variant-numeric: tabular-nums; font-weight: 400; letter-spacing: -.03em; line-height: 1.05; }
+.usage-kpi .muted { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.usage-page .spark-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.usage-page .spark-head { align-items: center; margin-bottom: 12px; }
+.usage-page .spark-meta { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+@media (max-width: 1180px) { .usage-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Workers: the schedule edit control is a quiet icon, as in the prototype rows. */
+.workers-page .worker-icon-button { background: transparent; border-color: transparent; color: var(--muted); height: 28px; width: 28px; }
+.workers-page .worker-icon-button:hover:not(:disabled) { background: var(--hover-tint); border-color: var(--border); color: var(--text); }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Security (d-security, d-security-clear)
+   ========================================================================== */
+.security-page { gap: 20px; }
+.security-metrics { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.security-metric { display: flex; flex-direction: column; gap: 6px; margin: 0; overflow: hidden; padding: 16px 20px 20px; position: relative; }
+.security-metric::before { background: var(--border-strong); content: ''; height: 1px; left: 0; opacity: .18; position: absolute; right: 0; top: 0; }
+.security-metric.ok::before { background: var(--grass); opacity: .55; }
+.security-metric.warn::before { background: var(--marigold); opacity: .55; }
+.security-metric.bad::before { background: var(--coral); opacity: .55; }
+.security-metric-head { align-items: center; display: flex; gap: 8px; justify-content: space-between; min-height: 20px; }
+.security-metric .section-label { color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: var(--track-caps); margin: 0; text-transform: uppercase; }
+.security-metric-value { color: var(--text); font-family: var(--font-display); font-size: 30px; font-variant-numeric: tabular-nums; font-weight: 400; letter-spacing: -.03em; line-height: 1.05; }
+.security-metric-value.security-metric-small { font-family: var(--font-mono); font-size: 13.5px; letter-spacing: 0; line-height: 1.4; padding: 8px 0 1px; }
+.security-metric .muted { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.security-alerts { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; }
+.security-alerts > .section-label { margin: 0; }
+.security-page .security-scroll-list { display: flex; flex-direction: column; gap: 10px; }
+.security-alert { align-items: flex-start; border-left: 2px solid var(--border-strong); display: flex; gap: 14px; margin: 0; padding: 18px 20px; }
+.security-alert.tone-bad { border-left-color: var(--coral); }
+.security-alert.tone-warn { border-left-color: var(--marigold); }
+.security-alert-icon { color: var(--muted); display: inline-flex; flex: none; margin-top: 2px; }
+.security-alert.tone-bad .security-alert-icon { color: var(--coral); }
+.security-alert.tone-warn .security-alert-icon { color: var(--marigold); }
+.security-alert-body { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+.security-alert-title { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; }
+.security-alert-title b { color: var(--text); font-size: 13.5px; font-weight: 600; }
+.security-alert-body .note { line-height: 1.6; margin: 0; }
+.security-alert-meta { font-size: 11px; }
+.security-alert-body .btn-row { margin-top: 4px; }
+.security-alert-body .btn-row form { margin: 0; }
+.security-alert-when { font-size: 10.5px; }
+.security-page .security-clear { align-items: center; display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; justify-content: center; margin: 0; padding: 56px 24px; text-align: center; }
+.security-page .security-clear-icon { color: var(--grass); }
+.security-page .security-clear strong { color: var(--text); font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+.security-page .security-clear > span { color: var(--muted); font-size: 12.5px; line-height: 1.6; max-width: 52ch; }
+@media (max-width: 1180px) { .security-metrics { grid-template-columns: minmax(0, 1fr); } }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — System Settings (d-settings, d-appearance)
+   ========================================================================== */
+.settings-shell { align-items: start; display: grid; gap: 24px; grid-template-columns: 210px minmax(0, 1fr); }
+.settings-nav { background: transparent; border: 0; display: flex; flex-direction: column; gap: 2px; padding: 0; position: sticky; top: 0; }
+.settings-nav-item { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--soft); cursor: pointer; display: flex; font: 600 12.5px/1.2 var(--font-sans); gap: 11px; min-height: 0; padding: 8px 10px; text-align: left; width: 100%; }
+.settings-nav-item .ui-icon { color: var(--muted); flex: none; opacity: .85; }
+.settings-nav-item:hover:not(.active) { background: var(--hover-tint); color: var(--text); }
+.settings-nav-item.active { background: var(--accent-10); border-color: var(--accent-40); color: var(--text); }
+.settings-nav-item.active .ui-icon { color: var(--accent); opacity: 1; }
+.settings-nav-item small { display: none; }
+.settings-section { margin: 0; padding: 20px; }
+.settings-section .settings-section-head { margin-bottom: 16px; }
+.settings-section-head .card-sub { max-width: 680px; }
+.settings-form-stack { display: flex; flex-direction: column; gap: 16px; }
+.settings-section .field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.field-label { color: var(--text); font-size: 12.5px; font-weight: 600; letter-spacing: 0; margin: 0; text-transform: none; }
+.field-hint { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.field-hint.warn { color: var(--marigold); }
+.settings-field-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-pin { margin-bottom: 6px; }
+.settings-pin code { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+.settings-pin-mode.ok { color: var(--grass); }
+.settings-pin-mode.warn { color: var(--marigold); }
+.settings-pin-hint { margin: 0 0 14px; }
+.settings-section form > .notice,
+.settings-section .settings-form-stack > .notice { margin: 0 0 14px; }
+.settings-saved { color: var(--grass); font-size: 12.5px; }
+@media (max-width: 1040px) {
+  .settings-shell { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; position: static; }
+  .settings-nav-item { width: auto; }
+}
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Notifications (d-notifications)
+   ========================================================================== */
+.settings-shell.single { grid-template-columns: minmax(0, 1fr); }
+.settings-shell.single > .settings-nav { display: none; }
+.settings-section.plain { background: transparent; border: 0; box-shadow: none; margin: 0; padding: 0; }
+.notifications-grid { align-items: start; display: grid; gap: 20px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+.notifications-card { margin: 0; padding: 20px; }
+.switch-list { display: flex; flex-direction: column; }
+.switch-row { align-items: center; border-bottom: 1px solid var(--divider-soft); display: flex; gap: 12px; padding: 8px 0; }
+.switch-list .switch-row:last-child { border-bottom: 0; }
+.switch-row-label { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.switch-row-label > span { color: var(--text); font-size: 12.5px; }
+.switch-row-label small { color: var(--muted); font-size: 11px; }
+.switch-row.emphasis { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.switch-row.emphasis .switch-row-label > span { font-weight: 600; }
+.switch-row.disabled .switch-row-label > span { color: var(--muted); }
+.switch-row .status-toggle-icon { flex: none; }
+.personal-notification-types { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.personal-notification-types .section-label { margin: 4px 0 2px; }
+.push-status { align-items: stretch; margin: 0; padding: 20px; }
+.push-status .card-head { margin-bottom: 4px; }
+.push-status .btn.block { justify-content: center; }
+@media (max-width: 1100px) { .notifications-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Documentation (d-docs)
+   ========================================================================== */
+.dashboard-docs-layout { grid-template-columns: 238px minmax(0, 1fr); }
+.dashboard-docs-nav { background: var(--header-strip); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; padding: 20px 12px; }
+.dashboard-docs-nav-group { color: var(--muted); display: block; font-size: 10.5px; font-weight: 700; letter-spacing: var(--track-caps); padding: 8px 10px 6px; text-transform: uppercase; }
+.dashboard-docs-nav nav { gap: 2px; }
+.dashboard-docs-nav-link { border: 1px solid transparent; border-radius: 7px; color: var(--soft); font-size: 12.5px; font-weight: 500; min-height: 0; padding: 8px 10px; }
+.dashboard-docs-nav-link .ui-icon { display: none; }
+.dashboard-docs-nav-link:hover { background: var(--hover-tint); color: var(--text); }
+.dashboard-docs-nav-link.active { background: var(--accent-10); border-color: var(--accent-40); color: var(--text); font-weight: 600; }
+.dashboard-docs-stack-link { margin: auto 0 0; order: 2; }
+.dashboard-docs-article { padding: 32px 40px 72px; }
+.dashboard-docs-article .visual-guide { max-width: 860px; }
+.dashboard-docs-article-head { border-bottom: 0; margin-bottom: 22px; padding-bottom: 0; }
+.dashboard-docs-eyebrow { color: var(--accent); display: block; font-size: 10.5px; font-weight: 700; letter-spacing: var(--track-caps); margin-bottom: 10px; text-transform: uppercase; }
+.dashboard-docs-article h1 { font-family: var(--font-display); font-size: 30px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; margin: 0 0 12px; }
+.dashboard-docs-article-head p { color: var(--soft); font-size: 15px; line-height: 1.6; }
+.visual-guide h2 { font-family: var(--font-display); font-size: 18px; margin: 30px 0 8px; }
+.visual-guide p,
+.visual-guide li { line-height: 1.7; }
+
+/* Parity fixes from the live pass: full-width settings, block notice titles, toned clear-state icon. */
+.settings-page-frame { margin: 0; max-width: none; width: 100%; }
+.settings-detail { min-width: 0; }
+.notice.with-icon .notice-title { color: var(--text); display: block; font-size: 12.5px; font-weight: 700; letter-spacing: 0; margin-bottom: 3px; text-transform: none; }
+.security-page .security-clear .ui-icon.security-clear-icon { color: var(--grass); }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Memory graph (d-graph)
+   ========================================================================== */
+.memory-graph-filter-rail,
+.memory-graph-inspector { background: var(--header-strip); }
+.memory-graph-rail-head strong,
+.memory-graph-inspector-head strong { font-family: var(--font-display); font-size: 12.5px; font-weight: 600; }
+.memory-graph-rail-head span { color: var(--muted); font-size: 10.5px; }
+.memory-graph-section-title { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: var(--track-caps); text-transform: uppercase; }
+.memory-graph-section-title .ui-icon { display: none; }
+.memory-graph-facet-list button { align-items: center; border-radius: 6px; color: var(--soft); display: flex; font-size: 12.5px; gap: 8px; }
+.memory-graph-facet-list button::before { border: 1.5px solid var(--border-strong); border-radius: 4px; content: ''; flex: none; height: 14px; width: 14px; }
+.memory-graph-facet-list button.active { background: transparent; color: var(--text); }
+.memory-graph-facet-list button.active::before { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--header-strip); }
+
+/* The toolbar floats over the canvas as HUD chips. */
+.memory-graph-stage { position: relative; }
+.memory-graph-stage-toolbar { background: transparent; border: 0; left: 16px; padding: 0; pointer-events: none; position: absolute; right: 16px; top: 16px; z-index: 3; }
+.memory-graph-stage-toolbar > * { pointer-events: auto; }
+.memory-graph-title-block,
+.memory-graph-viewport-controls {
+  align-items: center;
+  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 5px 10px;
+}
+.memory-graph-title-block > div { align-items: baseline; display: flex; gap: 8px; }
+.memory-graph-title-block strong { font-size: 11px; font-weight: 600; }
+.memory-graph-title-block small { color: var(--soft); font-size: 10.5px; margin: 0; }
+.memory-graph-viewport-controls { padding: 3px 4px 3px 10px; }
+.memory-graph-viewport-controls .memory-graph-auto-state { color: var(--soft); font-size: 10.5px; font-weight: 600; }
+.memory-graph-viewport-controls .memory-graph-icon-button { border-radius: 999px; height: 24px; width: 24px; }
+
+.memory-graph-canvas-wrap {
+  background:
+    radial-gradient(620px 420px at 50% 45%, rgba(43, 197, 232, .10), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(148, 178, 208, .05) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, rgba(148, 178, 208, .05) 0 1px, transparent 1px 40px),
+    #05070a;
+}
+.memory-graph-canvas-footer { align-items: flex-end; bottom: 16px; left: 16px; right: 16px; }
+.memory-graph-canvas-footer .memory-graph-legend {
+  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+}
+.memory-graph-canvas-footer .memory-graph-legend span { color: var(--soft); font-size: 10.5px; }
+
+.memory-graph-inspector-head { align-items: center; display: flex; justify-content: space-between; }
+.memory-graph-inspector-head .badge { font-size: 9.5px; }
+.memory-graph-selected { align-items: stretch; text-align: left; }
+.memory-graph-selected-orb { display: none; }
+.memory-graph-selected h3 { background: var(--inset); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12.5px; font-weight: 500; line-height: 1.55; margin: 8px 0 0; padding: 12px; }
+.memory-graph-selected .memory-graph-kind { color: var(--muted); font-size: 10.5px; margin-top: 6px; }
+.memory-graph-selected dl { margin: 10px 0 0; }
+.memory-graph-selected dl > div { border-top: 0; border-bottom: 1px solid var(--divider-soft); grid-template-columns: 78px minmax(0, 1fr); padding: 5px 0; }
+.memory-graph-selected dt { color: var(--muted); font-size: 11px; }
+.memory-graph-selected dd { color: var(--text); font-size: 12px; }
+
+/* ==========================================================================
+   PROTOTYPE PARITY — Unlock (a-login), Profile (a-profile), Shared connection (s-connect-*)
+   ========================================================================== */
+.login-wrap { background: var(--bg); }
+.login-card { max-width: 92vw; overflow: hidden; padding: 0; width: 420px; }
+.login-crest { align-items: center; background: radial-gradient(circle at 50% 0%, rgba(43, 197, 232, .12), transparent 70%), var(--header-strip); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; padding: 28px 24px 34px; position: relative; text-align: center; }
+.login-crest .login-brand-mark { color: var(--accent); height: 46px; margin-bottom: 14px; width: 46px; }
+.login-crest .login-brand-mark svg { height: 42px; width: 42px; }
+.login-crest-name { color: var(--text); font-family: var(--font-display); font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+.login-crest-sub { margin-top: 5px; }
+.login-crest-lattice { bottom: 0; left: 50%; opacity: .28 !important; pointer-events: none; position: absolute; transform: translateX(-50%); }
+.login-body { padding: 24px 28px 28px; }
+.login-card h1 { font-family: var(--font-display); font-size: 18px; margin: 0 0 4px; }
+.login-card .login-lead { margin: 0 0 18px; }
+.login-card .notice { margin: 0 0 14px; }
+.login-form .field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; }
+.login-card .ui-input.invalid,
+.connection-form .ui-input.invalid { border-color: var(--coral); box-shadow: 0 0 0 2px var(--coral-12); }
+.btn.lg { font-size: 13.5px; gap: 8px; height: 40px; min-height: 40px; padding: 0 20px; }
+.login-divider { align-items: center; color: var(--muted); display: flex; font-size: 10.5px; font-weight: 700; gap: 10px; letter-spacing: var(--track-caps); margin: 16px 0; text-transform: uppercase; }
+.login-divider::before,
+.login-divider::after { background: var(--border); content: ''; flex: 1; height: 1px; }
+
+.profile-identity { align-items: center; display: flex; gap: 14px; }
+.profile-identity-name { color: var(--text); font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+.profile-identity .badge { margin-top: 5px; }
+.profile-form { display: flex; flex-direction: column; gap: 14px; }
+.profile-form .field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.profile-section { border-top: 1px solid var(--border); gap: 10px; padding-top: 16px; }
+.profile-section .notice { margin: 0; }
+.modal-foot-spacer { flex: 1; }
+.modal-foot form { margin: 0; }
+
+.connection-page { display: flex; flex-direction: column; gap: 20px; }
+.connection-new { display: flex; flex-direction: column; gap: 20px; margin: 0 auto; max-width: 720px; width: 100%; }
+.connection-hero { align-items: center; display: flex; flex-direction: column; padding: 24px 0 8px; text-align: center; }
+.connection-hero-art { margin-bottom: 14px; opacity: .75; }
+.connection-hero h2 { font-family: var(--font-display); font-size: 23px; font-weight: 600; margin: 0 0 8px; }
+.connection-hero .lede { color: var(--soft); font-size: 14px; line-height: 1.6; margin: 0 auto; max-width: 56ch; }
+.connection-card { margin: 0; padding: 20px; }
+.connection-form { display: flex; flex-direction: column; gap: 14px; }
+.connection-form .field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.connection-form .notice,
+.connection-new > .notice { margin: 0; }
+.connection-grid { align-items: start; display: grid; gap: 20px; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+.connection-side { display: flex; flex-direction: column; gap: 16px; }
+.connection-card .kv { margin-bottom: 14px; }
+.connection-card > .notice { margin: 0; }
+.connection-actions form { margin: 0; }
+.connection-replace { border-top: 1px solid var(--divider-soft); margin-top: 16px; padding-top: 16px; }
+@media (max-width: 1100px) { .connection-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Prototype a-profile: the identity avatar is a rounded square, not a circle. */
+.profile-identity .ui-avatar { border-radius: 15px; }
+
+/* Overview live MCP activity: the active stream sessions, then one session's live output. */
+.mcp-live-panel { min-width: 0; }
+.mcp-live-table .gt-scroll-body { max-height: 320px; }
+.mcp-live-row {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--divider);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+.mcp-live-row:hover:not(:disabled) { background: var(--elevated); border-color: var(--divider); }
+.mcp-live-row:focus-visible { box-shadow: inset 2px 0 0 var(--accent); outline: none; }
+.mcp-live-row > span { display: block; min-width: 0; padding: 11px 14px; }
+.mcp-live-row > span + span { border-left: 1px solid var(--divider-soft); }
+.mcp-live-row .service-cell { align-items: center; display: flex; gap: 10px; }
+.mcp-live-row .service-cell-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mcp-live-row .cell-strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-live-row .mcp-connection-cell { background: transparent; border: 0; width: auto; }
+.mcp-live-row .mcp-time-cell > span { display: block; }
+.mcp-live-row .mcp-live-chevron { align-items: center; color: var(--dim); display: flex; justify-content: center; padding: 0; }
+.mcp-live-row:hover .mcp-live-chevron,
+.mcp-live-row:focus-visible .mcp-live-chevron { color: var(--accent); }
+.mcp-live-detail-head { align-items: center; }
+.mcp-live-detail-head .btn { margin-left: -10px; }
+.mcp-live-detail-title { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; min-width: 0; }
+.mcp-live-detail-title .note { margin-top: 2px; }
+.mcp-live-notice { align-items: center; margin: 0 0 12px; }
+.mcp-live-notice .icon-btn { margin-left: auto; }
+.mcp-live-output .log-output-lines { max-height: 320px; min-height: 180px; }
+.mcp-live-table .gt-head > div { white-space: nowrap; }

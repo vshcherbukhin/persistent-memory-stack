@@ -5,6 +5,7 @@ import { Field, Terminal } from './components'
 import { ResourceSummary } from './ResourceSummary'
 import { modelPresence } from './flow'
 import { PrereqProgress } from './PrereqProgress'
+import { Icon, Notice } from './ui'
 import { prereqProgressEvent, type PrereqProgressState } from './prereq-progress'
 
 export interface EmbeddingAnswers {
@@ -34,13 +35,14 @@ const MODEL_NOTES: Record<string, string> = {
   'qwen3-embedding:8b': 'Largest local option · for machines with ample memory',
 }
 
-export function EmbeddingSetup({ answers, set, resources, resourceError, refreshResources, setNextDisabled, tested, setTested }: {
+export function EmbeddingSetup({ answers, set, resources, resourceError, refreshResources, setNextDisabled, setFault, tested, setTested }: {
   answers: EmbeddingAnswers
   set: <K extends keyof EmbeddingAnswers>(key: K, value: EmbeddingAnswers[K]) => void
   resources: ResourceSnapshot | null
   resourceError: string | null
   refreshResources: () => Promise<void>
   setNextDisabled: (value: boolean) => void
+  setFault?: (value: boolean) => void
   tested: string
   setTested: (value: string) => void
 }) {
@@ -70,6 +72,8 @@ export function EmbeddingSetup({ answers, set, resources, resourceError, refresh
     return () => { active = false }
   }, [])
   useEffect(() => { setNextDisabled(busy || !assessment?.allowed || !warningsAccepted || (local ? !ollamaReady : !keyPresent || !testPassed)) }, [busy, assessment?.allowed, warningsAccepted, local, ollamaReady, keyPresent, testPassed])
+  const testFailed = Boolean(result && !result.ok)
+  useEffect(() => { setFault?.(testFailed || Boolean(assessment?.blockers.length)) }, [testFailed, assessment?.blockers.length])
   const select = (provider: ResourceProvider, model?: string) => {
     if (!model && provider === 'voyage') model = 'voyage-4'
     const choice = RESOURCE_MODELS.find(item => item.provider === provider && (!model || item.model === model))!
@@ -102,34 +106,66 @@ export function EmbeddingSetup({ answers, set, resources, resourceError, refresh
   }
   return <section>
     <h2>Embeddings</h2>
-    <p>Choose where memory text is converted to vectors. Your memory database stays on this computer with either option.</p>
-    {recommendation ? <div className="notice"><b>Suggested for this computer: {recommendation.model}</b><p>{recommendation.reason}</p>{answers.embedModel !== recommendation.model ? <button type="button" disabled={busy} onClick={() => select(recommendation.provider, recommendation.model)}>Use suggested option</button> : null}</div> : <p className="notice warn">{resourceError ?? 'Checking machine resources…'}</p>}
+    <p className="lede">Choose where memory text is converted to vectors. Your memory database stays on this computer with either option.</p>
+    {recommendation ? (
+      <Notice tone="accent" icon="sparkle" title={`Suggested for this computer: ${recommendation.model}`}>
+        {recommendation.reason}
+        {answers.embedModel !== recommendation.model ? (
+          <div className="btn-row">
+            <button type="button" className="btn sm secondary" disabled={busy} onClick={() => select(recommendation.provider, recommendation.model)}>Use suggested option</button>
+          </div>
+        ) : null}
+      </Notice>
+    ) : <Notice tone="warn">{resourceError ?? 'Checking machine resources…'}</Notice>}
     <div className="seg-group"><span className="seg-label">Embedding provider</span><div className="seg-row">
       {(['openai', 'voyage', 'ollama'] as const).map(provider => <button type="button" key={provider} className={`seg${answers.embedProvider === provider ? ' active' : ''}`} disabled={busy || (provider === 'ollama' && !recommendation?.localEnabled)} onClick={() => select(provider)}>{provider === 'ollama' ? 'Ollama · local' : provider === 'openai' ? 'OpenAI · API' : 'Voyage · API'}</button>)}
     </div></div>
-    {recommendation && !recommendation.localEnabled ? <p className="notice warn">Local Ollama is unavailable because even the smallest supported model does not meet this installation’s minimum resource budget. Use a remote embedding API, or free resources and check again.</p> : null}
+    {recommendation && !recommendation.localEnabled ? <Notice tone="warn">Local Ollama is unavailable because even the smallest supported model does not meet this installation’s minimum resource budget. Use a remote embedding API, or free resources and check again.</Notice> : null}
     <div className="modellist">{RESOURCE_MODELS.filter(item => item.provider === answers.embedProvider && (item.model !== 'voyage-3-large' || answers.embedModel === item.model)).map(item => <button type="button" className={`modelrow${answers.embedModel === item.model ? ' active' : ''}`} key={item.model} disabled={busy} onClick={() => select(item.provider, item.model)}>
       <span className="modelradio" aria-hidden /><span className="modelrow-main"><span className="modelrow-name">{item.model}</span> <span className="modelrow-dim">{item.dim} dimensions</span><span className="modelrow-note">{MODEL_NOTES[item.model]}</span></span>
       <span className="modelrow-ram">RAM: {item.budget.minimum.hostMemoryGiB} GiB min / {item.budget.recommended.hostMemoryGiB} GiB recommended</span>
-      {local ? <span className="modelrow-rec">{modelPresence(models, item.model) === 'installed' ? 'installed' : 'downloaded during installation'}</span> : null}
+      {local
+        ? <span className={`modelrow-rec ${modelPresence(models, item.model) === 'installed' ? 'ok' : 'warn'}`}>{modelPresence(models, item.model) === 'installed' ? 'installed' : 'downloaded during installation'}</span>
+        : recommendation?.model === item.model ? <span className="modelrow-rec">recommended</span> : null}
     </button>)}</div>
     {resources && assessment ? <ResourceSummary snapshot={resources} assessment={assessment} acknowledged={answers.resourceAcknowledged} onAcknowledge={value => set('resourceAcknowledged', value)} /> : null}
-    <button type="button" disabled={busy} onClick={() => void refreshResources()}>Check resources again</button>
+    <div className="btn-row">
+      <button type="button" className={`btn ${assessment && !assessment.allowed ? 'primary' : 'secondary'}`} disabled={busy} onClick={() => void refreshResources()}><Icon name="refresh" size={15} /> Check resources again</button>
+    </div>
     {!local ? <>
       {answers.embedProvider === 'voyage' ? <p className="field-hint">Anthropic recommends Voyage for embeddings. A Claude / Anthropic API key cannot be used here; Voyage requires its own API key.</p> : null}
-      <p className="notice">Embedding requests send memory and search text to {answers.embedProvider === 'openai' ? 'OpenAI' : 'Voyage'}. An internet connection and provider API billing are required. The connection test sends a short sample and may incur a small charge.</p>
-      <Field label={answers.embedProvider === 'voyage' ? 'Voyage API key' : 'OpenAI API key'} hint={answers.embedProvider === 'openai' ? 'Also used if you choose OpenAI for fact extraction. Saved locally and masked in review.' : 'Saved locally and masked in review.'}><input type="password" autoComplete="off" value={key} placeholder={keyPresent && !key ? 'Existing key — leave blank to keep' : 'Paste your provider API key'} onChange={event => { set(answers.embedProvider === 'voyage' ? 'voyageApiKey' : 'openaiApiKey', event.target.value); setResult(null); setTested('') }} /></Field>
+      <Notice>Embedding requests send memory and search text to {answers.embedProvider === 'openai' ? 'OpenAI' : 'Voyage'}. An internet connection and provider API billing are required. The connection test sends a short sample and may incur a small charge.</Notice>
+      <Field label={answers.embedProvider === 'voyage' ? 'Voyage API key' : 'OpenAI API key'} hint={answers.embedProvider === 'openai' ? 'Also used if you choose OpenAI for fact extraction. Saved locally and masked in review.' : 'Saved locally and masked in review.'}><input type="password" autoComplete="off" className={testFailed ? 'invalid' : undefined} value={key} placeholder={keyPresent && !key ? 'Existing key — leave blank to keep' : 'Paste your provider API key'} onChange={event => { set(answers.embedProvider === 'voyage' ? 'voyageApiKey' : 'openaiApiKey', event.target.value); setResult(null); setTested('') }} /></Field>
       {answers.embedProvider === 'openai' ? <p className="embedding-key-help">Use a key from the OpenAI project that allows your selected model. The key and its user or service account also need <b>Model capabilities → Request</b> permission for embeddings. Adding models to the project allowlist alone is not enough. <a href="https://developers.openai.com/api/docs/guides/rbac" target="_blank" rel="noreferrer">OpenAI permission guide</a>.</p> : null}
-      <button type="button" disabled={busy || !keyPresent || !assessment?.allowed || !warningsAccepted} onClick={() => void test()}>{busy ? 'Testing…' : 'Test embedding connection'}</button>
-      {!testPassed ? <p className="field-hint">A successful connection test is required before continuing with API embeddings.</p> : null}
-      {testPassed && !result ? <p className="notice ok">Embedding connection verified for this model and key.</p> : null}
+      <div className="btn-row">
+        <button type="button" className="btn secondary" disabled={busy || !keyPresent || !assessment?.allowed || !warningsAccepted} onClick={() => void test()}><Icon name={testFailed ? 'refresh' : 'bolt'} size={15} /> {busy ? 'Testing…' : testFailed ? 'Test again' : 'Test embedding connection'}</button>
+      </div>
+      {!testPassed && !testFailed ? <p className="field-hint">A successful connection test is required before continuing with API embeddings.</p> : null}
+      {testPassed && !result ? <Notice tone="ok">Embedding connection verified for this model and key.</Notice> : null}
     </> : <>
-      {!ollamaReady ? <><p className="notice warn">Ollama must be installed and running for local embeddings. The model itself is downloaded later.</p><button type="button" disabled={busy || !assessment?.allowed || !warningsAccepted} onClick={() => void prepareOllama()}>Install / start Ollama</button></> : <p className="notice ok">Ollama is ready. Installation will reuse the selected model or download it once.</p>}
-      {modelPresence(models, answers.embedModel) === 'installed' ? <button type="button" disabled={busy || !assessment?.allowed || !warningsAccepted} onClick={() => void test()}>{busy ? 'Testing…' : 'Test local embedding model'}</button> : null}
+      {!ollamaReady ? (
+        <>
+          <Notice tone="warn">Ollama must be installed and running for local embeddings. The model itself is downloaded later.</Notice>
+          <div className="btn-row">
+            <button type="button" className="btn secondary" disabled={busy || !assessment?.allowed || !warningsAccepted} onClick={() => void prepareOllama()}>Install / start Ollama</button>
+          </div>
+        </>
+      ) : <Notice tone="ok">Ollama is ready. Installation will reuse the selected model or download it once.</Notice>}
+      {modelPresence(models, answers.embedModel) === 'installed' ? (
+        <div className="btn-row">
+          <button type="button" className="btn secondary" disabled={busy || !assessment?.allowed || !warningsAccepted} onClick={() => void test()}><Icon name="bolt" size={15} /> {busy ? 'Testing…' : 'Test local embedding model'}</button>
+        </div>
+      ) : null}
     </>}
-    {result ? <p className={`notice ${result.ok ? 'ok' : 'bad'}`} role="status">{result.message} {result.details}</p> : null}
+    {result ? (
+      <Notice tone={result.ok ? 'ok' : 'fault'} title={result.ok ? 'Embedding connection verified' : 'Embedding connection failed'} role={result.ok ? 'status' : 'alert'}>
+        {result.message}
+        {result.details ? <p className="note">{result.details}</p> : null}
+      </Notice>
+    ) : null}
+    {testFailed && !local ? <Notice>A successful connection test is required before continuing with API embeddings.</Notice> : null}
     {progress ? <PrereqProgress progress={progress} component="Ollama" /> : null}
     {log.length ? <Terminal lines={log} /> : null}
-    <p className="notice warn">Changing the embedding model or dimensions after storing memories requires a re-embedding migration from the dashboard. Setup preserves an existing corpus’s model.</p>
+    <Notice tone="warn">Changing the embedding model or dimensions after storing memories requires a re-embedding migration from the dashboard. Setup preserves an existing corpus’s model.</Notice>
   </section>
 }

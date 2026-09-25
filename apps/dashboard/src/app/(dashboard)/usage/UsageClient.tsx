@@ -276,7 +276,7 @@ function GroupUsageTable({ groups, view, capabilityHealth }: { groups: Group[]; 
           ? groups.flatMap((g) =>
               g.children.map((r, i) => (
                 <div key={`${g.key}:${r.model}`} className="gt-row" style={{ gridTemplateColumns: GT_COLS }}>
-                  <div className="mono" style={{ color: i === 0 ? 'var(--body)' : 'var(--dim)' }}>{i === 0 ? g.label : ''}</div>
+                  <div className="cell-strong">{i === 0 ? g.label : ''}</div>
                   <div className="mono" style={{ color: 'var(--soft)' }}>
                     {r.model} <HealthErrorIndicator health={healthForService(r.service, capabilityHealth)} />
                   </div>
@@ -292,7 +292,7 @@ function GroupUsageTable({ groups, view, capabilityHealth }: { groups: Group[]; 
             )
           : groups.map((g) => (
               <div key={g.key} className="gt-row" style={{ gridTemplateColumns: GT_COLS }}>
-                <div className="mono" style={{ color: 'var(--body)' }}>{g.label}</div>
+                <div className="cell-strong">{g.label}</div>
                 <div className="mono" style={{ color: 'var(--soft)' }}>{[...new Set(g.children.map((c) => SERVICE_LABEL[c.service] ?? c.service))].join(', ')}</div>
                 <div className="mono" style={{ textAlign: 'right', color: 'var(--soft)' }}>{fmtTok(g.tokensIn)} / {fmtTok(g.tokensOut)}</div>
                 <div className="mono" style={{ textAlign: 'right', color: 'var(--soft)' }}>{fmtTok(g.requests)}</div>
@@ -328,7 +328,7 @@ function UserUsageTable({ data }: { data: UsageData }) {
       <div className="gt-scroll-body">
         {data.users.map((u) => (
           <div key={u.userId ?? 'system'} className="gt-row" style={{ gridTemplateColumns: USER_GT_COLS }}>
-            <div style={{ color: 'var(--body)' }}>{u.displayName}</div>
+            <div className="cell-strong">{u.displayName}</div>
             <div className="mono" style={{ color: u.email ? 'var(--soft)' : 'var(--dim)' }}>{u.email ?? '—'}</div>
             <div className="mono" style={{ textAlign: 'right', color: 'var(--soft)' }}>{fmtTok(u.tokens)}</div>
             <div className="mono" style={{ textAlign: 'right', color: 'var(--soft)' }}>{fmtTok(u.requests)}</div>
@@ -393,6 +393,15 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
 
   function renderChart() {
     const chrome = <UsageChartChrome chartWindow={chartWindow} xDomain={xDomain} xTicks={xTicks} />
+    // Prototype d-usage: bars carry the plasma ramp (accent → violet) rather than a flat fill.
+    const plasmaDefs = (
+      <defs>
+        <linearGradient id="pmUsagePlasma" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.95 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--accent-2)', stopOpacity: 0.7 }} />
+        </linearGradient>
+      </defs>
+    )
     switch (chartStyle) {
       case 'line-linear':
       case 'line-monotone':
@@ -483,11 +492,12 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
       default:
         return (
           <BarChart data={trend} margin={CHART_MARGIN} accessibilityLayer>
+            {plasmaDefs}
             {chrome}
             <Bar
               dataKey="tokens"
               name="Tokens"
-              fill="var(--accent)"
+              fill="url(#pmUsagePlasma)"
               barSize={liveBarSize}
               maxBarSize={28}
               radius={[4, 4, 0, 0]}
@@ -500,18 +510,25 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
 
   return (
     <div className="page-fill usage-page">
-      {chartData.error ? <div className="notice danger">{chartData.error}</div> : null}
+      {chartData.error ? (
+        <div className="notice with-icon danger" role="alert">
+          <span className="n-ic"><Icon name="error_outline" size={16} /></span>
+          <span className="n-body">{chartData.error}</span>
+        </div>
+      ) : null}
 
       <div className="usage-chart-controls">
         <div className="win-bar">
           {WINDOWS.map((w) => (
-            <div
+            <button
+              type="button"
               key={w.v}
               className={`win-pill${chartWindow === w.v ? ' active' : ''}`}
+              aria-pressed={chartWindow === w.v}
               onClick={() => setChartWindow(w.v)}
             >
               {w.label}
-            </div>
+            </button>
           ))}
         </div>
         <div className="usage-chart-style-select">
@@ -559,7 +576,7 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
         <div className="spark-head">
           <div>
             <h2 className="card-title">Usage over time</h2>
-            <p className="note" style={{ margin: '3px 0 0' }}>Token volume per bucket for the selected window.</p>
+            <p className="card-sub">Token volume per bucket for the selected window.</p>
           </div>
           <div className="spark-meta">{WINDOW_LABEL[chartWindow]}</div>
         </div>
@@ -574,9 +591,9 @@ export function UsageClient({ initial, surface }: { initial: UsageData; surface:
 
       {/* By service / By model / By user requests toggle */}
       <div className="win-bar usage-table-tabs">
-        <div className={`win-pill${by === 'service' ? ' active' : ''}`} onClick={() => setBy('service')}>By service</div>
-        <div className={`win-pill${by === 'model' ? ' active' : ''}`} onClick={() => setBy('model')}>By model</div>
-        <div className={`win-pill${by === 'user' ? ' active' : ''}`} onClick={() => setBy('user')}>By user requests</div>
+        <button type="button" className={`win-pill${by === 'service' ? ' active' : ''}`} aria-pressed={by === 'service'} onClick={() => setBy('service')}>By service</button>
+        <button type="button" className={`win-pill${by === 'model' ? ' active' : ''}`} aria-pressed={by === 'model'} onClick={() => setBy('model')}>By model</button>
+        <button type="button" className={`win-pill${by === 'user' ? ' active' : ''}`} aria-pressed={by === 'user'} onClick={() => setBy('user')}>By user requests</button>
       </div>
 
       <div className="usage-table-panels">

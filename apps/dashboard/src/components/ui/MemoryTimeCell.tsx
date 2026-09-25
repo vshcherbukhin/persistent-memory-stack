@@ -6,7 +6,8 @@ import { Tooltip } from './Tooltip'
 const subscribe = () => () => {}
 const clientSnapshot = () => true
 const serverSnapshot = () => false
-const compactFormat = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+// Prototype d-memories: "Sep 6, 22:55" — 24-hour so the column never shifts width with AM/PM.
+const compactFormat = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const fullFormat = new Intl.DateTimeFormat([], { dateStyle: 'full', timeStyle: 'long' })
 
 /** Localize only after hydration: Docker and the browser may use different zones. */

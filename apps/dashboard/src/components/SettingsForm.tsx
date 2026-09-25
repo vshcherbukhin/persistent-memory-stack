@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Icon } from '@/components/ui/Icon'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   saveFactExtractionAction,
   saveSettingsAction,
@@ -80,6 +81,8 @@ export function SettingsForm({
   const [model, setModel] = useState(current.activeEmbedModel)
   const [dim, setDim] = useState(current.activeEmbedDim)
   const [confirmed, setConfirmed] = useState(false)
+  // Prototype d-settings: the pin reads as facts; changing it is a deliberate second step.
+  const [editing, setEditing] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
   const [testResult, setTestResult] = useState<SettingsTestResult | null>(null)
 
@@ -129,19 +132,23 @@ export function SettingsForm({
       {/* Preserve the legacy wire alias while showing the topology as read-only. */}
       <input type="hidden" name="embeddingMode" value={mode} />
 
-      {/* Always-on caution (verbatim from the install wizard) — the embedding pin is a
-          deliberate, hard-to-reverse choice. */}
-      <div className="notice warn" style={{ marginBottom: 18 }}>
-        <div className="notice-title">Choose the embedding pin deliberately</div>
-        Switching the model/dim later forces a full <b>re-embed migration</b> of the whole corpus —
-        pick deliberately. Matryoshka lets you truncate down (2560 → 1024 → 768…) within qwen3.
+      <div className="kv settings-pin">
+        <div className="kv-row"><span>Active model</span><code>{current.activeEmbedModel}</code></div>
+        <div className="kv-row"><span>Dimensions</span><code>{current.activeEmbedDim}</code></div>
+        <div className="kv-row"><span>Vector name</span><code>{current.activeVectorName}</code></div>
+        <div className="kv-row">
+          <span>Topology</span>
+          <span className={`settings-pin-mode ${mode === 'server' ? 'ok' : 'warn'}`}>{modeLabel}</span>
+        </div>
       </div>
+      <p className="field-hint settings-pin-hint">
+        {mode === 'server'
+          ? 'The embedder runs on the server. The model can change here; the topology itself is fixed at install.'
+          : 'No server embedder: each member’s MCP bridges to its local Ollama at the pinned model. Change the pin only when every client can use it.'}
+      </p>
 
       {sw ? (
-        <div
-          className={`notice ${sw.state === 'failed' ? 'danger' : sw.state === 'running' ? 'warn' : 'ok'}`}
-          style={{ marginBottom: 18 }}
-        >
+        <div className={`notice ${sw.state === 'failed' ? 'danger' : sw.state === 'running' ? 'warn' : 'ok'}`}>
           <div className="notice-title">
             Model switch: {sw.state} — {sw.from.model}@{sw.from.dim} → {sw.to.model}@{sw.to.dim}
           </div>
@@ -158,86 +165,93 @@ export function SettingsForm({
 
       <CapabilityHealthNotice health={current.capabilityHealth.embeddings} />
 
-      {pinChanged ? (
-        <div className="notice warn" style={{ marginBottom: 18 }}>
-          <div className="notice-title">Re-embed migration</div>
-          Changing the pin to <strong>{model}@{dim}</strong> re-embeds the entire corpus in the
-          background for server-managed embeddings — search stays on the current pin until the new one is fully built, then
-          flips automatically. No restart. With client-managed embeddings the server cannot re-embed: each
-          member must re-pull the model locally and restart their MCP.
-          <div style={{ marginTop: 10 }}>
-            <Checkbox checked={confirmed} onChange={setConfirmed} label="I understand this re-embeds the corpus." />
-          </div>
-        </div>
-      ) : null}
+      {/* Always-on caution (verbatim from the install wizard) — the embedding pin is a
+          deliberate, hard-to-reverse choice. */}
+      <div className="notice with-icon warn">
+        <span className="n-ic"><Icon name="warning" size={16} /></span>
+        <span className="n-body">
+          <span className="notice-title">Choose the embedding pin deliberately</span>
+          Switching the model/dim later forces a full <b>re-embed migration</b> of the whole corpus —
+          pick deliberately. Matryoshka lets you truncate down (2560 → 1024 → 768…) within qwen3.
+        </span>
+      </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* Read-only CURRENT state: the install topology + the active pin (model + dim),
-            as styled badges. The mode is fixed at install; only the model changes here. */}
-        <div>
-          <label style={{ marginBottom: 8 }}>Current embedding</label>
-          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span className={mode === 'server' ? 'state-badge ok' : 'state-badge warn'}>{modeLabel}</span>
-            <span className="chip-category">{current.activeEmbedModel}</span>
-            <span className="badge-readonly">dim {current.activeEmbedDim}</span>
-          </div>
-          <p className="note" style={{ marginTop: 8 }}>
-            {mode === 'server'
-              ? 'The embedder runs on the server. Change the model below; the topology itself is not switchable here.'
-              : 'No server embedder: each member’s MCP bridges to its local Ollama at the pinned model. Change the pin only when every client can use it.'}
-          </p>
-        </div>
-
-        <div>
-          <label>Active model</label>
-          <Select name="activeEmbedModel" ariaLabel="Active embedding model" value={model} onChange={selectModel} options={modelOptions} />
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <div>
-            <label htmlFor="dim">Active dim</label>
-            <input
-              id="dim"
-              name="activeEmbedDim"
-              type="number"
-              min={1}
-              value={dim}
-              onChange={(e) => setDim(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label>Vector name (derived)</label>
-            <input
-              className="mono"
-              type="text"
-              value={current.activeVectorName}
-              disabled
-              readOnly
-            />
-          </div>
-        </div>
-
-        <div className="row" style={{ gap: 14 }}>
-          <button type="button" className="secondary" disabled={testBusy || switchRunning} onClick={() => void testEmbedding()}>
-            {testBusy ? 'Testing…' : 'Test embedding'}
+      {!editing ? (
+        <div className="btn-row">
+          <button type="button" className="btn secondary" disabled={switchRunning} onClick={() => setEditing(true)}>
+            <Icon name="tune" size={15} /> Change embedding pin…
           </button>
-          <button type="submit" disabled={!canSave}>
-            {pending ? 'Saving…' : pinChanged ? 'Switch model' : 'Save pin'}
-          </button>
-          {switchRunning ? (
-            <span className="muted" style={{ fontSize: 13 }}>
-              A switch is already running — wait for it to finish.
-            </span>
-          ) : null}
+          {switchRunning ? <span className="note">A switch is already running — wait for it to finish.</span> : null}
           {state.ok && !state.error ? (
-            <span className="inline-icon-label" style={{ color: 'var(--grass)', fontSize: 13 }}>
+            <span className="inline-icon-label settings-saved">
               <Icon name="check" size={14} />
               Saved &amp; persisted
             </span>
           ) : null}
         </div>
-        <ResultNotice result={testResult} />
-      </div>
+      ) : (
+        <div className="settings-form-stack">
+          {pinChanged ? (
+            <div className="notice warn">
+              <div className="notice-title">Re-embed migration</div>
+              Changing the pin to <strong>{model}@{dim}</strong> re-embeds the entire corpus in the
+              background for server-managed embeddings — search stays on the current pin until the new one is fully built, then
+              flips automatically. No restart. With client-managed embeddings the server cannot re-embed: each
+              member must re-pull the model locally and restart their MCP.
+              <div style={{ marginTop: 10 }}>
+                <Checkbox checked={confirmed} onChange={setConfirmed} label="I understand this re-embeds the corpus." />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="field">
+            <span className="field-label">Active model</span>
+            <Select name="activeEmbedModel" ariaLabel="Active embedding model" value={model} onChange={selectModel} options={modelOptions} />
+          </div>
+
+          <div className="settings-field-grid">
+            <div className="field">
+              <label className="field-label" htmlFor="dim">Active dim</label>
+              <Input
+                id="dim"
+                name="activeEmbedDim"
+                type="number"
+                min={1}
+                value={dim}
+                onChange={(e) => setDim(Number(e.target.value))}
+                className="mono"
+              />
+            </div>
+            <div className="field">
+              <span className="field-label">Vector name (derived)</span>
+              <Input className="mono" type="text" value={current.activeVectorName} disabled readOnly />
+            </div>
+          </div>
+
+          <div className="btn-row">
+            <button type="button" className="btn secondary" disabled={testBusy || switchRunning} onClick={() => void testEmbedding()}>
+              {testBusy ? 'Testing…' : 'Test embedding'}
+            </button>
+            <button type="submit" className="btn primary" disabled={!canSave}>
+              {pending ? 'Saving…' : pinChanged ? 'Switch model' : 'Save pin'}
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                setEditing(false)
+                setModel(current.activeEmbedModel)
+                setDim(current.activeEmbedDim)
+                setConfirmed(false)
+                setTestResult(null)
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+          <ResultNotice result={testResult} />
+        </div>
+      )}
 
       {state.error ? (
         <div className="notice danger" style={{ marginTop: 14 }}>
@@ -297,6 +311,14 @@ export function FactExtractionForm({ current, showHeader = true }: { current: Se
     resetTest()
   }
 
+  // Prototype d-settings: the provider is a segmented choice and the model list follows it.
+  const providers = [...new Set(options.map((option) => option.provider))]
+  const selectProvider = (next: FactExtractionProvider) => {
+    if (next === provider) return
+    const first = options.find((option) => option.provider === next)
+    if (first) selectModel(first.value)
+  }
+
   const testFactExtraction = async () => {
     setTestBusy(true)
     setTestResult(null)
@@ -333,32 +355,35 @@ export function FactExtractionForm({ current, showHeader = true }: { current: Se
 
       <input type="hidden" name="factExtractionTested" value={tested ? 'true' : 'false'} />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="settings-form-stack">
         <CapabilityHealthNotice health={current.capabilityHealth.factExtraction} />
-        <div>
-          <label style={{ marginBottom: 8 }}>Current fact extraction</label>
-          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span className="state-badge ok">{providerLabel(base.provider)}</span>
-            <span className="chip-category">{base.model}</span>
-            <span className={base.apiKeySource === 'missing' ? 'state-badge warn' : 'badge-readonly'}>
-              {base.apiKeyMasked ? `${base.apiKeyMasked} (${base.apiKeySource})` : 'key missing'}
-            </span>
+        {providers.length > 1 ? (
+          <div className="field">
+            <span className="field-label">Provider</span>
+            <SegmentedControl
+              ariaLabel="Fact extraction provider"
+              value={provider}
+              onChange={selectProvider}
+              options={providers.map((value) => ({ value, label: providerLabel(value) }))}
+            />
           </div>
-        </div>
+        ) : null}
 
-        <div>
-          <label>Model</label>
+        <div className="field">
+          <span className="field-label">Model</span>
           <Select
             name="factExtractionModel"
             ariaLabel="Fact extraction model"
             value={model}
             onChange={selectModel}
-            options={options.map((option) => ({ value: option.value, label: `${option.label} — ${providerLabel(option.provider)}` }))}
+            options={options
+              .filter((option) => providers.length < 2 || option.provider === provider)
+              .map((option) => ({ value: option.value, label: option.label }))}
           />
         </div>
 
-        <div>
-          <label htmlFor="fact-api-key">API key for {providerLabel(provider)}</label>
+        <div className="field">
+          <label className="field-label" htmlFor="fact-api-key">API key for {providerLabel(provider)}</label>
           <Input
             id="fact-api-key"
             name="factExtractionApiKey"
@@ -370,21 +395,21 @@ export function FactExtractionForm({ current, showHeader = true }: { current: Se
               resetTest()
             }}
           />
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          <span className={`field-hint${key.hasKey ? '' : ' warn'}`}>
             {key.hasKey
-              ? `Current ${providerLabel(provider)} key source: ${key.source}.`
+              ? `Current ${providerLabel(provider)} key source: ${key.source}. Leave blank to keep it.`
               : `No ${providerLabel(provider)} key is configured yet.`}
-          </div>
+          </span>
         </div>
 
-        <div className="row" style={{ gap: 14 }}>
-          <button type="button" className="secondary" disabled={testBusy} onClick={() => void testFactExtraction()}>
+        <div className="btn-row">
+          <button type="button" className="btn secondary" disabled={testBusy} onClick={() => void testFactExtraction()}>
             {testBusy ? 'Testing…' : 'Test fact extraction'}
           </button>
-          <button type="submit" disabled={pending || !dirty}>
+          <button type="submit" className="btn primary" disabled={pending || !dirty}>
             {pending ? 'Saving…' : 'Save fact extraction'}
           </button>
-          {tested ? <span className="muted" style={{ fontSize: 13 }}>Tested for this model/key.</span> : null}
+          {tested ? <span className="note">Tested for this model and key.</span> : null}
         </div>
       </div>
 

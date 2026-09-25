@@ -77,7 +77,7 @@ function activityIdentity(event: MemoryGraphActivity): string {
   return `${event.memoryId}:${event.kind}:${event.occurredAt}`
 }
 
-export function MemoryGraphShell({ surface }: { surface: MemorySurface }) {
+export function MemoryGraphShell({ surface, focusMemoryId = null }: { surface: MemorySurface; focusMemoryId?: string | null }) {
   const [rendererFallback, setRendererFallback] = useState(false)
   const [filters, setFilters] = useState<MemoryGraphFilters>(EMPTY_FILTERS)
   const [facets, setFacets] = useState<MemoryGraphFacets>(EMPTY_FACETS)
@@ -383,6 +383,16 @@ export function MemoryGraphShell({ surface }: { surface: MemorySurface }) {
     setAutoOverview(false)
   }, [autoOverview, selectedId])
 
+  // "Open in graph" from a memory record: select that memory once its node has loaded.
+  const appliedFocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focusMemoryId || appliedFocus.current === focusMemoryId) return
+    const node = nodes.find((candidate) => candidate.kind === 'memory' && candidate.memoryId === focusMemoryId)
+    if (!node) return
+    appliedFocus.current = focusMemoryId
+    selectNode(node)
+  }, [focusMemoryId, nodes, selectNode])
+
   const updateFilterRailWidth = useCallback((nextWidth: number) => {
     const clamped = clampFilterRailWidth(nextWidth)
     setFilterRailWidth(clamped)
@@ -505,7 +515,13 @@ export function MemoryGraphShell({ surface }: { surface: MemorySurface }) {
 
       <aside className="memory-graph-inspector" aria-label="Memory graph inspector">
         <section className="memory-graph-inspector-pane memory-graph-activity-pane" aria-label="Live memory activity">
-          <div className="memory-graph-inspector-head"><strong>Live activity</strong></div>
+          <div className="memory-graph-inspector-head">
+            <strong>Live activity</strong>
+            {/* Prototype d-graph: the pane states whether the stream is flowing. */}
+            {activityStale
+              ? <span className="badge warn up">stale</span>
+              : <span className="badge accent up inline-icon-label"><i className="live-dot" aria-hidden="true" />streaming</span>}
+          </div>
           <div className="memory-graph-activity-legend" aria-label="Activity colors: read cyan, created green, updated amber">
             <span className="read">Read</span><span className="created">Created</span><span className="updated">Updated</span>
           </div>
