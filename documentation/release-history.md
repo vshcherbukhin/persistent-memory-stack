@@ -11,6 +11,8 @@ nav_hidden: true
   their idle countdown, the live output of a selected session, and when a session
   leaves the list.
 - Describes the corpus shape panel beside it.
+- Documents the Memories page's **New memory** dialog, including every field the
+  Shape gate requires, and the **Open in graph** jump from a record to its node.
 - Includes version-specific
   [installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.0/README.md)
   and the `npm run update-persistent-memory -- --release 1.3.0` update command.

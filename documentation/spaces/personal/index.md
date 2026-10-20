@@ -71,6 +71,6 @@ Do not enter secrets into search boxes or documentation. Fields intended for cre
 | Problem | What to do |
 | --- | --- |
 | A page is missing from the sidebar | Some control pages require local administrator access. Sign in with the account configured for this local dashboard. |
-| Counts look stale | Wait for the page's automatic refresh, then reopen the page. Services and Workers do not provide manual Refresh buttons. |
+| Counts look stale | Wait for the page's automatic refresh, then reopen the page. Overview, Services, and Workers do not provide manual Refresh buttons. |
 | Shared Space cannot be used | Shared Space is in development. Return to **Personal memories** in the space switcher. |
 | The whole dashboard is unreachable | Check the local stack outside the dashboard before changing any data or configuration. |

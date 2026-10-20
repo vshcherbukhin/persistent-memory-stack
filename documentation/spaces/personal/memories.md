@@ -19,11 +19,25 @@ nav_order: 40
 
 ## Purpose
 
-Memories is the working area for records stored in your local Personal Space. The list refreshes automatically and supports live text search, project filtering, dynamic category-badge filtering, and a confidence range, record inspection, editing, and deletion. It loads 50 records at a time and continues as you scroll, rather than rendering the full history at once. **Memory Graph** explores the same authorized corpus as a live connection map, while **Memory Tools** contains bulk and file workflows.
+Memories is the working area for records stored in your local Personal Space. The list refreshes automatically and supports live text search, project filtering, dynamic category-badge filtering, and a confidence range, record creation, inspection, editing, and deletion. It loads 50 records at a time and continues as you scroll, rather than rendering the full history at once. **Memory Graph** explores the same authorized corpus as a live connection map, while **Memory Tools** contains bulk and file workflows.
 
 ## Read the page
 
 The search field fills the available row width while the project, badge, confidence, and Reset controls remain compact on the right. The confidence menu opens upward when needed; choose the minimum and maximum in 0.1 steps, then choose **Apply**. **Reset** clears the current query and filters. Each row shows content, project, category, Created, Updated, author, confidence or embedding badges, and actions. Created is when the record was added; Updated advances only when the memory record itself changes, not when embedding, graph sync, safety bookkeeping, or access reinforcement runs.
+
+### New memory
+
+**New memory** is the page's primary action. It sits in the top bar while the list tab is selected and is hidden on Memory Graph and Memory Tools. The dialog writes through the same Shape gate your agents use, then embeds the record and adds it to the graph.
+
+| Field | What it needs |
+| --- | --- |
+| Content | At least 40 characters: what happened, why it matters, and what to do next time. |
+| Project | The repo or product name, or `general` when there is no project context. It starts from the first project already in the list. |
+| Category | `gotcha`, `fix`, `user-correction`, `tool-gap`, `migration-pattern`, `data-constraint`, `permission`, or `flag-state`. `prd` is not offered here because it requires Confluence provenance. |
+| Source | What triggered the note: `user-correction`, `gotcha-discovered`, `postmortem`, `test-failure`, or `heal-cycle`. |
+| Entities | At least one lowercase `type_name` entity, separated by commas or spaces. Each one must also appear word-for-word in the content. |
+
+**Save memory** stays disabled until every rule above passes, so the gate's format is visible while you write instead of arriving as a rejection.
 
 ### Memory Graph
 
@@ -52,6 +66,7 @@ While the tab is visible, each completed create, update, or read appears briefly
 
 Open a record to read its full text and metadata, including category, project, confidence, tier, source, shape, embedding state, and entities.
 The focused connection panel shows up to eight of that record's entity links.
+**Open in graph** leaves the dialog for that memory's own node on Memory Graph, and is offered whenever the graph tab is available.
 
 ![Edit memory modal with a demonstration record](../../assets/spaces/personal/memory-edit-modal.png)
 
@@ -63,15 +78,17 @@ Memory Tools provides export, verify-first import, graph rebuild, embedding back
 
 ## Actions
 
-1. Type in search or choose a project; results update without a separate Search button.
-2. Open a row to inspect the full record before changing it.
-3. Open Memory Graph to rotate the full bubble, zoom for labels, filter by recent or searched facets, or select a node for its flat connection map.
-4. Select edit, make the smallest needed change, then choose **Save & re-embed**.
-5. Select delete to review its live graph impact, then confirm the removal. A graph-primary record clearly shows its cascade impact.
-6. In Memory Tools, choose a secure `.pm` export when the file needs passphrase protection. Standard JSON is readable text.
-7. For import, choose a file and run **Load & verify** first. Review the detected format, record count, target project, and errors before **Import & re-embed** becomes available.
-8. Use graph rebuild to queue replay of the selected memory slice through the graph service.
-9. Choose All projects or one project, then choose **Review bulk delete**. The preview covers every selected memory and recorded graph episode; confirm with the short-lived token only after reviewing the impact.
+1. Choose **New memory** in the top bar to write a record by hand, fill content, project, category, source, and entities, then choose **Save memory**.
+2. Type in search or choose a project; results update without a separate Search button.
+3. Open a row to inspect the full record before changing it.
+4. Choose **Open in graph** in an open record to jump from the list to that memory's node on Memory Graph.
+5. Open Memory Graph to rotate the full bubble, zoom for labels, filter by recent or searched facets, or select a node for its flat connection map.
+6. Select edit, make the smallest needed change, then choose **Save & re-embed**.
+7. Select delete to review its live graph impact, then confirm the removal. A graph-primary record clearly shows its cascade impact.
+8. In Memory Tools, choose a secure `.pm` export when the file needs passphrase protection. Standard JSON is readable text.
+9. For import, choose a file and run **Load & verify** first. Review the detected format, record count, target project, and errors before **Import & re-embed** becomes available.
+10. Use graph rebuild to queue replay of the selected memory slice through the graph service.
+11. Choose All projects or one project, then choose **Review bulk delete**. The preview covers every selected memory and recorded graph episode; confirm with the short-lived token only after reviewing the impact.
 
 ## States
 
@@ -104,6 +121,8 @@ Keep secure-export passphrases outside the export file. A standard JSON export c
 | Problem | What to do |
 | --- | --- |
 | Search returns nothing | Clear the project, badge, and confidence filters, then shorten the query or confirm the record is in this space. |
+| **New memory** is not in the top bar | The button belongs to the list tab. Leave Memory Graph or Memory Tools and it returns. |
+| **Save memory** stays disabled | The content needs 40 characters, at least one `type_name` entity, and every named entity spelled word-for-word in the content. |
 | Import button stays disabled | Run **Load & verify** successfully first. For `.pm` files, enter the correct passphrase and verify again. |
 | Imported memories are pending | Wait for background embedding, run backfill when available, and inspect Workers for the embed-backfill schedule. |
 | A project edit says graph history is immutable | Keep the original until an equivalent memory is embedded and verified in the target project. Then review the original memory's graph cascade preview and confirm deletion. |

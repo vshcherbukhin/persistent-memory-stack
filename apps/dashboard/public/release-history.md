@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | dashboard / dashboard layer | 1.3.0 | Live MCP activity on Overview, memory creation from the Memories toolbar, impact-stating deletion dialogs and the completed Neural Obsidian pass. |
 | onboarding | 1.3.0 | Installation wizard rebuilt to the design, with per-field errors, per-step fault states, install step timings and a completion summary. |
-| docs | 1.3.0 | Documents the Overview live MCP activity panel. |
+| docs | 1.3.0 | Documents the Overview live MCP activity panel, plus the Memories page's New memory dialog and its Open in graph jump. |
 | api | 1.0.2 | Existing personal memory and provider health APIs retained. |
 | update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
 | shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
