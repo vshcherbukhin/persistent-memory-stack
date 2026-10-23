@@ -4,6 +4,7 @@ import { api, configuredMemorySurfaces } from '@/lib/api'
 import { Nav } from '@/components/Nav'
 import { AppHeader } from '@/components/AppHeader'
 import { ToastProvider } from '@/components/ui/Toast'
+import { MemoryToolsStateProvider } from '@/components/MemoryToolsState'
 import type { Profile } from '@/lib/types'
 
 /**
@@ -50,6 +51,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <ToastProvider>
+      <MemoryToolsStateProvider key={`${who.userId}:${who.teamId ?? ''}`}>
       <div className="shell">
         <Nav
           adminLevel={who.adminLevel}
@@ -73,6 +75,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <main className="content">{children}</main>
         </div>
       </div>
+      </MemoryToolsStateProvider>
     </ToastProvider>
   )
 }

@@ -1,6 +1,7 @@
 'use server'
 
-import { api, ApiError, normalizeMemorySurface } from '@/lib/api'
+import { api, ApiError, UnauthorizedError, ForbiddenError, normalizeMemorySurface } from '@/lib/api'
+import { memoryImportTransportError } from '@/lib/memoryImportError'
 import { requireSession, requireControlPlane, isSuperuser } from '@/lib/session'
 import { canAccessControlPlane } from '@/lib/authz'
 import type { MemoryUpdateActionResult } from '@/lib/memoryUpdateResult'
@@ -186,12 +187,12 @@ export async function previewBulkDeleteAction(project?: string, surfaceInput?: M
 }
 
 /** Consume a single-use bulk-delete preview. The API rechecks every selected row and graph episode. */
-export async function bulkDeleteAction(input: { previewToken: string; surface?: MemorySurface }): Promise<number> {
+export async function bulkDeleteAction(input: { previewToken: string; surface?: MemorySurface }): Promise<{ ok: true; deleted: number } | { ok: false; error: string }> {
   const surface = normalizeMemorySurface(input.surface)
   try {
-    return (await api.dpConfirmBulkDeleteMemories(input.previewToken, surface)).deleted
+    return { ok: true, deleted: (await api.dpConfirmBulkDeleteMemories(input.previewToken, surface)).deleted }
   } catch (err) {
-    if (err instanceof ApiError) throw new Error(err.message)
+    if (err instanceof ApiError) return { ok: false, error: err.message }
     throw err
   }
 }
@@ -257,16 +258,19 @@ export async function exportMemoriesAction(input: { teamId?: string; project?: s
 }
 
 /** Import (admin+ only). Accepts the export envelope's `memories` array. */
-export async function importMemoriesAction(memories: unknown[], teamId?: string, project?: string, surfaceInput?: MemorySurface): Promise<MemoryImportResult> {
-  const surface = normalizeMemorySurface(surfaceInput)
-  const { admin } = await role(surface)
-  if (!admin) throw new Error('Import requires admin.')
+export async function importMemoriesAction(memories: unknown[], teamId?: string, project?: string, surfaceInput?: MemorySurface): Promise<{ ok: true; result: MemoryImportResult } | { ok: false; error: string; rejected?: boolean }> {
   try {
+    const surface = normalizeMemorySurface(surfaceInput)
+    const { admin } = await role(surface)
+    if (!admin) return { ok: false, error: 'Import requires admin.', rejected: true }
     const rows = surface === 'personal' ? stripTeamFieldsFromMemoryRows(memories) : memories
-    return await api.importMemories(rows, surface === 'personal' ? undefined : teamId, project, surface)
+    return { ok: true, result: await api.importMemories(rows, surface === 'personal' ? undefined : teamId, project, surface) }
   } catch (err) {
-    if (err instanceof ApiError) throw new Error(err.message)
-    throw err
+    // Expected failures are data: thrown Server Action errors are redacted in production.
+    if (err instanceof ApiError) return { ok: false, error: `HTTP ${err.status} · ${err.code}: ${err.message}${err.details ? ` (${err.details})` : ''}`, rejected: err.status >= 400 && err.status < 500 && err.status !== 408 }
+    if (err instanceof UnauthorizedError) return { ok: false, error: 'Your session expired. Sign in again before resuming the import.', rejected: true }
+    if (err instanceof ForbiddenError) return { ok: false, error: 'Your role cannot import memories into this space.', rejected: true }
+    return { ok: false, error: memoryImportTransportError(err) }
   }
 }
 

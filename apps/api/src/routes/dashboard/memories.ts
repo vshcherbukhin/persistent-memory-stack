@@ -887,6 +887,8 @@ export async function dashboardMemoryRoutes(app: FastifyInstance): Promise<void>
   })
   const ImportBody = z.object({
     memories: z.array(ImportRow).min(1).max(5000),
+    // Dashboard acknowledges individual rows and shows one aggregate completion toast.
+    notify: z.boolean().default(true),
     teamId: z.string().uuid().optional(),
     project: z.string().min(1).optional(),
   }).strict()
@@ -1061,7 +1063,7 @@ export async function dashboardMemoryRoutes(app: FastifyInstance): Promise<void>
           req.log.warn({ err, id: rec.id }, 'memory import row failed')
         }
       }
-      if (imported > 0) {
+      if (imported > 0 && req.body.notify) {
         const targetTeam = req.body.teamId ?? id.teamId ?? undefined
         if (targetTeam) {
           void sendBrowserPushNotification({

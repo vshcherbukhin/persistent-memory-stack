@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { MemoryToolsScope, useMemoryToolState } from '@/components/MemoryToolsState'
+import { emptyMemoryImportResult, runMemoryImport } from '@/lib/memoryImportRunner'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { FileInput } from '@/components/ui/FileInput'
@@ -29,6 +31,7 @@ export interface DashboardToolsProps {
   pending: PendingEmbeddings | null
   onExport: (teamId?: string, project?: string) => Promise<MemoryExportEnvelope>
   onImport: (memories: unknown[], teamId?: string, project?: string) => Promise<MemoryImportResult>
+  onImportFinished?: (result: MemoryImportResult) => void
   onGraphRebuild: (input: { teamId?: string; project?: string; createdById?: string }) => Promise<MemoryGraphRebuildResult>
   onRequestBulkDelete: (project: string | undefined) => void
   onBackfill: () => void
@@ -43,6 +46,7 @@ export interface DashboardToolsProps {
 export function DashboardTools(props: DashboardToolsProps) {
   // Prototype d-tools: the three safe tools side by side, the destructive one on its own row.
   return (
+    <MemoryToolsScope scope={`${props.surface}:${props.localTeamId ?? ''}`}>
     <div className="memory-tools-stack">
       {props.canManageAdminTools ? <>
         <section className="panel tool-card">
@@ -75,16 +79,17 @@ export function DashboardTools(props: DashboardToolsProps) {
         <DeleteTab {...props} />
       </section>
     </div>
+    </MemoryToolsScope>
   )
 }
 
 // ── Graph rebuild ───────────────────────────────────────────────────────────────
 function GraphRebuildTab({ surface, teams, users, projectScopes, localTeamId, isSuper, busy, onGraphRebuild }: DashboardToolsProps) {
-  const [team, setTeam] = useState('')
-  const [project, setProject] = useState('')
-  const [createdById, setCreatedById] = useState('')
-  const [running, setRunning] = useState(false)
-  const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [team, setTeam] = useMemoryToolState('graph.team', '')
+  const [project, setProject] = useMemoryToolState('graph.project', '')
+  const [createdById, setCreatedById] = useMemoryToolState('graph.author', '')
+  const [running, setRunning] = useMemoryToolState('graph.running', false)
+  const [status, setStatus] = useMemoryToolState<{ kind: 'ok' | 'error'; text: string } | null>('graph.status', null)
   const isPersonalSurface = surface === 'personal'
   const effectiveTeam = isPersonalSurface ? undefined : localTeamId ?? (isSuper ? team || undefined : undefined)
   const projectOptions = useMemo(() => projectSelectOptions(projectScopes, effectiveTeam, project), [effectiveTeam, project, projectScopes])
@@ -149,12 +154,12 @@ function GraphRebuildTab({ surface, teams, users, projectScopes, localTeamId, is
 
 // ── Export ───────────────────────────────────────────────────────────────────────
 function ExportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, onExport }: DashboardToolsProps) {
-  const [team, setTeam] = useState('') // '' = all teams (super only)
-  const [project, setProject] = useState('')
-  const [exportType, setExportType] = useState<'secure' | 'standard'>('secure')
-  const [passphrase, setPassphrase] = useState('')
-  const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [team, setTeam] = useMemoryToolState('export.team', '') // '' = all teams (super only)
+  const [project, setProject] = useMemoryToolState('export.project', '')
+  const [exportType, setExportType] = useMemoryToolState<'secure' | 'standard'>('export.type', 'secure')
+  const [passphrase, setPassphrase] = useMemoryToolState('export.passphrase', '')
+  const [status, setStatus] = useMemoryToolState<{ kind: 'ok' | 'error'; text: string } | null>('export.status', null)
+  const [saving, setSaving] = useMemoryToolState('export.saving', false)
   const isPersonalSurface = surface === 'personal'
   const effectiveTeam = isPersonalSurface ? undefined : localTeamId ?? (team || undefined)
   const projectOptions = useMemo(() => projectSelectOptions(projectScopes, effectiveTeam, project), [effectiveTeam, project, projectScopes])
@@ -255,7 +260,7 @@ function ExportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
 }
 
 // ── Import ───────────────────────────────────────────────────────────────────────
-type ImportPhase = 'idle' | 'verifying' | 'ready' | 'importing' | 'done' | 'error'
+type ImportPhase = 'idle' | 'verifying' | 'ready' | 'importing' | 'done' | 'error' | 'interrupted'
 type LocalImportDetail = { stage: string; message: string }
 type ImportDraft = {
   fileName: string
@@ -266,18 +271,19 @@ type ImportDraft = {
   exportedAt?: string
 }
 
-function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, pending, canRunBackfill, onImport, onBackfill }: DashboardToolsProps) {
-  const [file, setFile] = useState<File | null>(null)
-  const [team, setTeam] = useState('') // '' = keep each row's team from the file
-  const [project, setProject] = useState('')
-  const [passphrase, setPassphrase] = useState('')
-  const [status, setStatus] = useState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>(null)
-  const [phase, setPhase] = useState<ImportPhase>('idle')
-  const [draft, setDraft] = useState<ImportDraft | null>(null)
-  const [result, setResult] = useState<MemoryImportResult | null>(null)
-  const [localDetails, setLocalDetails] = useState<LocalImportDetail[]>([])
-  const [loading, setLoading] = useState(false)
-  const [importing, setImporting] = useState(false)
+function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, pending, canRunBackfill, onImport, onImportFinished, onBackfill }: DashboardToolsProps) {
+  const [file, setFile] = useMemoryToolState<File | null>('import.file', null)
+  const [team, setTeam] = useMemoryToolState('import.team', '') // '' = keep each row's team from the file
+  const [project, setProject] = useMemoryToolState('import.project', '')
+  const [passphrase, setPassphrase] = useMemoryToolState('import.passphrase', '')
+  const [status, setStatus] = useMemoryToolState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>('import.status', null)
+  const [phase, setPhase] = useMemoryToolState<ImportPhase>('import.phase', 'idle')
+  const [draft, setDraft] = useMemoryToolState<ImportDraft | null>('import.draft', null)
+  const [result, setResult] = useMemoryToolState<MemoryImportResult | null>('import.result', null)
+  const [completed, setCompleted] = useMemoryToolState('import.completed', 0)
+  const [localDetails, setLocalDetails] = useMemoryToolState<LocalImportDetail[]>('import.details', [])
+  const [loading, setLoading] = useMemoryToolState('import.loading', false)
+  const [importing, setImporting] = useMemoryToolState('import.running', false)
   const isPersonalSurface = surface === 'personal'
   const effectiveTeam = isPersonalSurface ? undefined : localTeamId ?? (team || undefined)
   const projectOptions = useMemo(() => projectSelectOptions(projectScopes, effectiveTeam, project, 'project from file'), [effectiveTeam, project, projectScopes])
@@ -294,6 +300,7 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
     setResult(null)
     setLocalDetails([])
     setPhase('idle')
+    setCompleted(0)
   }
   const applyScope = (options?: MemoryExportOptions | null, memories?: unknown[]) => {
     const optionTeam = options?.teamId ?? undefined
@@ -319,6 +326,7 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
     setLocalDetails([])
     setDraft(null)
     setPhase('verifying')
+    setCompleted(0)
     try {
       const parsed = JSON.parse(await file.text()) as unknown
       const secure = isSecureExport(parsed)
@@ -358,23 +366,35 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
     }
   }
   const doImport = async () => {
-    if (!draft) return
+    if (!draft || importing) return
     setImporting(true)
     setStatus({ kind: 'ok', text: 'Importing memories and preparing embeddings…' })
     setLocalDetails([])
-    setResult(null)
     setPhase('importing')
     try {
       const targetTeam = isPersonalSurface ? undefined : localTeamId ?? (team || (isSuper && draft.options?.teamId ? draft.options.teamId : undefined))
       const targetProject = project || draft.options?.project || inferSingleProject(draft.memories) || undefined
-      const nextResult = await onImport(draft.memories, targetTeam, targetProject)
-      setResult(nextResult)
-      const notice = memoryImportNotice(nextResult)
+      const outcome = await runMemoryImport(draft.memories, (rows) => onImport(rows, targetTeam, targetProject), (progress) => {
+        setCompleted(progress.completed)
+        setResult(progress.result)
+        setStatus({ kind: 'ok', text: `Processed ${progress.completed.toLocaleString()} of ${draft.memories.length.toLocaleString()} memories (${progress.result.imported.toLocaleString()} imported, ${progress.result.errors.toLocaleString()} errors).` })
+      }, { completed, result: result ?? emptyMemoryImportResult() })
+      setResult(outcome.result)
+      if (outcome.interrupted) {
+        setPhase(outcome.interrupted.rejected ? 'error' : 'interrupted')
+        setStatus(outcome.interrupted.rejected
+          ? { kind: 'error', text: `Import request rejected at row ${outcome.interrupted.index}. ${outcome.completed} of ${draft.memories.length} rows have confirmed results. Correct the request error and verify the file again.` }
+          : { kind: 'warn', text: `Import interrupted at row ${outcome.interrupted.index}. ${outcome.completed} of ${draft.memories.length} rows have confirmed results. The current row may still be processing on the server.` })
+        setLocalDetails([{ stage: `Row ${outcome.interrupted.index} · Import request`, message: outcome.interrupted.message }])
+        return
+      }
+      const notice = memoryImportNotice(outcome.result)
       setStatus({ kind: notice.kind === 'success' ? 'ok' : notice.kind, text: notice.text })
       setPhase(notice.kind === 'error' ? 'error' : 'done')
+      onImportFinished?.(outcome.result)
     } catch (err) {
-      setPhase('error')
-      setStatus({ kind: 'error', text: 'Import failed before the server returned a batch result.' })
+      setPhase('interrupted')
+      setStatus({ kind: 'warn', text: 'The import response was interrupted. Confirmed results are retained; the current row may still be processing on the server.' })
       setLocalDetails([{ stage: 'Import request', message: err instanceof Error ? err.message : String(err) }])
     } finally {
       setImporting(false)
@@ -390,6 +410,8 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
         <span>File</span>
         <FileInput
           variant="dropzone"
+          selectedFileName={file?.name ?? null}
+          disabled={loading || importing}
           accept=".json,.pm,application/json,application/octet-stream"
           dropLabel={<>Drop a <code>.pm</code> or <code>.json</code> export here</>}
           onFile={(picked) => void onPickFile(picked)}
@@ -400,11 +422,16 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
           <span>Target team</span>
           <Select
             ariaLabel="Import target team"
+            disabled={loading || importing}
             value={team}
             onChange={(v) => {
               setTeam(v)
               setProject('')
               setResult(null)
+              setCompleted(0)
+              setPhase(draft ? 'ready' : 'idle')
+              setLocalDetails([])
+              setStatus(null)
             }}
             options={[{ value: '', label: 'team from file' }, ...teams.map((t) => ({ value: t.id, label: `→ ${t.name}` }))]}
           />
@@ -412,12 +439,12 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
       ) : null}
       <label className="tool-field">
         <span>Target project</span>
-        <Select ariaLabel="Import target project" value={project} onChange={(v) => { setProject(v); setResult(null) }} options={projectOptions} />
+        <Select ariaLabel="Import target project" value={project} disabled={loading || importing} onChange={(v) => { setProject(v); setResult(null); setCompleted(0); setPhase(draft ? 'ready' : 'idle'); setLocalDetails([]); setStatus(null) }} options={projectOptions} />
       </label>
       {file?.name.toLowerCase().endsWith('.pm') ? (
         <label className="tool-field">
           <span>Passphrase</span>
-          <Input type="password" value={passphrase} onChange={(e) => { setPassphrase(e.target.value); clearLoadedState(); setStatus(file ? { kind: 'ok', text: 'Passphrase changed. Load and verify the file again.' } : null) }} />
+          <Input type="password" value={passphrase} disabled={loading || importing} onChange={(e) => { setPassphrase(e.target.value); clearLoadedState(); setStatus(file ? { kind: 'ok', text: 'Passphrase changed. Load and verify the file again.' } : null) }} />
         </label>
       ) : null}
       <button type="button" className="btn secondary block tool-card-action" disabled={!file || busy || loading || importing} onClick={() => void doLoadAndVerify()}>
@@ -446,10 +473,10 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
           <div className="card-head">
             <div>
               <h3 className="card-title"><Icon name="upload" size={16} /> Review import</h3>
-              <div className="card-sub">{phase === 'done' ? 'Import finished. Embeddings continue in the background.' : 'Nothing is written until you confirm.'}</div>
+              <div className="card-sub">{phase === 'done' ? 'Import finished. Embeddings continue in the background.' : phase === 'importing' ? 'Import is running. You can switch dashboard pages while it continues.' : phase === 'interrupted' ? 'Confirmed results are retained. Check the current row before resuming.' : phase === 'error' ? 'Review the errors before retrying.' : 'Nothing is written until you confirm.'}</div>
             </div>
-            <span className={`badge up ${phase === 'done' ? 'ok' : phase === 'error' ? 'bad' : 'accent'}`}>
-              {phase === 'done' ? 'imported' : phase === 'importing' ? 'importing' : phase === 'error' ? 'failed' : 'staged'}
+            <span className={`badge up ${phase === 'done' ? 'ok' : phase === 'error' ? 'bad' : phase === 'interrupted' ? 'warn' : 'accent'}`}>
+              {phase === 'done' ? 'imported' : phase === 'importing' ? 'importing' : phase === 'error' ? 'failed' : phase === 'interrupted' ? 'interrupted' : 'staged'}
             </span>
           </div>
           <div className="import-review-grid">
@@ -475,8 +502,8 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
             </span>
           </div>
           <div className="btn-row">
-            <button type="button" className="btn primary" disabled={busy || loading || importing || phase === 'done'} onClick={() => void doImport()}>
-              {importing ? 'Importing…' : 'Import & re-embed'}
+            <button type="button" className="btn primary" disabled={busy || loading || importing || completed === draft.memories.length} onClick={() => void doImport()}>
+              {importing ? 'Importing…' : phase === 'interrupted' ? 'Resume import' : 'Import & re-embed'}
             </button>
             {canRunBackfill ? (
               <Tooltip label={pending && pending.embeddingMode !== 'server' ? 'Client-managed embeddings run on the client side' : 'Re-embed pending rows now'}>
@@ -510,8 +537,8 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
 
 function ImportProgress({ phase, draft, result }: { phase: ImportPhase; draft: ImportDraft | null; result: MemoryImportResult | null }) {
   const verifiedState = phase === 'verifying' ? 'active' : draft || phase === 'importing' || phase === 'done' ? 'done' : phase === 'error' && !draft ? 'error' : 'idle'
-  const importState = phase === 'importing' ? 'active' : result && result.imported > 0 ? 'done' : phase === 'error' && draft ? 'error' : 'idle'
-  const embedState = phase === 'importing' ? 'active' : result ? (result.pending > 0 ? 'queued' : 'done') : 'idle'
+  const importState = phase === 'importing' ? 'active' : phase === 'interrupted' ? 'queued' : phase === 'error' && draft ? 'error' : result && result.imported > 0 ? 'done' : 'idle'
+  const embedState = phase === 'importing' ? 'active' : phase === 'interrupted' ? 'queued' : result ? (result.pending > 0 ? 'queued' : 'done') : 'idle'
   return (
     <div className="import-steps steplist" aria-label="Import progress">
       <ImportStep state={phase === 'idle' && !draft ? 'current' : 'done'} title="Select file" detail={draft?.fileName ?? 'Choose a .json or .pm export'} />
@@ -760,7 +787,7 @@ function inferSingleProject(memories: unknown[] | undefined): string | null {
 
 // ── Bulk delete ────────────────────────────────────────────────────────────────────
 function DeleteTab({ surface, projectScopes, localTeamId, teamName, canManageAdminTools, busy, onRequestBulkDelete }: DashboardToolsProps) {
-  const [project, setProject] = useState('')
+  const [project, setProject] = useMemoryToolState('delete.project', '')
   const isPersonalSurface = surface === 'personal'
   const effectiveTeam = localTeamId
   // Personal Memories are self-owned: no team selector or hidden team gate.

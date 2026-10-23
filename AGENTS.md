@@ -1,4 +1,4 @@
-# AGENTS.md - persistent-memory
+# AGENTS.md - persistent-memory-stack
 
 Codex reads this root file automatically. The project-level Codex rules live in
 `.codex/AGENTS.md`; keep this adapter short and keep both Codex and Claude rule
@@ -6,7 +6,8 @@ files aligned when the operating protocol changes.
 
 ## Required First Step
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory")`.
+- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
+  Use this same canonical project for all memory writes; the folder/repository name is the memory namespace.
   If the persistent-memory MCP is unavailable, say so and continue from repo evidence.
 - The detailed persistent-memory protocol is installed by the wizard in the global
   Codex rule, `~/.codex/rules/persistent-memory.md`, unless the wizard was run with

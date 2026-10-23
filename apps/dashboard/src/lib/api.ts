@@ -1,6 +1,7 @@
 import 'server-only'
 import { cookies } from 'next/headers'
 import { SESSION_COOKIE } from './session'
+import { readApiErrorPayload } from './apiErrorPayload'
 import type {
   WhoAmI,
   Team,
@@ -128,10 +129,8 @@ async function callAt<T>(base: string, path: string, init?: RequestInit, tokenOv
     let message = `${res.status}`
     let details: string | undefined
     try {
-      const body = (await res.json()) as { error?: string; message?: string; reason?: string; details?: string }
-      code = body.error ?? code
-      message = body.message ?? body.reason ?? message
-      details = body.details
+      const body = await res.json()
+      ;({ code, message, details } = readApiErrorPayload(body, res.status))
     } catch {
       /* non-JSON error body */
     }
@@ -296,7 +295,9 @@ export const api = {
   importMemories: (memories: unknown[], teamId?: string, project?: string, surface: MemorySurface = 'personal') =>
     callMemory<MemoryImportResult>(surface, '/dashboard/memories/import', {
       method: 'POST',
-      body: JSON.stringify({ memories, ...(teamId ? { teamId } : {}), ...(project ? { project } : {}) }),
+      // Return a useful timeout result before either Node proxy's headers timeout.
+      signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ memories, notify: false, ...(teamId ? { teamId } : {}), ...(project ? { project } : {}) }),
     }),
 
   // ── Memory Graph (metadata-safe, tenant-derived read model) ───────────────

@@ -19,6 +19,8 @@ import { MemoryTimeCell } from '@/components/ui/MemoryTimeCell'
 import { MemoryLattice } from '@/components/ui/MemoryLattice'
 import { useToast } from '@/components/ui/Toast'
 import { memoryImportNotice } from '@/lib/memoryImportResult'
+import { MemoryImportRequestError } from '@/lib/memoryImportRunner'
+import { useMemoryToolState } from '@/components/MemoryToolsState'
 import { handleMemoryUpdateResult } from '@/lib/memoryUpdateResult'
 import { DashboardTools } from './DashboardTools'
 import { MemoryGraphShell } from './graph/MemoryGraphShell'
@@ -121,10 +123,11 @@ export function MemoriesClient({
   const [creating, setCreating] = useState(false)
   const [viewing, setViewing] = useState<Memory | null>(null)
   const [deleting, setDeleting] = useState<{ memory: Memory; preview: GraphDeletePreview } | null>(null)
-  // The scope travels with the preview: a bulk delete confirmation that cannot
-  // name what it is about to delete is not a confirmation.
-  const [bulkDeleting, setBulkDeleting] = useState<{ preview: BulkGraphDeletePreview; scope: string } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useMemoryToolState<{ preview: BulkGraphDeletePreview; scope: string } | null>(`${surface}:${who.userId}:${who.teamId ?? ''}:delete.preview`, null)
+  const toolScope = `${surface}:${who.teamId ?? ''}`
+  const [operationBusy, setBusy] = useMemoryToolState('operation.busy', false, toolScope)
+  const [importRunning] = useMemoryToolState('import.running', false, toolScope)
+  const busy = operationBusy || importRunning
   const [pending, setPending] = useState<PendingEmbeddings | null>(initialPending)
   // Filter state drives three things: the reset affordance, the result line, and
   // which blank state the table shows when a query returns nothing.
@@ -248,7 +251,10 @@ export function MemoriesClient({
   }
 
   const wrap = async (fn: () => Promise<void>) => {
-    setBusy(true)
+    if (importRunning) return
+    let acquired = false
+    setBusy((current) => { acquired = !current; return true })
+    if (!acquired) return
     try {
       await fn()
     } catch (e) {
@@ -687,13 +693,17 @@ export function MemoriesClient({
           busy={busy}
           pending={pending}
           onExport={(teamId, project) => exportMemoriesAction({ teamId, project, surface })}
-          onImport={(memories, teamId, project) => wrapResult(async () => {
-            const r = await importMemoriesAction(memories, teamId, project, surface)
-            const notice = memoryImportNotice(r)
+          onImport={async (memories, teamId, project) => {
+            const response = await importMemoriesAction(memories, teamId, project, surface)
+            if (!response.ok) throw new MemoryImportRequestError(response.error, response.rejected ?? false)
+            return response.result
+          }}
+          onImportFinished={(result) => {
+            const notice = memoryImportNotice(result)
             toast[notice.kind](notice.text)
-            await refresh()
-            return r
-          })}
+            void refresh()
+            void pendingEmbeddingsAction(surface).then(setPending).catch(() => {})
+          }}
           onGraphRebuild={(input) => wrapResult(async () => {
             const r = await rebuildMemoryGraphAction({ ...input, surface })
             toast.success(`Graph rebuild queued for ${r.matched.toLocaleString()} memor${r.matched === 1 ? 'y' : 'ies'}.`)
@@ -796,8 +806,13 @@ export function MemoriesClient({
           busy={busy}
           onClose={() => setBulkDeleting(null)}
           onConfirm={() => void wrap(async () => {
-            const deleted = await bulkDeleteAction({ previewToken: bulkDeleting.preview.token, surface })
-            toast.success(`Deleted ${deleted.toLocaleString()} memory row${deleted === 1 ? '' : 's'}.`)
+            const result = await bulkDeleteAction({ previewToken: bulkDeleting.preview.token, surface })
+            if (!result.ok) {
+              toast.error(result.error)
+              setBulkDeleting(null)
+              return
+            }
+            toast.success(`Deleted ${result.deleted.toLocaleString()} memory row${result.deleted === 1 ? '' : 's'}.`)
             setBulkDeleting(null)
             await refresh()
           })}
@@ -838,7 +853,7 @@ function BulkDeletePreviewModal({
   const permitted = !hasPrimary || preview.canConfirmPrimary
   // Typing the scope is the gate. A bulk delete is unrecoverable and the count
   // alone is too easy to click past.
-  const [typed, setTyped] = useState('')
+  const [typed, setTyped] = useMemoryToolState(`delete.confirm:${preview.token}`, '')
   const matches = typed.trim() === scope
   const canConfirm = permitted && matches
   const memories = `memor${preview.memoryCount === 1 ? 'y' : 'ies'}`

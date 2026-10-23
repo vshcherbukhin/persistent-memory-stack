@@ -6,7 +6,7 @@ parking notes, or historical debugging logs here.
 
 ## Start Here
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory")`.
+- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
   If the persistent-memory MCP is unavailable, say so and continue from repo evidence.
 - The full persistent-memory protocol comes from the global installed rule
   `~/.claude/rules/persistent-memory.md` for Global Level installs. This repo's
