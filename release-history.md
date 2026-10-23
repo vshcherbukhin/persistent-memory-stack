@@ -2,6 +2,56 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.3.1 - 2026-10-23
+
+[GitHub release v1.3.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.1)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.3.1 | Preserve memory-tool state across navigation, acknowledge import progress, and show exact request errors. |
+| api | 1.0.3 | Allow dashboard row imports to suppress repeated completion notifications. |
+| docs | 1.3.1 | Explain import progress, interruption recovery, and browser-session state. |
+| onboarding | 1.3.0 | Existing installation wizard retained. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.0 | Existing embedding catalog and schema retained. |
+| worker / database / mcp / mcp-runtime / core-tools | 1.0.0 | Existing processing, storage and memory tools retained. |
+| graph / graphiti service / memory-vector / evidence-files / security-dlp / DLP service | 1.0.0 | Existing graph, retrieval and sensitive-data checks retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Keep import/export selections, selected files, verified packages, running
+  progress, results, and bulk-delete reviews when switching memory tabs or visiting
+  another dashboard page. State stays in browser memory for the current user and
+  memory space; a full reload or sign-out clears it.
+- Import one row per request and display confirmed progress instead of holding a
+  single connection open while the entire file embeds. If a response is lost,
+  retain confirmed results, stop submitting rows, and allow an explicit resume
+  from the first unconfirmed row after its server outcome is checked.
+- Show HTTP codes, schema field paths, row-level failures, and embedding/network
+  timeout causes. Distinguish a rejected request from an unknown write outcome.
+- Prevent conflicting mutations during an active import and duplicate bulk-delete
+  confirmations after navigation. Preserve the scope and typed confirmation;
+  expired previews still require a fresh server review.
+- Suppress repeated browser-push notifications for dashboard row requests and
+  show one aggregate completion notice. Other API imports retain their default
+  completion notification.
+- Align this repository's agent memory instructions with the canonical
+  persistent-memory-stack project.
+
+Direct upgrades from public 1.0.0 through 1.3.0 preserve memories, data volumes,
+credentials and embedding configuration. This patch adds no database migration
+or embedding-model change. Keep the browser document open during an import;
+closing or reloading it stops further row submissions.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.3.1
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.3.1`.
+For a new installation, follow the
+[v1.3.1 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.1/README.md).
+
 ## 1.3.0 - 2026-09-25
 
 [GitHub release v1.3.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.0)

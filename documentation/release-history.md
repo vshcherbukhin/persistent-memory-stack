@@ -3,6 +3,17 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.3.1 - 2026-10-23
+
+[GitHub release v1.3.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.1)
+
+- Document retained import/export and bulk-delete state across dashboard navigation,
+  including the full-reload/sign-out boundary for browser-memory drafts.
+- Explain per-row import acknowledgements, confirmed progress, exact request errors,
+  and checking an unconfirmed row before resuming an interrupted import.
+- Keep the existing installation wizard and graph guidance. This patch requires no
+  database migration or embedding-model change.
+
 ## 1.3.0 - 2026-09-25
 
 [GitHub release v1.3.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.0)
