@@ -200,7 +200,7 @@ export async function assertNoPii(content: string): Promise<void> {
   throw new PiiDetectedError({
     error: 'pii_detected',
     reason: result.failClosed
-      ? 'The DLP scanner is unavailable — the write is blocked (fail-closed).'
+      ? `${result.failure?.message ?? 'The DLP scanner is unavailable.'} The write is blocked (fail-closed).`
       : 'The memory contains PII or a secret and was blocked. Remove the sensitive data and retry.',
     findings: result.findings.map((f) => ({
       detector: f.detector,
@@ -208,7 +208,7 @@ export async function assertNoPii(content: string): Promise<void> {
       severity: f.severity,
     })),
     guidance: result.failClosed
-      ? 'Retry shortly; if it persists, the dlp sidecar is down — contact an admin.'
+      ? 'Retry the failed row shortly. If the scan still fails, check the DLP service health and logs; this does not mean PII was detected.'
       : 'Redact the flagged value(s) (e.g. SSNs, credit cards, emails, API keys/tokens) from the content, then resubmit.',
   })
 }

@@ -2,6 +2,64 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 1.3.2 - 2026-10-24
+
+[GitHub release v1.3.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.2)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / dashboard layer | 1.3.2 | Memory creation, graph navigation, retained import state and patched Next.js. |
+| api | 1.0.4 | Preserve specific scanner failure diagnostics in rejected memory writes and import results. |
+| worker | 1.0.1 | Use the resilient shared safety-scanner client. |
+| security-dlp | 1.0.1 | Retry one transient scan failure and reject malformed scanner responses. |
+| docs | 1.3.2 | Explain scanner retries, blocked rows and recovery without repeating successful imports. |
+| onboarding | 1.3.1 | Refreshed wizard design with patched HTTP/static dependencies. |
+| update-runner / update-flow layer / update-coordinator | 1.0.1 | Existing published-release discovery, pinned upgrades and recovery retained. |
+| shared / schema | 1.1.1 | Refresh storage and Prisma dependencies; database schema retained. |
+| database / mcp / mcp-runtime | 1.0.1 | Align Prisma clients and patch MCP transport/validation dependencies. |
+| core-tools | 1.0.0 | Existing tool entry points retained. |
+| graph / graphiti service / memory-vector / evidence-files / DLP service | 1.0.0 | Existing graph, retrieval and detector services retained. |
+| dashboard-gateway / docker-control | 1.0.0 | Existing local gateway and service controls retained. |
+
+- Create memories from the dashboard, jump from details to the memory graph,
+  and view live MCP sessions on Overview. The installation wizard includes
+  field-level errors, step timings and a completion summary.
+- Preserve import/export drafts, verified files, confirmed row progress and
+  bulk-delete reviews across dashboard navigation. Import one acknowledged row
+  per request and retain exact row-level errors.
+- Update Next.js, HTTP parsing, MCP SDK, Prisma, schema validation and mail
+  dependencies to patched releases; retain the supported Node LTS policy.
+- Retry a temporary scanner timeout, network failure, HTTP 408/429 or server
+  error once before rejecting a memory write. Keep the configured timeout per
+  attempt and require a successful safety scan before writing.
+- Preserve the scanner deadline, HTTP status, or supported network error code
+  instead of collapsing every operational failure into an unavailable message.
+  Diagnostics exclude submitted content, scanner response bodies and arbitrary
+  exception text.
+- Never retry a successful PII or secret detection automatically. Invalid or
+  inconsistent scanner responses remain blocked, and explicit scanner blocks
+  cannot be overridden by an empty findings list.
+- Explain how to recover a skipped row after scanner recovery while retaining
+  memories already imported successfully.
+
+Direct upgrades from public 1.0.0 through 1.3.1 preserve memories, data volumes,
+credentials, scanner configuration and embedding settings. This patch adds no
+database migration or embedding-model change.
+
+The production npm audit retains four moderate MinIO dependency-chain findings;
+review found no current product call path to the affected APIs. See the
+[scoped dependency assessment](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.2/documentation/spaces/personal/security.md#release-dependency-notes).
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 1.3.2
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 1.3.2`.
+For a new installation, follow the
+[v1.3.2 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v1.3.2/README.md).
+
 ## 1.3.1 - 2026-10-23
 
 [GitHub release v1.3.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.1)

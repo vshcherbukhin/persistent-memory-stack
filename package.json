@@ -1,7 +1,7 @@
 {
   "name": "persistent-memory",
   "private": true,
-  "version": "1.3.1",
+  "version": "1.3.2",
   "type": "module",
   "description": "persistent-memory monorepo root — personal-first memory stack with stream MCP, optional Shared Memories connection, dashboard, API, worker, and reusable shared/db packages.",
   "workspaces": [
@@ -78,8 +78,8 @@
     "test:p0-token-quality-comparison": "node --test scripts/p0-token-quality-comparison.test.mjs",
     "test:complete-system-health-evidence": "node --test scripts/complete-system-health-evidence.test.mjs",
     "test:deployment-agnosticism": "node --test scripts/deployment-agnosticism.test.mjs",
-    "test:layers": "vitest run test/layers --exclude '.local/**'",
-    "test:spaces": "vitest run test/spaces --exclude '.local/**'",
+    "test:layers": "vitest run test/layers --exclude '.local/**' --exclude '.claude/worktrees/**'",
+    "test:spaces": "vitest run test/spaces --exclude '.local/**' --exclude '.claude/worktrees/**'",
     "verify:architecture": "npm run test:layers && npm run test:spaces",
     "docs:install": "node scripts/docs-tool.mjs install",
     "docs:check-diagrams": "npm run diagrams:check --prefix apps/documentation",

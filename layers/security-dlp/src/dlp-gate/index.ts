@@ -28,10 +28,28 @@ export interface ScanResult {
   block: boolean
 }
 
+export type DlpFailureKind = 'timeout' | 'network' | 'http' | 'invalid_response'
+
+const NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'])
+
+/** Diagnostics are built from controlled values, never scanner bodies or submitted content. */
 export class DlpError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(
+    readonly kind: DlpFailureKind,
+    readonly info: { timeoutMs?: number; status?: number; code?: string; attempts?: number } = {},
+  ) {
+    const code = info.code && NETWORK_CODES.has(info.code) ? info.code : undefined
+    const detail = kind === 'timeout' ? `timed out after ${info.timeoutMs} ms per attempt`
+      : kind === 'http' ? `returned HTTP ${info.status}`
+        : kind === 'invalid_response' ? 'returned an invalid scan response'
+          : `could not be reached${code ? ` (${code})` : ' (network error)'}`
+    super(`The DLP scanner ${detail}${(info.attempts ?? 1) > 1 ? ` after ${info.attempts} attempts` : ''}.`)
     this.name = 'DlpError'
+  }
+
+  get retryable(): boolean {
+    return this.kind === 'timeout' || this.kind === 'network'
+      || (this.kind === 'http' && (this.info.status === 408 || this.info.status === 429 || (this.info.status ?? 0) >= 500))
   }
 }
 
@@ -71,31 +89,61 @@ export function resolvePiiEntities(envValue: string | undefined): readonly strin
   return parsed.length > 0 ? parsed : DEFAULT_PII_ENTITIES
 }
 
-export function makeDlpClient(opts: { baseUrl: string; timeoutMs?: number }): DlpClient {
+function isScanResult(value: unknown): value is ScanResult {
+  if (!value || typeof value !== 'object') return false
+  const scan = value as ScanResult
+  return Array.isArray(scan.pii) && Array.isArray(scan.secrets) && typeof scan.block === 'boolean'
+    && scan.pii.every(p => p && typeof p.entity_type === 'string' && Number.isFinite(p.start) && Number.isFinite(p.end) && Number.isFinite(p.score))
+    && scan.secrets.every(s => s && typeof s.rule_id === 'string' && typeof s.description === 'string')
+    && scan.block === (scan.pii.length > 0 || scan.secrets.length > 0)
+}
+
+export function makeDlpClient(opts: { baseUrl: string; timeoutMs?: number; retryDelayMs?: number }): DlpClient {
   const baseUrl = opts.baseUrl.replace(/\/+$/, '')
   const timeoutMs = opts.timeoutMs ?? 4000
   return {
     async scan(text, o) {
-      let res: Response
-      try {
-        res = await fetch(`${baseUrl}/scan`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            text,
-            entities: o?.entities ? [...o.entities] : undefined,
-            score_threshold: o?.scoreThreshold,
-          }),
-          signal: AbortSignal.timeout(timeoutMs),
-        })
-      } catch (err) {
-        throw new DlpError(`dlp sidecar unreachable: ${String(err)}`)
+      // Scanning has no write side effects. Retry one transient failure, before the
+      // caller can write anything; never retry a successful PII/secret decision.
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        let failure: DlpError
+        const signal = AbortSignal.timeout(timeoutMs)
+        try {
+          const res = await fetch(`${baseUrl}/scan`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              entities: o?.entities ? [...o.entities] : undefined,
+              score_threshold: o?.scoreThreshold,
+            }),
+            signal,
+          })
+          if (!res.ok) {
+            await res.body?.cancel().catch(() => {})
+            throw new DlpError('http', { status: res.status })
+          }
+          let scan: unknown
+          try { scan = await res.json() } catch (error) {
+            if (error instanceof SyntaxError) throw new DlpError('invalid_response')
+            throw error
+          }
+          if (!isScanResult(scan)) throw new DlpError('invalid_response')
+          return scan
+        } catch (error) {
+          if (error instanceof DlpError) failure = error
+          else if (signal.aborted || (error instanceof Error && error.name === 'TimeoutError')) {
+            failure = new DlpError('timeout', { timeoutMs })
+          } else {
+            const cause = error instanceof Error ? error.cause : undefined
+            const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined
+            failure = new DlpError('network', { code })
+          }
+        }
+        if (!failure.retryable || attempt === 2) throw new DlpError(failure.kind, { ...failure.info, attempts: attempt })
+        await new Promise(resolve => setTimeout(resolve, opts.retryDelayMs ?? 250))
       }
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        throw new DlpError(`dlp scan failed (${res.status}): ${body.slice(0, 300)}`)
-      }
-      return (await res.json()) as ScanResult
+      throw new DlpError('network') // the bounded loop always returns or throws
     },
   }
 }
@@ -116,6 +164,8 @@ export interface GateResult {
   findings: GateFinding[]
   /** true when the block is because the scanner itself failed (fail-closed). */
   failClosed: boolean
+  /** Controlled operational diagnostic; never raw scanner output or memory content. */
+  failure?: { kind: DlpFailureKind; message: string }
 }
 
 /**
@@ -132,10 +182,11 @@ export async function dlpGate(
   let scan: ScanResult
   try {
     scan = await client.scan(text, opts)
-  } catch {
+  } catch (error) {
     return {
       blocked: true,
       failClosed: true,
+      ...(error instanceof DlpError ? { failure: { kind: error.kind, message: error.message } } : {}),
       findings: [
         { detector: 'dlp', findingType: 'scanner_unavailable', severity: 'high', redactedExcerpt: 'DLP scanner unavailable — write blocked (fail-closed)' },
       ],
@@ -159,5 +210,5 @@ export async function dlpGate(
       }),
     ),
   ]
-  return { blocked: findings.length > 0, findings, failClosed: false }
+  return { blocked: scan.block || findings.length > 0, findings, failClosed: false }
 }

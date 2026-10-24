@@ -32,7 +32,7 @@ describe('update-ops layer', () => {
   })
 
   it('exposes update-flow helpers from the layer path', () => {
-    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', releaseLine: 'public-v1' })
+    expect(publicUpdateSource).toEqual({ owner: 'vshcherbukhin', repo: 'persistent-memory-stack', branch: 'master', channel: 'releases', releaseLine: 'public-v1' })
     expect(isPublicUpdateRepository('https://github.com/vshcherbukhin/persistent-memory-stack.git')).toBe(true)
     expect(isPublicUpdateRepository('https://github.com/another-owner/persistent-memory-stack.git')).toBe(false)
   })

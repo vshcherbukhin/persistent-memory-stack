@@ -80,6 +80,8 @@ Tool selections, the selected import file, verified rows, progress, results, and
 
 Imports send one row at a time and display confirmed progress, so embedding a large file does not hold one request open for the entire file. Row-level errors retain their original file row numbers. If a response is lost, import stops sending further rows and shows the known results plus the specific request error. The current row may still finish on the server; check the memory list before choosing **Resume import**, which starts at the first unconfirmed row. Keep this browser document open while importing; closing or reloading it stops further submissions.
 
+The safety scanner retries one temporary timeout, connection failure, or retryable HTTP error before rejecting a row. A successful scan that detects PII or a secret is never retried automatically. If both attempts fail, the error identifies the timeout, HTTP status, or connection failure; the row is not written. Other imported rows remain intact. To recover a skipped row, verify and import a file containing that row after the scanner recovers.
+
 ## Actions
 
 1. Choose **New memory** in the top bar to write a record by hand, fill content, project, category, source, and entities, then choose **Save memory**.

@@ -3,6 +3,17 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 1.3.2 - 2026-10-24
+
+[GitHub release v1.3.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.2)
+
+- Refresh patched dashboard, installer, transport, validation and storage dependencies.
+- Explain one bounded retry for temporary scanner failures, specific scanner
+  diagnostics, and recovery of skipped import rows without repeating successful rows.
+- Clarify that detected PII/secrets and malformed scanner responses remain blocked.
+- Preserve the configured per-attempt scan timeout and existing memory, storage
+  and embedding configuration; no database migration is introduced.
+
 ## 1.3.1 - 2026-10-23
 
 [GitHub release v1.3.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.1)

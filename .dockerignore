@@ -20,6 +20,8 @@ __pycache__/
 !.env.persistent-memory.example
 .env.persistent-memory
 .local/
+memories_backup/
+memory_backup/
 docs/internal/
 documentation/storybook/
 scratchpad/

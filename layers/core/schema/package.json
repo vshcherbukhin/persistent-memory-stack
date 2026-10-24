@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-prisma",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Prisma schema, RLS policies and bootstrap seed for the persistent-memory data model (Phase 2).",
   "type": "module",
@@ -16,14 +16,14 @@
     "seed": "npm run seed"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.6.0",
-    "@prisma/client": "^7.6.0",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "argon2": "^0.41.1",
     "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
-    "prisma": "^7.6.0",
+    "prisma": "^7.10.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

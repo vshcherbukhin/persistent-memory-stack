@@ -28,6 +28,9 @@ import {
 
 const tempRoots: string[] = []
 const releaseLine = 'public-v1'
+// These cases create Git histories and worktrees through many host processes.
+// The default 5s test budget is too short on Windows; assertions remain identical.
+const GIT_FIXTURE_TIMEOUT_MS = 20_000
 const contractModuleUrl = new URL('../../../layers/update-ops/release-versioning/upgrade-contract.ts', import.meta.url).href
 // These fixtures describe a fixed historical release. Copying the checkout's
 // current contract makes their package/contract pairs invalid on the next release.
@@ -668,7 +671,7 @@ describe('update coordinator bootstrap', () => {
     const worktree = await coordinatorReleaseWorktree(repoRoot, join(repoRoot, 'coordinator'), 'master', '1.0.0', releaseLine)
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8', windowsHide: true }).trim()).toBe(publicCommit)
     expect(JSON.parse(await readFile(join(worktree, 'package.json'), 'utf8'))).toMatchObject({ persistentMemoryReleaseLine: releaseLine })
-  })
+  }, GIT_FIXTURE_TIMEOUT_MS)
 
   it('changes the immutable bundle when only its published release resolver changes', async () => {
     const { root, installation: first } = await installFixture()
@@ -699,7 +702,7 @@ describe('update coordinator bootstrap', () => {
     await expect(coordinatorPublishedReleaseWorktree(root, join(root, 'coordinator'), hop)).resolves.toBe(worktree)
     await writeFile(join(worktree, 'package.json'), '{}')
     await expect(coordinatorPublishedReleaseWorktree(root, join(root, 'coordinator'), hop)).rejects.toThrow('tracked changes')
-  })
+  }, GIT_FIXTURE_TIMEOUT_MS)
 
   it('fails closed when a required hop is unpublished or its lookup fails even with cached branch history', async () => {
     const { root, pins } = await publishedFixture()

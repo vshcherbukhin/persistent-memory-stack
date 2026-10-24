@@ -15,6 +15,24 @@ nav_order: 80
 
 # Security
 
+## Release dependency notes
+
+Community 1.3.2 refreshes the dashboard, HTTP handling, MCP SDK, Prisma, schema
+validation and mail dependencies to patched releases. The production npm audit
+still reports four moderate package findings in the MinIO 8 client dependency
+chain. The reviewed product uses `query-string.stringify()`, not its affected
+decoding path, and does not call MinIO's notification API that imports the
+affected `stream-json` package. No reachable path to those affected APIs was
+identified in the current product. This is a scoped assessment, not an upstream
+fix; reassess before adding notification or parsing APIs.
+
+The underlying advisories cover [URI decoding](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr),
+[JSON path filters](https://github.com/advisories/GHSA-528h-pc64-c93x),
+[JSONC parsing](https://github.com/advisories/GHSA-hqr4-qq8f-hg3x), and
+[JSON assembly](https://github.com/advisories/GHSA-mjw6-4jj6-33hc).
+The release retains the supported MinIO client rather than forcing an incompatible
+major override or downgrade solely to suppress an audit finding.
+
 ![Security page with no open findings](../../assets/spaces/personal/security-empty.png)
 
 ## Purpose

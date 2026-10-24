@@ -52,6 +52,10 @@ describe('dlpGate', () => {
     expect(r.failClosed).toBe(true)
     expect(r.findings[0].findingType).toBe('scanner_unavailable')
   })
+
+  it('never overrides an explicit scanner block even if findings are absent', async () => {
+    expect((await dlpGate(clientReturning({ pii: [], secrets: [], block: true }), 'memory')).blocked).toBe(true)
+  })
 })
 
 describe('resolvePiiEntities', () => {

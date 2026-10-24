@@ -25,7 +25,7 @@ import {
   ENTITY_FORMAT_GUIDANCE,
 } from '../src/protocol/shapes.ts'
 import type { ExtractionLLM, VerdictRaw } from '../src/protocol/llm/client.ts'
-import type { DlpClient, ScanResult } from '@pm/security-dlp'
+import { DlpError, type DlpClient, type ScanResult } from '@pm/security-dlp'
 
 /** A stub LLM that returns a canned verdict (Stage 2 never calls a real backend). */
 function stubLlm(verdict: VerdictRaw): ExtractionLLM {
@@ -563,6 +563,21 @@ describe('Stage 1.5 — the DLP/PII gate (assertNoPii + validateAndRoute)', () =
   it('FAILS CLOSED: a scanner error blocks the write (PiiDetectedError)', async () => {
     __setDlpClient({ scan: async () => { throw new Error('ECONNREFUSED') } })
     await expect(assertNoPii(GOOD_CONTENT)).rejects.toBeInstanceOf(PiiDetectedError)
+  })
+
+  it('preserves a typed scanner deadline in the user-facing rejection', async () => {
+    __setDlpClient({ scan: async () => { throw new DlpError('timeout', { timeoutMs: 4000, attempts: 2 }) } })
+    try {
+      await assertNoPii(GOOD_CONTENT)
+      throw new Error('Expected the scanner to block the write')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PiiDetectedError)
+      const payload = (error as PiiDetectedError).payload
+      expect(payload.reason).toContain('timed out after 4000 ms per attempt after 2 attempts')
+      expect(payload.reason).toContain('write is blocked')
+      expect(payload.guidance).toContain('does not mean PII was detected')
+      expect(JSON.stringify(payload)).not.toContain(GOOD_CONTENT)
+    }
   })
 
   it('validateAndRoute rejects PII BEFORE the LLM runs (no Stage-2 call)', async () => {

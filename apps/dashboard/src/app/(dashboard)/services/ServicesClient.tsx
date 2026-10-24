@@ -581,7 +581,7 @@ export function ServicesClient({
                 <span className="notice-detail">
                   Check the Docker socket is mounted and <code className="code-inline">DOCKER_CONTROL_TOKEN</code> is set (on native Linux,
                   set <code className="code-inline">DOCKER_GID</code> to the host docker-group gid), then try{' '}
-                  <code className="code-inline">docker compose --env-file .env.persistent-memory up -d docker-control</code>.
+                  <code className="code-inline">npm run start-persistent-memory</code> from the repository directory.
                 </span>
                 <span className="notice-detail mono">{error}</span>
               </span>
