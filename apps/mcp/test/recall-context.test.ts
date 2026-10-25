@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { z } from 'zod'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv'
 import { registerAllTools } from '../src/server.ts'
 import type { Runtime } from '../src/runtime.ts'
 
@@ -126,6 +130,78 @@ const oldLegacyFact = {
 }
 
 describe('recall_context', () => {
+  it.each(['timeline-only', 'graph-and-timeline'])('keeps %s facts within the advertised raw JSON contract', async (placement) => {
+    const api = {
+      post: vi.fn(async (path: string) => {
+        if (path === '/memories/search') return { results: [], counts: { own: 0, other: 0 } }
+        if (path === '/graph/search') return {
+          facts: placement === 'timeline-only'
+            ? [alphaDependsOnBeta]
+            : [alphaDependsOnBeta, betaReplacedLegacy, oldLegacyFact],
+        }
+        throw new Error(`unexpected POST ${path}`)
+      }),
+      get: vi.fn(async (path: string) => {
+        if (path.startsWith('/graph/entity/')) return { name: 'component_alpha_auth', facts: [] }
+        if (path === '/graph/timeline') return {
+          entityUuid: 'node-alpha',
+          entries: [
+            { ...oldLegacyFact, status: 'invalid' },
+            { ...betaReplacedLegacy, status: 'valid' },
+          ],
+        }
+        if (path === '/graph/contradictions') return { contradictions: [] }
+        throw new Error(`unexpected GET ${path}`)
+      }),
+    }
+    const server = new McpServer({ name: 'recall-contract-test', version: '1.0.0' })
+    registerAllTools(server, { api, runtime } as never)
+    const client = new Client({ name: 'recall-contract-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    try {
+      await server.connect(serverTransport)
+      await client.connect(clientTransport)
+      const advertised = (await client.listTools()).tools.find((tool) => tool.name === 'recall_context')!
+      expect(advertised.outputSchema).toBeDefined()
+      const validate = new AjvJsonSchemaValidator().getValidator(advertised.outputSchema!)
+      // Validate the untouched handler reply; Zod parsing strips nested unknown fields.
+      const reply = await collectAllTools(api, runtime).get('recall_context')!.handler({
+        query: 'How does AlphaAuth validate tokens now?',
+        project: 'persistent-memory',
+        scope: 'own',
+      })
+      expect(reply.isError).not.toBe(true)
+      const validation = validate(reply.structuredContent)
+      expect(validation.valid, validation.errorMessage).toBe(true)
+      const facts = reply.structuredContent!.facts as Record<string, unknown>
+      expect(facts).toEqual({
+        [alphaDependsOnBeta.uuid]: alphaDependsOnBeta,
+        [betaReplacedLegacy.uuid]: betaReplacedLegacy,
+        [oldLegacyFact.uuid]: oldLegacyFact,
+      })
+      for (const fact of Object.values(facts)) expect(fact).not.toHaveProperty('status')
+      expect(reply.structuredContent!.timeline).toMatchObject({ entries: [
+        { factRef: oldLegacyFact.uuid, status: 'invalid' },
+        { factRef: betaReplacedLegacy.uuid, status: 'valid' },
+      ] })
+      // Ensure this validator rejects the original defect without sanitizing the input.
+      const invalid = structuredClone(reply.structuredContent!)
+      ;(invalid.facts as Record<string, Record<string, unknown>>)[oldLegacyFact.uuid]!.status = 'invalid'
+      expect(validate(invalid).valid).toBe(false)
+      expect(invalid.facts).toHaveProperty(`${oldLegacyFact.uuid}.status`, 'invalid')
+      // Recall currently returns summary text only; validate JSON text too if duplicated later.
+      for (const content of reply.content) {
+        if (!content.text.trimStart().startsWith('{')) continue
+        const textPayload = JSON.parse(content.text)
+        expect(textPayload).toEqual(reply.structuredContent)
+        expect(validate(textPayload).valid).toBe(true)
+      }
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
+
   it('is the always-loaded graph-first memory entrypoint', () => {
     const tools = collectAllTools({ get: vi.fn(), post: vi.fn() }, runtime)
     const recall = tools.get('recall_context')

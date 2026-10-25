@@ -393,7 +393,7 @@ export function packRecallContext(input: {
   }
   input.graphFacts.forEach(register)
   input.entities.flatMap((entity) => entity.facts).forEach(register)
-  input.timeline.forEach(register)
+  input.timeline.forEach(({ status: _status, ...fact }) => register(fact))
   input.contradictions.flatMap((item) => [item.superseded, item.superseded_by].filter((fact): fact is FactEdgeValue => Boolean(fact))).forEach(register)
 
   const available: RecallPlaneCountValue = {
