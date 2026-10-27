@@ -14,14 +14,15 @@ files aligned when the operating protocol changes.
   Project Level registration. Do not expect this repo to have
   `.codex/rules/persistent-memory.md` after a normal Global Level install.
 - Then read `.codex/AGENTS.md` and the relevant files under `.codex/rules/`.
-- For multi-step planning, implementation, review, resume, phase advancement, or
-  status reporting, use the global `$critical-development` workflow. Its local
-  ledger supplements this repository's plans and evidence; it never overrides them.
-- After an approved-phase `continue`, the root Codex task runs the phase through
-  implementation, verification, actual review/fix loops, documentation, and
-  applicable UI evidence. A checkpoint, dispatch, package result, or pending
-  technical gate is not a stopping point; stop only for a real decision/blocker
-  or when the complete phase is ready for user acceptance.
+- Read `.agents/development-workflow.md`: it is the repository-owned workflow for
+  planning, implementation, review, resume, UI verification, and release handoff.
+- Global skills, custom-agent names, and local workflow ledgers are optional aids,
+  not prerequisites. If `$critical-development` or another workflow skill is
+  absent, report it once and continue under the repository workflow. Do not stop
+  to request a waiver, reinstall an old skill, or recreate its orchestration.
+- Continue an approved scope through implementation, proportionate verification,
+  one independent review and targeted fixes. Stop for genuine safety/scope/access
+  decisions or the applicable acceptance/release boundary, not routine checkpoints.
 
 ## Non-Negotiables
 

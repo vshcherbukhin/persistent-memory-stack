@@ -19,36 +19,21 @@ parking notes, or historical debugging logs here.
   install/update flow, docs, or package versions.
 - Use `rg`/`rg --files` first for repo search.
 
-## Critical Development Overlay
+## Repository Development Workflow
 
-- `$critical-development` is the coordinator for multi-phase work and understands
-  natural requests such as `continue`, `print status`, `review the code`, `fix the
-  findings`, and `go to the next phase`.
-- On first resume, reconcile `.local/documents/`, current source/tests, documentation,
-  Git history/diff, and runtime evidence before creating the local workflow ledger.
-  Never infer plan, phase, merge, or release approval from code or an old summary.
-- Development plans remain local under `.local/documents/`; committed product and
-  operator truth remains under `documentation/`.
-- Every phase requires implementation evidence, verification, independent review,
-  documentation disposition, applicable visual QA, and explicit user acceptance.
-- For an approved phase, the root task directly spawns any specialists, retains
-  their ids, verifies live status before saying `running`, waits for completion,
-  checks their filesystem/test evidence, fixes findings, and continues through
-  every technical gate in the same task. Ledger repair/writes, dispatch, worker
-  return, package completion, and pending technical work are never terminal.
-- Keep implementation, verification, review, fixes, documentation, and visual QA
-  in `pendingWork`. Only explicit choices belong in
-  `pendingHumanDecisions`; only typed external/tool/safety/scope/physical or
-  destructive-authorization conditions belong in `blockers`.
-- For dashboard work, the project verification anchor is the existing Persistent
-  Memory Chrome tab or `http://127.0.0.1:3200`. Redeploy with
-  `bash deploy/scripts/dev-redeploy.sh redeploy-dashboard`, then refresh that tab.
-- Dashboard visual QA must invoke the Chrome skill and acquire
-  `agent.browsers.get("extension")`, confirming `Type: extension`. Do not use
-  `getForUrl`, the in-app/default/sandbox browser, standalone Playwright, or
-  Computer Use as Chrome evidence, and do not open a parallel raw `:3000` tab.
-- Dashboard icons come through `apps/dashboard/src/components/ui/Icon.tsx`; reuse
-  the shared controls under that directory instead of browser-native substitutes.
+- Read `.agents/development-workflow.md` from the repository root. It owns the
+  shared Codex/Claude execution, evidence-reuse, review-budget and resume rules.
+- `$critical-development`, `$ui-workflow`, named custom reviewers and their
+  ledgers are optional aids. Their absence is not an implementation blocker.
+  Use available tools and repository evidence; never fabricate an invocation.
+- For dashboard work, also read `.claude/rules/realtime-dashboard-development.md`.
+  This is a shared browser/runtime rule, not a dependency on a Claude workflow.
+- Prefer the existing dashboard tab at the configured gateway (`:3200` by default).
+  Redeploy the affected service safely; do not start a parallel raw `:3000` app.
+- Reuse `apps/dashboard/src/components/ui/Icon.tsx` and the shared controls.
+- Current product descriptions are not a veto on an explicitly owner-approved
+  product change. Implement that scoped change and update its documentation;
+  never weaken data-preservation or release authorization to do so.
 
 ## Product Model
 
@@ -95,7 +80,8 @@ parking notes, or historical debugging logs here.
   list in an app, script, or config. `npm run docs:generate` derives `mkdocs.yml`
   from Markdown frontmatter, and the dashboard reader discovers
   `documentation/spaces/` from that same metadata.
-- For documentation changes, run `npm run docs:build` and `npm run docs:check-navigation`.
+- For product documentation changes under `documentation/`, run
+  `npm run docs:build` and `npm run docs:check-navigation`.
   Keep `mkdocs.template.yml` configuration-only: never hand-edit generated `mkdocs.yml`.
 - Development plans, investigation notes, temporary specs, status logs, and working
   documents must go under `.local/documents/`; they are local-only and never committed.
@@ -106,11 +92,15 @@ parking notes, or historical debugging logs here.
 
 ## Verification
 
-- Run the narrowest meaningful tests first, then root checks for commit candidates:
-  `npm run typecheck` and `npm test`.
-- For dashboard-only changes, also run tests from `apps/dashboard/`; for installer changes, run
-  tests from `apps/onboard/`.
-- Every completed phase records a documentation disposition. When committed docs
-  change, run `npm run docs:build`; use
+- Follow the evidence-reuse policy in `.agents/development-workflow.md`: focused
+  tests during edits; applicable integration/root checks for the completed code
+  candidate, not every micro-commit. Root code checks are `npm run typecheck`
+  and `npm test`; run affected dashboard/installer suites without duplicating
+  suites already covered by the root run.
+- Instruction-only edits require link/parity/diff checks, not unrelated builds,
+  stack redeploys, browser matrices or product releases. Product-doc changes
+  still require their documented documentation checks.
+- Every completed phase records a documentation disposition. When product docs
+  under `documentation/` change, run `npm run docs:build`; use
   `bash deploy/scripts/dev-redeploy.sh redeploy-documentation` for live review.
 - Report exactly what was verified and what was not.
