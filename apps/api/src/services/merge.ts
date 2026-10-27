@@ -88,7 +88,7 @@ export async function searchMemoriesMerged(client: QdrantClient, args: MergeArgs
         sessionId: row.sessionId, createdById: row.createdById, score: (scores.get(row.id) ?? 0) + hint, sourceTeam: row.teamId, isOwnTeam: true,
         createdAt: row.createdAt.toISOString(), recordUpdatedAt: row.recordUpdatedAt.toISOString(), memoryTier: row.memoryTier, sourceProvenance: row.sourceProvenance,
         confidence: row.confidence, revision: row.revision, classification: row.knowledge, classificationStatus: row.knowledge ? 'classified' : 'legacy_unclassified',
-        embeddingStatus: row.embeddingStatus, graphStatus: row.graphStatus, relationshipExplanations: reasons.get(row.id) ?? [] }
+        embeddingStatus: row.embeddingStatus, graphStatus: row.knowledge ? row.graphStatus : 'legacy_preserved', relationshipExplanations: reasons.get(row.id) ?? [] }
     }).sort((a,b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, args.limit)
     await reinforceMemoryAccess(tx, results.map(row => row.id))
     return { results, counts: { own: results.length, other: 0 }, diagnostics }

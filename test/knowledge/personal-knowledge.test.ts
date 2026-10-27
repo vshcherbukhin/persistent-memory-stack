@@ -107,6 +107,15 @@ describe('Community canonical personal knowledge on a restored isolated database
     expect(leaked).toEqual([])
     expect(knowledgeWhere({project:'exact-project'})).toMatchObject({ownershipState:'personal',deletedAt:null})
   })
+  it('reports preserved legacy graph state without rewriting historical failures',async()=>{
+    const id='00000000-0000-4000-8000-000000000001'
+    await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.update({where:{id},data:{graphStatus:'failed'}})))
+    const before=classify.mock.calls.length
+    const result=await inOwner(()=>searchMemoriesMerged({} as never,{query:'Synthetic positively owned legacy knowledge',project:'synthetic-owner-filter',pin:{modelId:'synthetic',dim:2,vectorName:'synthetic'},limit:5}))
+    expect(result.results.map(row=>({id:row.id,graphStatus:row.graphStatus,classificationStatus:row.classificationStatus}))).toEqual([{id,graphStatus:'legacy_preserved',classificationStatus:'legacy_unclassified'}])
+    expect((await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.findUniqueOrThrow({where:{id}})))).graphStatus).toBe('failed')
+    expect(classify.mock.calls.length).toBe(before)
+  })
   it('hashes requests deterministically without equating records from different projects',()=>{
     expect(knowledgeRequestHash({a:1,b:2})).toBe(knowledgeRequestHash({b:2,a:1}))
     expect(knowledgeRequestHash(capture(projects[0]!, 'A synthetic self contained source statement with forty characters.'))).not.toBe(knowledgeRequestHash(capture(projects[1]!, 'A synthetic self contained source statement with forty characters.')))
