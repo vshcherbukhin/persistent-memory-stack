@@ -76,6 +76,46 @@ describe('Community canonical personal knowledge on a restored isolated database
     expect(await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.count()))).toBe(before)
     expect((await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.findUniqueOrThrow({where:{id:accepted.id}})))).revision).toBe(1)
   })
+  it('scans protocol UUID values without changing receipts or weakening privacy rollback',async()=>{
+    const scans:string[]=[]
+    let gate:'clean'|'blocked'|'unavailable'='clean'
+    __setDlpClient({scan:async text=>{
+      scans.push(text)
+      if(gate==='unavailable')throw new Error('Synthetic scanner outage')
+      return {pii:[],secrets:gate==='blocked'?[{rule_id:'generic-api-key',description:'Synthetic blocked credential'}]:[],block:gate==='blocked'}
+    }})
+    try{
+      const submission=capture(null,`Synthetic privacy ${suffix} preserves the literal idempotencyKey in its source assertion.`)
+      const accepted=await inOwner(()=>saveKnowledge(submission)) as {id:string;revision:number}
+      const createScan=JSON.parse(scans.at(-1)!)
+      expect(createScan).toEqual({...submission,idempotencyKey:undefined,receiptId:submission.idempotencyKey})
+      expect(createScan.content).toContain('idempotencyKey')
+      const receipt=await inOwner(()=>runInTenant((tx:Tx)=>tx.memoryWriteReceipt.findUniqueOrThrow({where:{teamId_key:{teamId:ctx.teamId!,key:submission.idempotencyKey}}})))
+      expect(receipt.key).toBe(submission.idempotencyKey)
+      expect(receipt.requestHash).toBe(knowledgeRequestHash({operation:'create',input:submission}))
+      const update={contractVersion:2 as const,expectedRevision:1,intent:'correction' as const,changes:{content:submission.content+' This source supplied a correction.'},reason:'Explicit synthetic privacy correction.',evidence:submission.classification.sources,idempotencyKey:randomUUID()}
+      const corrected=await inOwner(()=>updateKnowledge(accepted.id,update)) as {revision:number}
+      expect(corrected.revision).toBe(2)
+      const updateScan=JSON.parse(scans.at(-1)!)
+      expect(updateScan.input).toEqual({...update,idempotencyKey:undefined,receiptId:update.idempotencyKey})
+      expect(updateScan.resulting).toMatchObject({content:update.changes.content,classification:submission.classification,receiptId:update.idempotencyKey})
+      const beforeReplay={scans:scans.length,models:classify.mock.calls.length}
+      expect(await inOwner(()=>saveKnowledge(submission))).toEqual(accepted)
+      expect(await inOwner(()=>updateKnowledge(accepted.id,update))).toEqual(corrected)
+      await expect(inOwner(()=>saveKnowledge({...submission,content:submission.content+' Changed retry.'}))).rejects.toMatchObject({code:'idempotency_conflict'})
+      expect({scans:scans.length,models:classify.mock.calls.length}).toEqual(beforeReplay)
+      const counts=()=>inOwner(()=>runInTenant(async(tx:Tx)=>({rows:await tx.memory.count(),history:await tx.memoryRevision.count(),receipts:await tx.memoryWriteReceipt.count()})))
+      const before=await counts(),models=classify.mock.calls.length
+      gate='blocked'
+      await expect(inOwner(()=>saveKnowledge(capture(null,submission.content+' Blocked.')))).rejects.toMatchObject({code:'pii_detected'})
+      await expect(inOwner(()=>updateKnowledge(accepted.id,{...update,expectedRevision:2,idempotencyKey:randomUUID()}))).rejects.toMatchObject({code:'pii_detected'})
+      gate='unavailable'
+      await expect(inOwner(()=>saveKnowledge(capture(null,submission.content+' Scanner unavailable.')))).rejects.toMatchObject({code:'pii_detected'})
+      expect(classify.mock.calls.length).toBe(models)
+      expect(await counts()).toEqual(before)
+      expect((await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.findUniqueOrThrow({where:{id:accepted.id}})))).revision).toBe(2)
+    }finally{__setDlpClient({scan:async()=>({pii:[],secrets:[],block:false})})}
+  })
   it('recalls both projects and general across the owner space, with strict filters and bounded results',async()=>{
     const noVectors={query: `${suffix} orbit scheduling`,pin:{modelId:'synthetic',dim:2,vectorName:'synthetic'},limit:10}
     const all=await inOwner(()=>searchMemoriesMerged({} as never,noVectors))

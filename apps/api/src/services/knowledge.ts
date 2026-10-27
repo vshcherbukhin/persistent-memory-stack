@@ -7,6 +7,7 @@ import {
   type Classification, type ClassifiedWrite, type ClassifiedUpdate, type KnowledgeFilter,
 } from '@pm/shared'
 import { assertNoPii, classifyKnowledgeContent } from '../protocol/validation.ts'
+import { knowledgePrivacyView } from '../protocol/knowledge-privacy.ts'
 import { LlmResponseError } from '../protocol/llm/client.ts'
 
 export class KnowledgeError extends Error {
@@ -218,7 +219,7 @@ export async function saveKnowledge(raw: unknown): Promise<unknown> {
   const receipt=await existingReceipt(input.idempotencyKey,request)
   if(receipt)return receipt.response
   // Scan content AND metadata/evidence. Metadata is not a DLP escape hatch.
-  await assertNoPii(JSON.stringify(input))
+  await assertNoPii(JSON.stringify(knowledgePrivacyView(input)))
   await assertKnowledgeContent(input.content)
   return withReceipt(input.idempotencyKey, request, async tx => {
     const classification = await resolveClassification(tx, input.classification, input.resolutions)
@@ -244,7 +245,7 @@ export async function updateKnowledge(memoryId: string, raw: unknown): Promise<u
   if(current.revision!==input.expectedRevision)throw new KnowledgeError('revision_conflict',409,'Read and reconcile the current accepted revision before retrying.')
   const candidate=KnowledgeWrite.safeParse({contractVersion:2,content:input.changes.content??current.content,classification:input.changes.classification??current.knowledge,idempotencyKey:input.idempotencyKey})
   if(!candidate.success)throw new KnowledgeError('memory_classification_invalid',422,'The resulting record must satisfy the complete current contract.',{issues:candidate.error.issues})
-  await assertNoPii(JSON.stringify({input,resulting:candidate.data}))
+  await assertNoPii(JSON.stringify({input:knowledgePrivacyView(input),resulting:knowledgePrivacyView(candidate.data)}))
   await assertKnowledgeContent(candidate.data.content)
   return withReceipt(input.idempotencyKey, request, async tx => {
     const prior = await tx.memory.findUnique({ where: { id: memoryId } })
