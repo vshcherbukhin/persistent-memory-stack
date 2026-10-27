@@ -6,7 +6,9 @@ parking notes, or historical debugging logs here.
 
 ## Start Here
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
+- Before non-trivial work, call `recall_context(query)` across the authorized personal space.
+  Use `persistent-memory-stack` for this repository's write classification; a project
+  filter is strict and must be explicitly intended.
   If the persistent-memory MCP is unavailable, say so and continue from repo evidence.
 - The full persistent-memory protocol comes from the global installed rule
   `~/.claude/rules/persistent-memory.md` for Global Level installs. This repo's
@@ -32,19 +34,19 @@ parking notes, or historical debugging logs here.
 
 ## Product Model
 
-- Client installs are personal-first: always install a local Personal Memories stack,
-  local dashboard, and stream MCP first, with local or API embeddings chosen for the host.
-- Shared Memories are optional and connected later from the local dashboard with a
-  server-issued connector token. The local dashboard is the single user surface for
-  Personal and Shared memory management.
-- Shared server dashboards are SSO/password operator consoles for super-admins only.
-  Regular users and team admins use their local dashboard; their Shared permissions
-  are exactly what the connector token grants.
+- Community installs one local Personal Memories stack, dashboard and stream MCP.
+  Shared Memories connections, surface switching and mounted-team reads are retired.
+  Historical sharing records/configuration remain preserved outside personal recall.
+- Ownership comes from the validated local identity, never project/folder metadata.
+  Default recall spans the owner's projects and general conversations; explicit
+  filters stay strict. Keep origin, applicability and relevance hints distinct.
+- Use the versioned canonical classified write contract and expected revisions for
+  updates. Preserve source evidence, stable IDs, meaningful history and safety gates.
 - Stream MCP is the only runtime. Legacy Node/stdio values are migration aliases only.
 - Use `server-managed embeddings` and `client-managed embeddings`; keep old
   `server` / `client-bridge` values only as wire/config aliases.
 - Runnable app shells live under `apps/`; local/server deployment spaces live under
-  `spaces/local-personal`, `spaces/local-shared-client`, and `spaces/shared-server`;
+  `spaces/local-personal`; retired deployment-space descriptors are historical;
   capability code lives under `layers/`. Use dashboard wording for the product/app;
   reserve `admin` and `super-admin` for roles or compatibility route names.
 

@@ -571,14 +571,9 @@ describe('table scroll layout contract', () => {
     expect(tokens).toContain('issued')
   })
 
-  it('presents mounts as a reader-focused editor using the themed checkbox component', () => {
-    const grants = src('../components/GrantMatrix.tsx')
-
-    expect(grants).toContain("import { Checkbox } from '@/components/ui/Checkbox'")
-    expect(grants).toContain('Selected reader')
-    expect(grants).toContain('Mounted memory sources')
-    expect(grants).not.toContain('type="checkbox"')
-    expect(grants).not.toContain('owner ↓')
+  it('retires the mounts editor instead of exposing old grants', () => {
+    expect(src('../app/(dashboard)/grants/page.tsx')).toContain('notFound()')
+    expect(src('../components/Nav.tsx')).not.toContain("label: 'Mounts'")
   })
 
   it('shows client-managed embeddings as an informational pin, not an editable embedding form', () => {

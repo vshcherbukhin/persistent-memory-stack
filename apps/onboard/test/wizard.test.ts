@@ -294,13 +294,13 @@ describe('readDefaultRule (committed template)', () => {
     expect(txt).toMatch(/timeline|graph/i)
     expect(txt).toMatch(/ToolSearch|tool_search/)
   })
-  it('instructs agents to persist project memory surface choice and default non-project work to personal/general', () => {
+  it('defaults recall across the personal space from every project or general session', () => {
     const txt = readDefaultRule()
 
     expect(txt).toMatch(/Personal Memories/)
     expect(txt).toMatch(/Shared Memories/)
-    expect(txt).toMatch(/project.*memory surface/i)
-    expect(txt).toMatch(/non-project.*personal/i)
+    expect(txt).toMatch(/without a project filter/)
+    expect(txt).toMatch(/from any folder/)
     expect(txt).toMatch(/general/i)
   })
   it('keeps the global rule template focused on unknowns without forcing heavyweight process', () => {
@@ -332,7 +332,7 @@ describe('buildSteps (flow-aware)', () => {
     expect(buildSteps({ flow: 'full', mcpRuntime: 'node', env }).map((s) => s.id))
       .toEqual(['deps', 'pull-model', 'compose-up', 'wait-postgres', 'prisma-migrate', 'rls', 'seed', 'restart-app', 'wait-mcp', 'verify', 'register', 'write-rule'])
   })
-  it('legacy engine flow aliases to personal-first install and pulls the shared server pin after local verify', () => {
+  it('legacy engine flow aliases to personal-only install without the shared server pin', () => {
     const steps = buildSteps({
       flow: 'engine',
       env,
@@ -353,12 +353,10 @@ describe('buildSteps (flow-aware)', () => {
       'restart-app',
       'wait-mcp',
       'verify',
-      'pull-shared-model',
-      'shared-connect',
       'register',
       'write-rule',
     ])
-    expect(steps.find((s) => s.id === 'pull-shared-model')!.cmd).toEqual(['ollama', 'pull', 'qwen3-embedding:4b'])
+    expect(steps.find((s) => s.id === 'pull-shared-model')).toBeUndefined()
   })
   it('legacy mcp-only flow is a personal-first install alias, not a shared-only runtime', () => {
     const steps = buildSteps({
@@ -368,7 +366,7 @@ describe('buildSteps (flow-aware)', () => {
       streamToken: 'tid.secret',
       memoryInstallMode: 'personal-and-shared',
     })
-    expect(steps.map((s) => s.id)).toEqual(['deps', 'pull-model', 'compose-up', 'wait-postgres', 'prisma-migrate', 'rls', 'seed', 'restart-app', 'wait-mcp', 'verify', 'shared-connect', 'register', 'write-rule'])
+    expect(steps.map((s) => s.id)).toEqual(['deps', 'pull-model', 'compose-up', 'wait-postgres', 'prisma-migrate', 'rls', 'seed', 'restart-app', 'wait-mcp', 'verify', 'register', 'write-rule'])
   })
   it('client flow with personal isolation installs the local private stack first', () => {
     const personal = buildSteps({ flow: 'engine', personalMemoryEnabled: true, mcpRuntime: 'node', env })
@@ -406,9 +404,9 @@ describe('buildSteps (flow-aware)', () => {
     ])
     expect(personal.find((s) => s.id === 'compose-up')?.envOverride?.COMPOSE_PROFILES).toBe('mcp-stream')
   })
-  it('pull-model carries the server pin; register/write-rule are fn steps', () => {
+  it('ignores the retired server pin; register/write-rule remain local fn steps', () => {
     const eng = buildSteps({ flow: 'engine', env, memoryInstallMode: 'personal-and-shared', pullModel: 'qwen3-embedding:8b' })
-    expect(eng.find((s) => s.id === 'pull-shared-model')!.cmd).toEqual(['ollama', 'pull', 'qwen3-embedding:8b'])
+    expect(eng.find((s) => s.id === 'pull-shared-model')).toBeUndefined()
     const steps = buildSteps({ flow: 'mcp', env })
     expect(steps.find((s) => s.id === 'register')!.fnId).toBe('register')
     expect(steps.find((s) => s.id === 'write-rule')!.fnId).toBe('write-rule')
@@ -704,26 +702,26 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(phasesFor('full')).not.toContain('remote')
     expect(nextPhase('shared', 'full')).toBeNull()
   })
-  it('legacy engine flow retains its optional server-connection sequence', () => {
+  it('legacy engine flow uses the personal-only sequence', () => {
     expect(nextPhase('flow', 'engine')).toBe('prereqs')
     expect(nextPhase('prereqs', 'engine')).toBe('account')
     expect(nextPhase('account', 'engine')).toBe('embedding')
-    expect(nextPhase('review', 'engine')).toBe('shared')
-    expect(nextPhase('shared', 'engine')).toBe('install')
+    expect(nextPhase('review', 'engine')).toBe('install')
+    expect(nextPhase('shared', 'engine')).toBeNull()
   })
   it('legacy engine personal-isolation options do not change the personal-first sequence', () => {
     const personal = { personalMemoryEnabled: true }
     expect(nextPhase('flow', 'engine', personal)).toBe('prereqs')
     expect(nextPhase('prereqs', 'engine', personal)).toBe('account')
     expect(nextPhase('account', 'engine', personal)).toBe('embedding')
-    expect(nextPhase('review', 'engine', personal)).toBe('shared')
-    expect(nextPhase('shared', 'engine', personal)).toBe('install')
+    expect(nextPhase('review', 'engine', personal)).toBe('install')
+    expect(nextPhase('shared', 'engine', personal)).toBeNull()
   })
-  it('legacy mcp flow retains its optional server-connection sequence', () => {
+  it('legacy mcp flow uses the personal-only sequence', () => {
     expect(nextPhase('flow', 'mcp')).toBe('prereqs')
     expect(nextPhase('prereqs', 'mcp')).toBe('account')
-    expect(nextPhase('review', 'mcp')).toBe('shared')
-    expect(nextPhase('shared', 'mcp')).toBe('install')
+    expect(nextPhase('review', 'mcp')).toBe('install')
+    expect(nextPhase('shared', 'mcp')).toBeNull()
   })
   it('legacy mcp personal-isolation options do not change the personal-first sequence', () => {
     const personal = { personalMemoryEnabled: true }
@@ -732,7 +730,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(nextPhase('account', 'mcp', personal)).toBe('embedding')
     expect(nextPhase('embedding', 'mcp', personal)).toBe('extraction')
     expect(nextPhase('rule', 'mcp', personal)).toBe('review')
-    expect(nextPhase('review', 'mcp', personal)).toBe('shared')
+    expect(nextPhase('review', 'mcp', personal)).toBe('install')
   })
   it('legacy shared connection is absent from the full personal wizard', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
@@ -740,9 +738,9 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).toContain('interface RemoteIdentity')
     expect(app).toContain('setRemoteIdentity')
     expect(app).toContain("serverPin?.dashboardLoginMode === 'sso'")
-    expect(app).toContain('Connect Shared Memories')
-    expect(app).toContain('sharedConnectEnabled')
-    expect(app).toContain("flow !== 'full' && phase === 'shared'")
+    expect(app).not.toContain('Connect Shared Memories')
+    expect(app).not.toContain('sharedConnectEnabled')
+    expect(app).not.toContain('/api/remote/test')
   })
   it('remote server config maps the API active embedding pin into the wizard pin', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
@@ -802,7 +800,7 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).not.toContain('updateGithubToken')
     expect(app).toContain('Global Level <span className="seg-badge">recommended</span>')
     expect(app).toContain('review-env-terminal')
-    expect(app).toContain('shared-connect-body')
+    expect(app).not.toContain('shared-connect-body')
   })
   it('does not re-enable Next from a parent phase effect after extraction reports blocked', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
@@ -842,8 +840,11 @@ describe('public wizard memory submissions', () => {
     expect(steps).not.toContain('pull-shared-model')
   })
 
-  it.each(['engine', 'mcp'] as const)('preserves existing %s operator connector settings', flow => {
+  it.each(['engine', 'mcp'] as const)('cannot activate old connector settings in %s flow', flow => {
     const settings = memorySettingsForFlow(flow, stale, 'qwen3-embedding:4b')
-    expect(settings).toMatchObject({ ...stale, sharedApiUrl: stale.remoteApiUrl, sharedUserToken: stale.remoteToken, pullModel: 'qwen3-embedding:4b' })
+    expect(settings).toMatchObject({ personalMemoryEnabled: true, memoryInstallMode: 'personal-only', defaultMemorySurface: 'personal', remoteApiUrl: '', remoteToken: '' })
+    expect(settings.sharedApiUrl).toBeUndefined()
+    expect(settings.sharedUserToken).toBeUndefined()
+    expect(settings.pullModel).toBeUndefined()
   })
 })

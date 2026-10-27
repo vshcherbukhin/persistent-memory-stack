@@ -6,8 +6,9 @@ files aligned when the operating protocol changes.
 
 ## Required First Step
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
-  Use this same canonical project for all memory writes; the folder/repository name is the memory namespace.
+- Before non-trivial work, call `recall_context(query)` across the authorized personal space.
+  Use `persistent-memory-stack` for memory writes about this repository.
+  Project metadata organizes knowledge; it does not restrict default recall or confer ownership.
   If the persistent-memory MCP is unavailable, say so and continue from repo evidence.
 - The detailed persistent-memory protocol is installed by the wizard in the global
   Codex rule, `~/.codex/rules/persistent-memory.md`, unless the wizard was run with
@@ -30,8 +31,8 @@ files aligned when the operating protocol changes.
   user data. Do not wipe or reinstall unless the user explicitly asks.
 - Direct Compose commands that build/start/recreate services must include
   `--env-file .env.persistent-memory`.
-- Client installs are personal-first: local Personal Memories stack first, optional
-  Shared Memories connection later from the local dashboard.
+- Community is personal-only: one local Personal Memories stack and dashboard.
+  Historical shared/foreign records remain preserved outside active personal recall.
 - Stream MCP is the only runtime; legacy Node/stdio settings are migration aliases.
 - Committed product/operator docs live in `documentation/`; development plans and
   temporary notes go only in `.local/documents/` and must not be committed.

@@ -27,8 +27,7 @@ This page is available to superusers. Appearance is also available from
 ## Read the page
 
 The local dashboard's left menu selects **Fact extraction**, **Embeddings**,
-**Stream sessions**, or **Appearance**. A shared-server operator console also
-has a **Dashboard login** section.
+**Stream sessions**, or **Appearance**. Community has no shared-server operator space.
 
 **Fact extraction** shows the active provider, model, and masked key source. You can choose a model, optionally replace its provider key, test the configuration, and save it. A blank key field keeps the stored key.
 

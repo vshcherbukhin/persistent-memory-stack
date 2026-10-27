@@ -423,7 +423,7 @@ WHERE r.group_id IN $group_ids
 RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
        a.uuid AS source_node_uuid, b.uuid AS target_node_uuid,
        a.name AS source_name, b.name AS target_name,
-       r.group_id AS group_id,
+       r.group_id AS group_id, r.episodes AS episodes,
        r.created_at AS created_at, r.valid_at AS valid_at,
        r.invalid_at AS invalid_at, r.expired_at AS expired_at,
        sort_at AS sort_at
@@ -442,7 +442,7 @@ WHERE r.group_id IN $group_ids
 RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
        a.uuid AS source_node_uuid, b.uuid AS target_node_uuid,
        a.name AS source_name, b.name AS target_name,
-       r.group_id AS group_id,
+       r.group_id AS group_id, r.episodes AS episodes,
        r.created_at AS created_at, r.valid_at AS valid_at,
        r.invalid_at AS invalid_at, r.expired_at AS expired_at,
        sort_at AS sort_at
@@ -457,7 +457,7 @@ MATCH (a:Entity {uuid: $source_uuid})-[r:RELATES_TO]->(b:Entity {uuid: $target_u
 RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
        a.uuid AS source_node_uuid, b.uuid AS target_node_uuid,
        a.name AS source_name, b.name AS target_name,
-       r.group_id AS group_id,
+       r.group_id AS group_id, r.episodes AS episodes,
        r.created_at AS created_at, r.valid_at AS valid_at,
        r.invalid_at AS invalid_at, r.expired_at AS expired_at
 """

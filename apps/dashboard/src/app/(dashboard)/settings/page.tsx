@@ -22,7 +22,7 @@ function ClientBridgeEmbeddingCard({ settings }: { settings: Settings }) {
         <span className="badge-readonly">{settings.activeVectorName}</span>
       </div>
       <p className="note" style={{ maxWidth: 680 }}>
-        To change this pin, update the server deployment and reconnect Shared Memories so every MCP uses the same local embedding model.
+        Keep this model and dimension while existing memories use them. Change the pin only through the supported embedding migration so stored vectors remain compatible.
       </p>
       <div className={`notice ${noticeTone}`} data-health-state={settings.capabilityHealth.embeddings.state} style={{ marginTop: 14 }}>
         <div className="notice-title">Client embedding health: {health.badge}</div>

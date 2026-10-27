@@ -1,16 +1,16 @@
-# Persistent Memory Stack
+# Persistent Memory Community
 
 **Give your AI coding assistants a memory that lasts beyond the chat.**
 
-Persistent Memory is a self-hosted memory system for Claude, Codex, and
+Persistent Memory Community is a free, self-hosted personal memory service for Claude, Codex, and
 MCP-compatible agents. Carry project decisions, hard-won fixes, and useful
 context across conversations. Find the right knowledge again through semantic
 search, explore its connections in a visual graph, and keep the source evidence
 within reach.
 
-Start with your own **Personal Memories** stack. Configure optional **Shared
-Memories** connections later from the local dashboard when you have a shared
-server and its connector token.
+One **Personal Memories** space connects your projects and general conversations.
+Project labels organize knowledge while explicit filters keep focused recall precise.
+Shared Memories connections and remote sharing are retired in Community.
 
 [Get started](#get-started) · [Features](#what-you-can-do) ·
 [Documentation](documentation/) · [Releases](https://github.com/vshcherbukhin/persistent-memory-stack/releases) · [Release notes](release-history.md)
@@ -24,11 +24,11 @@ server and its connector token.
 | **Recall relevant context** | Combine semantic retrieval with graph relationships and bounded responses that retain references for deeper follow-up. |
 | **Explore a living knowledge graph** | Browse memories, entities, and connections in 3D or 2D. Filter by project, tags, badges, and fact validity; follow how knowledge changes over time. |
 | **Keep the evidence** | Ingest documents and retain links between sources, memories, and derived graph facts. Review graph impact before deleting a memory. |
-| **Keep personal and shared work distinct** | Use Personal Memories independently, then configure an optional Shared Memories server connection with scoped access from the local dashboard. |
+| **Connect personal knowledge** | Recall across your own projects and general conversations, retaining distinct decisions, sources and assertion status. |
 | **Choose models that fit your computer** | Setup checks RAM, disk space, and Docker resources. Use local Ollama embeddings or OpenAI/Voyage APIs, with suggested models and connection tests. Configure fact extraction separately. |
 | **See what the system is doing** | Inspect memories, service health, worker activity, security findings, and model token usage from one dashboard. |
 | **Choose a comfortable appearance** | Use the default Obsidian dark theme, Porcelain light theme, or Match system in the dashboard. Change appearance from your profile without changing anyone else's account settings. |
-| **Avoid unnecessary model work** | Unchanged memory updates skip extraction, embedding, and graph processing; meaningful edits keep the full pipeline. |
+| **Control model work** | Stable retry keys reuse accepted writes. Legacy memories stay readable without mandatory bulk inference; derived processing follows accepted revisions. |
 | **Maintain memory with control** | Background workers handle processing and maintenance. Sensitive-data checks and access controls protect the memory flow; explicit updates take snapshots before rebuilding. |
 
 Your memory services and databases run in Docker Linux containers. Native host
@@ -37,7 +37,7 @@ macOS. Extraction uses the provider you configure; running the stack locally
 does not require every model to run locally.
 
 The dashboard and installer bundle their fonts locally, so their appearance does
-not depend on a font CDN. Cloud model requests, downloads and update checks still
+not depend on a font CDN. API model requests, downloads and update checks still
 require network access. The memory graph keeps a dark canvas in both themes to
 make its nodes and connections legible; surrounding controls follow your theme.
 See [appearance and profile settings](documentation/spaces/personal/profile.md#appearance).
@@ -121,8 +121,8 @@ The 11-step personal-install wizard checks prerequisites, prepares models, tests
 provider, builds the stack, and registers your selected Claude/Codex clients.
 Have your extraction API key and, for API embeddings, an embedding API key ready
 (the same OpenAI key can serve both). Keep the installer terminal
-open until it finishes. Shared-server connections are configured later from the
-dashboard, after personal installation is complete.
+open until it finishes. Setup installs the local personal stack and never activates
+a remote memory connector from old configuration.
 
 Then open the dashboard at **[localhost:3200](http://localhost:3200)** and reconnect
 your agent client so it loads the MCP configuration and memory rules. A fresh
@@ -174,7 +174,7 @@ The full product, dashboard, architecture, and operator documentation lives in
 
 Live integration tests use a separately namespaced server-mode DEV stack with
 their own containers, images, volumes, network, ports, and bootstrap token.
-They do not target your Personal or Shared Memories installation.
+They do not target your Personal Memories installation.
 
 ```bash
 npm run dev-test:up

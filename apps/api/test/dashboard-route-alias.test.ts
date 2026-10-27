@@ -25,7 +25,7 @@ function declaredDashboardRoutes(): Array<{ method: string; path: string; file: 
   const routePattern = /z4\.(get|post|put|patch|delete)\(\s*['"`]([^'"`]+)['"`]/g
 
   for (const file of readdirSync(routesDir)) {
-    if (!file.endsWith('.ts') || file === 'index.ts' || file === 'shared.ts') continue
+    if (!file.endsWith('.ts') || ['index.ts', 'shared.ts', 'grants.ts', 'shared-connection.ts'].includes(file)) continue
     const source = readFileSync(new URL(file, routesDir), 'utf8')
     for (const match of source.matchAll(routePattern)) {
       routes.push({
@@ -50,6 +50,11 @@ describe('dashboard route aliases', () => {
 
       expect(queues.scheduled).toHaveBeenCalledOnce()
       expect(queues.memoryGraphRebuild).toHaveBeenCalledOnce()
+      for (const prefix of ['/dashboard', '/admin']) {
+        expect(app.hasRoute({ method: 'POST', url: `${prefix}/grants` })).toBe(false)
+        expect(app.hasRoute({ method: 'PUT', url: `${prefix}/shared-connection` })).toBe(false)
+        expect(app.hasRoute({ method: 'POST', url: `${prefix}/memories/import` })).toBe(true)
+      }
       const expected = declaredDashboardRoutes()
       expect(expected.length).toBeGreaterThan(50)
 

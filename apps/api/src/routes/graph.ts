@@ -15,18 +15,25 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
+import { KnowledgeFilters, type KnowledgeFilter } from '@pm/shared'
 import { forbidden } from '../authz/errors.ts'
 import { requireTeamMember } from '../authz/guards.ts'
 import { graphiti } from '../services/graphiti.ts'
 import { currentMemorySurface, graphProjectGroup } from '../services/graph-project-group.ts'
+import { runInTenant, type Tx } from '@pm/db'
 import type { GraphitiFactEdge } from '../clients/graphiti.ts'
+import { knowledgeWhere } from '../services/knowledge.ts'
 
-const Scope = z.union([z.enum(['own', 'granted']), z.array(z.string())]).optional()
+const Scope = z.literal('own').optional()
 /** Direct graph routes require a named partition list; only the MCP chooses Personal `general`. */
 export const GraphReadProjects = z
-  .union([z.string().min(1).transform((project) => [project]), z.array(z.string().min(1)).min(1).max(20)])
+  .union([z.string().min(1).transform((project) => [project]), z.array(z.string().min(1)).min(1).max(20)]).optional()
 
 const FactEdgeSchema = z.object({
+  episodes: z.array(z.string()),
+  sourceMemoryIds: z.array(z.string()),
+  assertionStatus: z.string(),
+  verification: z.literal('derived_source_reported'),
   uuid: z.string(),
   name: z.string().nullable(),
   fact: z.string().nullable(),
@@ -51,28 +58,15 @@ type GraphFactLabel = { project: string; surface: 'personal' | 'shared'; relatio
 async function resolveGroupIds(
   req: FastifyRequest,
   scope: z.infer<typeof Scope>,
-  projects: z.infer<typeof GraphReadProjects>,
+  filters: KnowledgeFilter,
 ): Promise<{ groupIds: string[]; labels: Map<string, GraphFactLabel> }> {
   const own = req.identity!.teamId! // guaranteed by requireTeamMember
-  const mounted = req.identity!.mountedTeamIds
-  const readableTeams = [own, ...mounted]
-  let teams: string[]
-  if (!scope || scope === 'own') teams = [own]
-  else if (scope === 'granted') teams = mounted
-  else {
-    teams = scope
-  }
-  if (Array.isArray(scope)) {
-    for (const t of scope) {
-      if (!readableTeams.includes(t)) {
-        throw forbidden(
-          'scope_not_readable',
-          `Team "${t}" is not mounted for graph reads. scope can only narrow to your team or a mounted team.`,
-        )
-      }
-    }
-  }
-  const selectedProjects = projects
+  if (scope && scope !== 'own') throw forbidden('sharing_retired', 'Shared/mounted scope is retired; no cross-owner graph reads are permitted.')
+  const teams = [own]
+  const selectedProjects = await runInTenant(async (tx: Tx) => {
+    const rows = await tx.memory.findMany({ where: { ...knowledgeWhere(filters), graphStatus: 'ok' }, distinct: ['project'], select: { project: true }, take: 100 })
+    return rows.map(row => row.project)
+  })
   const surface = currentMemorySurface()
   const labels = new Map<string, GraphFactLabel>()
   for (const teamId of teams) {
@@ -102,12 +96,43 @@ export function tagKnownGraphFacts<T extends GraphitiFactEdge>(
   ]
 }
 
+/** A derived fact cannot outlive, cross ownership, or silently upgrade its sources. */
+export async function currentGraphFacts<T extends GraphitiFactEdge>(facts: T[], labels: Map<string, GraphFactLabel>, projectsOrFilters?: string[] | KnowledgeFilter) {
+  const filters = Array.isArray(projectsOrFilters) ? { projects: projectsOrFilters } : projectsOrFilters ?? {}
+  const episodeIds = [...new Set(facts.flatMap(fact => fact.episodes ?? []))]
+  if (!episodeIds.length) return []
+  const rows = await runInTenant((tx: Tx) => tx.memory.findMany({ where: { ...knowledgeWhere(filters), graphStatus: 'ok', graphEpisodeId: { in: episodeIds } }, select: { id: true, graphEpisodeId: true, graphGroupId: true, assertionStatus: true, relationshipDependencies: true } }))
+  const provenance = await runInTenant((tx: Tx) => tx.graphEpisodeProvenance.findMany({ where: { graphEpisodeId: { in: episodeIds }, subjectKind: 'memory' }, select: { subjectId: true, graphEpisodeId: true, graphGroupId: true } }))
+  const authorized = await runInTenant((tx: Tx) => tx.memory.findMany({ where: { ...knowledgeWhere(filters), id: { in: provenance.map(item => item.subjectId) } }, select: { id: true, graphEpisodeId: true, relationshipDependencies: true } }))
+  const dependencyIds = [...rows,...authorized].flatMap(row => Array.isArray(row.relationshipDependencies) ? row.relationshipDependencies.flatMap(value => value && typeof value === 'object' && 'targetMemoryId' in value ? [String(value.targetMemoryId)] : []) : [])
+  const targets = dependencyIds.length ? await runInTenant((tx: Tx) => tx.memory.findMany({ where: { id: { in: dependencyIds } }, select: { id: true, revision: true } })) : []
+  const targetVersions = new Map(targets.map(target => [target.id, target.revision]))
+  const dependencyValid = (row: { relationshipDependencies: unknown }) => !Array.isArray(row.relationshipDependencies) || row.relationshipDependencies.every(value => value && typeof value === 'object' && 'targetMemoryId' in value && 'targetRevision' in value && targetVersions.get(String(value.targetMemoryId)) === value.targetRevision)
+  const supported = rows.filter(dependencyValid)
+  const byEpisode = new Map(supported.map(row => [row.graphEpisodeId, row]))
+  const authorizedSubjects = new Map(authorized.filter(dependencyValid).map(row => [row.id, row]))
+  return tagKnownGraphFacts(facts, labels).flatMap(fact => {
+    const episodes = fact.episodes ?? []
+    const current = episodes.filter(episode => byEpisode.get(episode)?.graphGroupId === fact.group_id)
+    if (!current.length) return []
+    // Old episodes from a still-authorized subject are obsolete support, not an
+    // automatic veto on a fact that has current evidence. Unknown/foreign source
+    // episodes remain fail-closed, and only current support is attributed below.
+    if (!episodes.every(episode => current.includes(episode) || provenance.some(item => item.graphEpisodeId === episode && item.graphGroupId === fact.group_id && authorizedSubjects.has(item.subjectId) && authorizedSubjects.get(item.subjectId)!.graphEpisodeId !== episode))) return []
+    const sources = current.map(episode => byEpisode.get(episode)!)
+    const statuses = [...new Set(sources.map(source => source.assertionStatus))]
+    return [{ ...fact, episodes: current, sourceMemoryIds: [...new Set(sources.map(source => source.id))], assertionStatus: statuses.length === 1 ? statuses[0]! : 'inference', verification: 'derived_source_reported' as const }]
+  })
+
+}
+
 export async function graphRoutes(app: FastifyInstance): Promise<void> {
   const z4 = app.withTypeProvider<ZodTypeProvider>()
 
   // ── POST /graph/search — search_graph ──────────────────────────────────────
   const SearchBody = z
     .object({
+      ...KnowledgeFilters.shape,
       query: z.string().min(1),
       limit: z.number().int().min(1).max(100).default(10),
       centerNodeUuid: z.string().optional(),
@@ -127,7 +152,8 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (req, reply) => {
-      const groups = await resolveGroupIds(req, req.body.scope, req.body.projects)
+      const groups = await resolveGroupIds(req, req.body.scope, req.body)
+      if (!groups.groupIds.length) return reply.code(200).send({ facts: [] })
       const res = await graphiti.search({
         query: req.body.query,
         groupIds: groups.groupIds,
@@ -135,7 +161,7 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
         centerNodeUuid: req.body.centerNodeUuid,
         validOnly: req.body.validOnly,
       })
-      return reply.code(200).send({ facts: tagKnownGraphFacts(res.facts, groups.labels) })
+      return reply.code(200).send({ facts: await currentGraphFacts(res.facts, groups.labels, req.body) })
     },
   )
 
@@ -144,6 +170,7 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
   // (the worker discards episode node uuids) → composed from search(query=name)
   // + an optional timeline. An absent entity → empty result, NOT 404.
   const EntityQuery = z.object({
+    ...KnowledgeFilters.shape,
     scope: Scope,
     projects: GraphReadProjects,
     limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -163,7 +190,8 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (req, reply) => {
-      const groups = await resolveGroupIds(req, req.query.scope, req.query.projects)
+      const groups = await resolveGroupIds(req, req.query.scope, req.query)
+      if (!groups.groupIds.length) return reply.code(200).send({ name: req.params.name, facts: [] })
       const res = await graphiti.search({
         query: req.params.name,
         groupIds: groups.groupIds,
@@ -171,13 +199,14 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
       })
       return reply
         .code(200)
-        .send({ name: req.params.name, facts: tagKnownGraphFacts(res.facts, groups.labels) })
+        .send({ name: req.params.name, facts: await currentGraphFacts(res.facts, groups.labels, req.query) })
     },
   )
 
   // ── GET /graph/timeline — get_timeline ──────────────────────────────────────
   const TimelineEntrySchema = FactEdgeSchema.extend({ status: z.enum(['valid', 'invalid']) })
   const TimelineQuery = z.object({
+    ...KnowledgeFilters.shape,
     entityUuid: z.string().optional(),
     includeInvalid: z
       .union([z.boolean(), z.enum(['true', 'false'])])
@@ -204,14 +233,15 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (req, reply) => {
-      const groups = await resolveGroupIds(req, req.query.scope, req.query.projects)
+      const groups = await resolveGroupIds(req, req.query.scope, req.query)
+      if (!groups.groupIds.length) return reply.code(200).send({ entityUuid: req.query.entityUuid ?? null, entries: [] })
       const res = await graphiti.timeline({
         groupIds: groups.groupIds,
         entityUuid: req.query.entityUuid,
         includeInvalid: req.query.includeInvalid,
         limit: req.query.limit,
       })
-      const ordered = tagKnownGraphFacts(res.entries, groups.labels)
+      const ordered = await currentGraphFacts(res.entries, groups.labels, req.query)
       return reply.code(200).send({ entityUuid: res.entity_uuid, entries: ordered })
     },
   )
@@ -223,6 +253,7 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
     superseded_by: FactEdgeSchema.nullable(),
   })
   const ContradictionsQuery = z.object({
+    ...KnowledgeFilters.shape,
     entityUuid: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(1000).default(100),
     scope: Scope,
@@ -242,21 +273,19 @@ export async function graphRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (req, reply) => {
-      const groups = await resolveGroupIds(req, req.query.scope, req.query.projects)
+      const groups = await resolveGroupIds(req, req.query.scope, req.query)
+      if (!groups.groupIds.length) return reply.code(200).send({ contradictions: [] })
       const res = await graphiti.contradictions({
         groupIds: groups.groupIds,
         entityUuid: req.query.entityUuid,
         limit: req.query.limit,
       })
-      const contradictions = res.contradictions.flatMap((contradiction) => {
-        const superseded = tagKnownGraphFacts([contradiction.superseded], groups.labels).at(0)
-        const successor = contradiction.superseded_by
-          ? tagKnownGraphFacts([contradiction.superseded_by], groups.labels).at(0)
-          : null
-        return superseded && (!contradiction.superseded_by || successor)
-          ? [{ superseded, superseded_by: successor ?? null }]
-          : []
-      })
+      const contradictions = []
+      for (const item of res.contradictions) {
+        const superseded = (await currentGraphFacts([item.superseded], groups.labels, req.query))[0]
+        const supersededBy = item.superseded_by ? (await currentGraphFacts([item.superseded_by], groups.labels, req.query))[0] : null
+        if (superseded && (!item.superseded_by || supersededBy)) contradictions.push({ superseded, superseded_by: supersededBy ?? null })
+      }
       return reply.code(200).send({ contradictions })
     },
   )

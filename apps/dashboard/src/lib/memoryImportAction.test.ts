@@ -24,17 +24,17 @@ describe('import Server Action error contract', () => {
 
   it('returns the server code and message as data instead of a production-redacted exception', async () => {
     mocks.importMemories.mockRejectedValue(new ApiError(422, 'invalid_import', 'Row shape is invalid', 'row 1'))
-    await expect(importMemoriesAction([{ content: 'example' }])).resolves.toEqual({ ok: false, error: 'HTTP 422 · invalid_import: Row shape is invalid (row 1)', rejected: true })
+    await expect(importMemoriesAction({ schema: 'pm.memory-export/1', memories: [{ content: 'example' }], ownerConfirmation: true })).resolves.toEqual({ ok: false, error: 'HTTP 422 · invalid_import: Row shape is invalid (row 1)', rejected: true })
   })
 
   it('returns nested timeout causes to the browser', async () => {
     mocks.importMemories.mockRejectedValue(new TypeError('fetch failed', { cause: { code: 'UND_ERR_HEADERS_TIMEOUT' } }))
-    expect(await importMemoriesAction([{}])).toMatchObject({ ok: false, error: expect.stringContaining('UND_ERR_HEADERS_TIMEOUT') })
+    expect(await importMemoriesAction({ schema: 'pm.memory-export/1', memories: [{}], ownerConfirmation: true })).toMatchObject({ ok: false, error: expect.stringContaining('UND_ERR_HEADERS_TIMEOUT') })
   })
 
   it('checks authorization before submitting rows', async () => {
     mocks.requireSession.mockResolvedValue({ adminLevel: 'none' })
-    expect(await importMemoriesAction([{}])).toEqual({ ok: false, error: 'Import requires admin.', rejected: true })
+    expect(await importMemoriesAction({ schema: 'pm.memory-export/1', memories: [{}], ownerConfirmation: true })).toEqual({ ok: false, error: 'Import requires admin.', rejected: true })
     expect(mocks.importMemories).not.toHaveBeenCalled()
   })
 
@@ -43,10 +43,11 @@ describe('import Server Action error contract', () => {
     expect(await bulkDeleteAction({ previewToken: 'expired' })).toEqual({ ok: false, error: 'Preview expired. Review the live scope again.' })
   })
 
-  it('returns a row result and strips source team identity on the personal surface', async () => {
+  it('preserves source ownership evidence and archive revision metadata for the guarded converter', async () => {
     const result = { imported: 1, embedded: 1, pending: 0, errors: 0, details: [] }
     mocks.importMemories.mockResolvedValue(result)
-    expect(await importMemoriesAction([{ id: 'example', teamId: 'old-team' }], 'old-team', 'persistent-memory-stack')).toEqual({ ok: true, result })
-    expect(mocks.importMemories).toHaveBeenCalledWith([{ id: 'example' }], undefined, 'persistent-memory-stack', 'personal')
+    const archive = { schema: 'pm.memory-export/2' as const, memories: [{ id: 'example', teamId: 'original-owner-evidence', revision: 4, classification: null, revisionHistory: [{ revision: 1 }] }], ownerConfirmation: true as const }
+    expect(await importMemoriesAction(archive)).toEqual({ ok: true, result })
+    expect(mocks.importMemories).toHaveBeenCalledWith(archive, 'personal')
   })
 })

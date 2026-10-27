@@ -10,13 +10,7 @@ import { z } from 'zod'
 import type { ApiError } from './errors.ts'
 
 // ── Scope (subtractive; validated server-side) ──────────────────────────────
-export const Scope = z
-  .union([z.enum(['own', 'granted']), z.array(z.string())])
-  .optional()
-  .describe(
-    'Optional team scope. Omit = your team; "granted" = mounted teams as optional additional context. ' +
-      'Or provide mounted team ids only. scope can only narrow, never widen. e.g. "own"',
-  )
+export const Scope = z.literal('own').optional().describe('Community supports only the validated personal owner scope.')
 
 export const GraphProjects = z
   .array(z.string().min(1))
@@ -24,7 +18,7 @@ export const GraphProjects = z
   .max(20)
   .optional()
   .describe(
-    'Explicit graph projects to recall together. Omit for the personal "general" project only. ' +
+    'Explicit graph projects to recall together. Omit for the authorized personal space. ' +
       'Use this only when the task needs a workspace picture across named projects. e.g. ["inventory-service", "customer-portal"]',
   )
 
@@ -103,6 +97,7 @@ export const Metadata = z.object(MetadataShape).strict()
 // by SEMANTIC search (search_memories) and omitted by the non-vector list/get endpoints —
 // hence optional (present → surfaced; absent → still valid).
 export const ResultRowShape = {
+  revision: z.number().int().positive(), classification: z.unknown(), classificationStatus: z.string(), embeddingStatus: z.string(), graphStatus: z.string(), relationshipExplanations: z.array(z.string()).optional(),
   id: z.string(),
   content: z.string(),
   category: z.string(),
@@ -124,6 +119,7 @@ export const ResultRow = z.object(ResultRowShape)
 
 // ── A Graphiti fact edge (the API's FactEdgeSchema) ──────────────────────────
 export const FactEdgeShape = {
+  episodes: z.array(z.string()), sourceMemoryIds: z.array(z.string()), assertionStatus: z.string(), verification: z.literal('derived_source_reported'),
   uuid: z.string(),
   name: z.string().nullable(),
   fact: z.string().nullable(),
@@ -135,8 +131,8 @@ export const FactEdgeShape = {
   valid_at: z.string().nullable(),
   invalid_at: z.string().nullable(),
   project: z.string(),
-  surface: z.enum(['personal', 'shared']),
-  relation: z.enum(['own', 'granted']),
+  surface: z.literal('personal'),
+  relation: z.literal('own'),
 }
 export const FactEdge = z.object(FactEdgeShape)
 
@@ -226,7 +222,7 @@ function graphContractRecovery(toolName: string, detail: string): ToolResult {
 export function fromApiError(err: ApiError): ToolResult {
   const reject = err.rejectPayload()
   if (reject) return toolError(err.toAgentText(), { reject })
-  return toolError(err.toAgentText())
+  return toolError(err.toAgentText(), err.body ? { error: err.code, details: err.body.details ?? null, contractVersion: err.body.contractVersion ?? null } : undefined)
 }
 
 /** The project nudge ToolError — fired client-side before any API call. */

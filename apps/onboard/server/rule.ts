@@ -11,9 +11,41 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TextDecoder } from 'node:util'
+import { createHash } from 'node:crypto'
 import { agentProfiles, normalizedProjectPaths } from './agent-profiles.js'
 
 const RULE_BASENAME = 'persistent-memory.md'
+const RULE_BEGIN = '<!-- persistent-memory:rule-begin -->'
+const RULE_END = '<!-- persistent-memory:rule-end -->'
+// Exact pre-v2 generated template; user changes invalidate this ownership proof.
+const LEGACY_RULE_SHA256 = '2fdcb877bfa33e47d335ba7cae52b950cfd6b173c622709b21486ac349684536'
+
+export function mergeManagedRule(previous: string, replacement: string): string {
+  const body = replacement.endsWith('\n') ? replacement : `${replacement}\n`
+  if (body.includes(RULE_BEGIN) || body.includes(RULE_END)) throw new Error('Detailed protocol contains reserved ownership markers; instruction and rule files were not changed.')
+  const managed = `${RULE_BEGIN}\n${body}${RULE_END}\n`
+  if (!previous) return managed
+  const markers: { kind: 'begin' | 'end'; offset: number }[] = []
+  let offset = 0
+  let fence: MarkdownFence | null = null
+  for (const line of previous.split('\n')) {
+    const previousFence = fence
+    fence = nextFence(line, fence)
+    if (!previousFence && !fence) {
+      const exact = line.replace(/\r$/, '')
+      if (exact === RULE_BEGIN) markers.push({ kind: 'begin', offset })
+      if (exact === RULE_END) markers.push({ kind: 'end', offset })
+    }
+    offset += line.length + 1
+  }
+  if (markers.length === 2 && markers[0]!.kind === 'begin' && markers[1]!.kind === 'end') {
+    return previous.slice(0, markers[0]!.offset) + managed.trimEnd() + previous.slice(markers[1]!.offset + RULE_END.length)
+  }
+  if (markers.length) throw new Error('Detailed protocol ownership markers are damaged; instruction and rule files were not changed. Preserve the original and review it manually.')
+  const normalized = previous.replace(/\r\n/g, '\n')
+  if (normalized === body || createHash('sha256').update(normalized).digest('hex') === LEGACY_RULE_SHA256) return managed
+  throw new Error('Existing detailed protocol has user edits or unknown ownership; instruction and rule files were not changed. Review its contents before migrating the managed protocol.')
+}
 const MEMORY_BLOCK_HEADING = '## Persistent Memory Usage (MANDATORY)'
 const MEMORY_BLOCK_BEGIN = '<!-- persistent-memory:begin -->'
 const MEMORY_BLOCK_END = '<!-- persistent-memory:end -->'
@@ -41,7 +73,7 @@ export function defaultMemoryBlock(ruleRef: string): string {
   return `${MEMORY_BLOCK_HEADING}
 
 - Detailed protocol: read ${ruleRef} before using memory tools. Treat that rule as the source of truth for tool order, memory shapes, and save/update/delete rules.
-- Start every non-trivial task by calling \`recall_context(query, project)\` before planning or editing. If the tool schema is deferred, load persistent-memory through ToolSearch/tool_search first.
+- Start every non-trivial task by calling \`recall_context(query)\` before planning or editing. Recall defaults to the authorized personal space; use a project filter only when explicitly requested. If the tool schema is deferred, load persistent-memory through ToolSearch/tool_search first.
 - Use memory to learn the project/topic vocabulary, then verify against source files, tests, docs, or runtime evidence before changing behavior.
 - If memory is missing or thin, say so briefly, continue from current evidence, and save the durable lesson once you learn it.
 - Save user corrections, gotchas, fixes, decisions, tool gaps, and non-obvious workflow details immediately. Future sessions should not rediscover the same issue.
@@ -94,6 +126,7 @@ function legacyGeneratedLine(line: string): boolean {
   if (isLegacyRefLine(line)) return true
   if (/^- Detailed protocol: (?:read )?@(?:\.(?:claude|codex)\/)?rules\/persistent-memory\.md\b/.test(trimmed)) return true
   const known = new Set([
+    '- Start every non-trivial task by calling `recall_context(query, project)` before planning or editing. If the tool schema is deferred, load persistent-memory through ToolSearch/tool_search first.',
     ...defaultMemoryBlock('@rules/persistent-memory.md').split(/\r?\n/).map(value => value.trim()).filter(value => value.startsWith('- ')),
     'When any of these happen, STOP and call `add_memory` IMMEDIATELY in the same response — not "later", not "at session end":',
     '- **User corrects you** — save what you tried, why it was wrong, the correction, the right approach. Highest-value learning.',
@@ -300,17 +333,19 @@ export function writeRuleTargets(targets: RuleTarget[], ruleBody: string, memory
     try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(original) }
     catch { throw new Error(`Could not read ${t.memoryFile} as UTF-8; instruction and rule files were not changed. Preserve the original and correct its encoding before retrying.`) }
     const block = materializeMemoryBlock(memoryBlock?.trim() ? memoryBlock : defaultMemoryBlock(t.ruleRef), t.ruleRef, t.kind)
-    return { target: t, original, ...prepareMemoryBlock(text, block) }
+    const prepared = prepareMemoryBlock(text, block)
+    const ruleContent = mergeManagedRule(existsSync(t.ruleFile) ? readFileSync(t.ruleFile, 'utf8') : '', ruleBody)
+    return { target: t, original, ruleContent, ...prepared }
   })
   const repairs = plans.filter(plan => plan.repaired).map(plan => ({
     memoryFile: plan.target.memoryFile,
     backupFile: backupOriginal(plan.target.memoryFile, plan.original),
   }))
-  for (const { target: t, content } of plans) {
+  for (const { target: t, content, ruleContent } of plans) {
     try {
       mkdirSync(dirname(t.ruleFile), { recursive: true })
       mkdirSync(dirname(t.memoryFile), { recursive: true })
-      writeFileSync(t.ruleFile, ruleBody.endsWith('\n') ? ruleBody : ruleBody + '\n')
+      writeFileSync(t.ruleFile, ruleContent)
       writeFileSync(t.memoryFile, content)
     } catch (error) {
       const backup = repairs.find(repair => repair.memoryFile === t.memoryFile)?.backupFile

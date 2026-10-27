@@ -37,14 +37,15 @@ import { localAuthRoutes } from './routes/local-auth.ts'
 import { dashboardAuthRoutes } from './routes/dashboard-auth.ts'
 import { ingestRoutes } from './routes/ingest.ts'
 import { memoryRoutes } from './routes/memories.ts'
+import { knowledgeRoutes } from './routes/knowledge.ts'
+import { embeddingProjectionRoutes } from './routes/embedding-projections.ts'
+import { KnowledgeError } from './services/knowledge.ts'
 import { graphRoutes } from './routes/graph.ts'
 import { memoryGraphRoutes } from './routes/memory-graph.ts'
 import { documentRoutes } from './routes/documents.ts'
 import { investigationRoutes } from './routes/investigations.ts'
 import { projectRoutes } from './routes/projects.ts'
-import { projectMemoryBindingRoutes } from './routes/project-memory-bindings.ts'
 import { mcpSessionRoutes } from './routes/mcp-sessions.ts'
-import { connectRoutes } from './routes/connect.ts'
 import { embeddingHealthRoutes } from './routes/embedding-health.ts'
 import { dashboardRoutes } from './routes/dashboard/index.ts'
 
@@ -60,6 +61,7 @@ export function buildApp(): FastifyInstance {
   app.setSerializerCompiler(serializerCompiler)
 
   app.setErrorHandler((err, req, reply) => {
+    if (err instanceof KnowledgeError) return reply.code(err.statusCode).send({ error: err.code, message: err.message, details: err.details, contractVersion: 2 })
     if (err instanceof AuthError) {
       return reply.code(err.statusCode).send({ error: err.code, message: err.message })
     }
@@ -166,16 +168,16 @@ export function buildApp(): FastifyInstance {
     await secured.register(ingestRoutes)
     // P7 — the memory protocol layer + graph proxy + documents/investigations.
     await secured.register(memoryRoutes)
+    await secured.register(knowledgeRoutes)
+    await secured.register(embeddingProjectionRoutes)
     await secured.register(graphRoutes)
     await secured.register(memoryGraphRoutes)
     await secured.register(documentRoutes)
     await secured.register(investigationRoutes)
     // P8 — distinct projects across the readable corpus (backs list_projects).
     await secured.register(projectRoutes)
-    await secured.register(projectMemoryBindingRoutes)
     // Non-admin connector portal: authenticated users can mint a local-dashboard
     // connector token without entering the server operator dashboard.
-    await secured.register(connectRoutes)
     // Client-managed embedding bridges report only a canonical outcome here; the
     // route derives their observer scope from the authenticated identity.
     await secured.register(embeddingHealthRoutes)

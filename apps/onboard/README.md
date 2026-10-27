@@ -19,11 +19,9 @@ There is one client install:
 
 1. Install the local **Personal Memories** stack first.
 2. Configure local embeddings, extraction LLM, dashboard account, and stream MCP.
-3. Optionally connect **Shared Memories** after personal setup by testing a
-   server-issued connector token against remote `/config` and `/whoami`.
 
 Legacy `full`, `engine`, and `mcp` flow ids remain as migration aliases in tests
-and payload normalization. The visible wizard normalizes them to the personal-first
+and payload normalization. The visible wizard normalizes them to the personal-only
 flow.
 
 ## What It Does
@@ -34,46 +32,34 @@ flow.
   because the official installer can require Administrator approval; after the
   user installs Homebrew, returning to this step runs the checks again.
 - **Account** — collects the local dashboard email/name and optional password.
-  The local dashboard user has full local rights; Shared Memories permissions
-  come later from the remote connector token.
-- **Embeddings** — picks the local personal memory model/dim. This also becomes
-  the compatibility baseline for client-managed Shared Memories connections.
+  Ownership remains the validated local identity; project labels never grant access.
+- **Embeddings** — chooses the local personal model/dimension without changing an
+  existing corpus pin. Use the supported migration for any later model change.
 - **Extraction LLM** — provider + model + API key for Shape gate and graph
   extraction. The step calls the selected provider with a small probe; Next stays
   disabled until the fact extraction test passes.
 - **Ecosystem** — checkboxes for detected agent apps (Claude CLI/Desktop and
   separate Codex CLI/Desktop choices).
 - **Registration** — global vs project scope plus the stream MCP service. Agent
-  config entries carry only `http://127.0.0.1:8091/mcp`; connector tokens stay in
-  the local dashboard/API.
-- **Rule** — review/edit the top memory block written into CLAUDE.md / AGENTS.md
-  plus the detailed `persistent-memory.md` rule prompt. The generated rule tells
-  agents to choose Personal Memories or Shared Memories at the start of each new
-  project when both surfaces are configured, park the choice under project-level
-  `.claude`/`.codex` config when possible, and default non-project sessions to
-  personal `project: "general"`.
+  config entries carry only `http://127.0.0.1:8091/mcp`; no connector credentials are written into agent configuration.
+- **Rule** — review/edit the managed top memory block and detailed protocol.
+  Default recall spans the authorized personal space. Writes use explicit
+  classification and evidence; updates require the expected current revision.
+  Unknown/user-edited detailed rules are preserved for review.
 - **Review** — writes `.env.persistent-memory` with `DEPLOYMENT_MODE=local`,
   local embedding settings, stream MCP settings, and masked secrets.
-- **Shared Memories** — optional. Collects Shared API URL + connector token, calls
-  remote `/config` and `/whoami`, compares embedding topology/model/dim, and saves
-  the connection only after the local personal stack is installed and verified.
+
 - **Install** — runs the personal stack commands (`ollama pull` if needed,
   `compose up` with `COMPOSE_PROFILES=mcp-stream`, migrate, container-applied
   `rls.sql`, seed, restart, verify), then registers stream MCP and writes rules.
 
-## Shared Memories Compatibility
+## Personal-only compatibility
 
-The connection step accepts one shared server per local personal stack.
-
-- **server-managed embeddings:** no local shared embedding model is required; the
-  shared server embeds.
-- **client-managed embeddings:** the local selected model/dim must match the
-  shared server pin. If the provider/model/dim is incompatible, the wizard blocks
-  with the exact model/dim to install or select.
-
-The connector token is server-issued, role/team-scoped, shown once by the server,
-stored locally as a masked secret, and used by the local dashboard/API/MCP as a
-connector credential. It is not a human dashboard login session.
+Legacy installer flow ids normalize to the local personal sequence. Historical
+shared answers and connector environment variables cannot activate remote memory
+operations. Existing retired connector values may remain as recovery evidence;
+no connector token is sent in client registrations. Old sharing endpoints are
+unavailable and do not silently route into Personal Memories.
 
 ## Architecture
 

@@ -128,6 +128,14 @@ export interface Memory {
   confidence?: number
   graphPrimary?: boolean
   graphPrimaryFactCount?: number
+  revision?: number
+  classification?: import('./knowledge').Classification | null
+  classificationStatus?: string
+  memoryType?: string
+  assertionStatus?: string
+  graphStatus?: string
+  searchable?: boolean
+  processing?: string
 }
 
 export interface MemoryGraphNode {

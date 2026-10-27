@@ -356,7 +356,6 @@ export default function App() {
               }} />}
               {phase === 'prereqs' && <Prereqs {...shared} />}
               {phase === 'account' && <Account {...shared} />}
-              {phase === 'remote' && <RemoteConnect {...shared} />}
               {phase === 'embedding' && <EmbeddingSetup {...shared} tested={embeddingTested} setTested={setEmbeddingTested} set={(key, value) => setAnswers(current => ({ ...current, [key]: value }))} />}
               {phase === 'pullModel' && <PullModel {...shared} />}
               {phase === 'extraction' && <Extraction {...shared} />}
@@ -364,7 +363,6 @@ export default function App() {
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
               {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} setFault={setFault} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} onGoto={setPhaseAndResetGate} />}
-              {flow !== 'full' && phase === 'shared' && <SharedConnect {...shared} />}
               {phase === 'install' && (
                 <Install
                   flow={flow}
@@ -887,151 +885,6 @@ function Account({ answers, set, setNextDisabled, setFault, flow, remoteIdentity
   )
 }
 
-// ── Optional Shared Memories connection ─────────────────────────────────────────
-function SharedConnect(props: StepProps) {
-  const { answers, set, remoteIdentity, setRemoteIdentity, setServerPin, setNextDisabled } = props
-  const [sharedConnectEnabled, setSharedConnectEnabled] = useState(answers.memoryInstallMode === 'personal-and-shared')
-  useEffect(() => {
-    set('memoryInstallMode', sharedConnectEnabled ? 'personal-and-shared' : 'personal-only')
-    set('defaultMemorySurface', 'personal')
-    if (!sharedConnectEnabled) {
-      setRemoteIdentity(null)
-      setServerPin(null)
-    }
-  }, [sharedConnectEnabled])
-  useEffect(() => {
-    setNextDisabled(sharedConnectEnabled && !remoteIdentity)
-  }, [sharedConnectEnabled, remoteIdentity])
-
-  useEffect(() => { if (!sharedConnectEnabled) props.setFault(false) }, [sharedConnectEnabled])
-
-  return (
-    <section>
-      <h2>Connect Shared Memories</h2>
-      {!sharedConnectEnabled ? <p className="lede">Optional. Personal Memories is already fully configured — this only adds a second, team-owned space.</p> : null}
-      <label className={`checkrow flow-isolation-option${sharedConnectEnabled ? ' checked' : ''}`}>
-        <input type="checkbox" checked={sharedConnectEnabled} onChange={(e) => setSharedConnectEnabled(e.target.checked)} />
-        <span className="checkbox" aria-hidden>{sharedConnectEnabled ? <Icon name="check" size={11} /> : ''}</span>
-        <span className="checkrow-label">Connect this local dashboard to Shared Memories</span>
-        <span className="checkrow-tag">can be added later</span>
-      </label>
-      {sharedConnectEnabled ? (
-        <div className="shared-connect-body">
-          <RemoteConnect {...props} nested />
-        </div>
-      ) : (
-        <>
-          <Notice>Shared Memories can be connected any time from the local dashboard under <b>Shared memories → Connection</b>. Skipping now changes nothing about your personal stack.</Notice>
-          <div className="shared-skip-art"><Lattice width={220} height={110} /></div>
-        </>
-      )}
-    </section>
-  )
-}
-
-// ── Shared server connector token test ─────────────────────────────────────────
-type RemoteError = { kind: 'unreachable' | 'bad_token'; url: string; portHint: boolean }
-
-function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, setNextDisabled, setFault, nested = false }: StepProps & { nested?: boolean }) {
-  const [testing, setTesting] = useState(false)
-  const [whoami, setWhoami] = useState<RemoteIdentity | null>(remoteIdentity)
-  const [error, setError] = useState<RemoteError | null>(null)
-  useEffect(() => { setWhoami(remoteIdentity) }, [remoteIdentity])
-  useEffect(() => { setNextDisabled(!whoami) }, [whoami])
-  useEffect(() => { setFault(!!error) }, [error])
-  const clearConnection = () => {
-    setWhoami(null)
-    setRemoteIdentity(null)
-    setServerPin(null)
-    setError(null)
-  }
-  const setRemoteApiUrl = (value: string) => {
-    clearConnection()
-    set('remoteApiUrl', value)
-  }
-  const setRemoteToken = (value: string) => {
-    clearConnection()
-    set('remoteToken', value)
-  }
-  const missingLocalPort = (urlText: string) => {
-    try {
-      const url = new URL(urlText)
-      return (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && !url.port
-    } catch {
-      return false
-    }
-  }
-  const test = async () => {
-    setTesting(true); setError(null); setWhoami(null); setServerPin(null); setRemoteIdentity(null)
-    const r = await postJSON<{ config: RemoteServerConfig | null; whoami: RemoteIdentity | null; error?: string }>(
-      '/api/remote/test', { apiUrl: answers.remoteApiUrl, token: answers.remoteToken },
-    ).catch(() => ({ config: null, whoami: null, error: 'unreachable' }))
-    setTesting(false)
-    const pin = serverPinFromConfig(r.config)
-    const url = answers.remoteApiUrl.replace(/\/+$/, '')
-    if (r.error === 'unreachable' || !pin) {
-      setError({ kind: 'unreachable', url, portHint: missingLocalPort(answers.remoteApiUrl) })
-      return
-    }
-    if (r.error === 'bad_token' || !r.whoami) { setError({ kind: 'bad_token', url, portHint: false }); setServerPin(pin); return }
-    const identity = r.whoami
-    const alias = identity.userDisplayName?.trim() || (identity.userEmail?.includes('@') ? identity.userEmail.split('@')[0] : '')
-    setServerPin(pin); setWhoami(identity); setRemoteIdentity(identity)
-    set('teamName', identity.teamName ?? '')
-    set('userEmail', identity.userEmail ?? '')
-    set('userName', alias)
-  }
-  return (
-    <section>
-      {nested ? (
-        <>
-          <h3>Shared Memories server</h3>
-          <p className="note">The connector token is saved in the local dashboard as a masked secret.</p>
-        </>
-      ) : (
-        <>
-          <h2>Shared Memories server</h2>
-          <p className="lede">The connector token is saved in the local dashboard as a masked secret.</p>
-        </>
-      )}
-      <Field label="Shared API URL" hint="The Persistent Memory API URL printed by the shared server installer.">
-        <input className={`mono${error?.kind === 'unreachable' ? ' invalid' : ''}`} value={answers.remoteApiUrl} onChange={(e) => setRemoteApiUrl(e.target.value)} placeholder="http://127.0.0.1:12090" />
-      </Field>
-      <Field label="Connector token" hint={<>Server-issued token for this local dashboard (<code>tokenId.secret</code>).</>}>
-        <input type="password" className={`mono${error?.kind === 'bad_token' ? ' invalid' : ''}`} value={answers.remoteToken} onChange={(e) => setRemoteToken(e.target.value)} placeholder="tokenId.secret" />
-      </Field>
-      <div className="btn-row">
-        <button type="button" className="btn secondary" onClick={() => void test()} disabled={testing || !answers.remoteApiUrl || !answers.remoteToken}>
-          <Icon name="cloud_sync" size={15} /> {testing ? 'Testing…' : 'Test connection'}
-        </button>
-      </div>
-      {error?.kind === 'unreachable' ? (
-        <Notice tone="fault" title={`Couldn’t reach ${error.url}/config`} role="alert">
-          {error.portHint
-            ? <>Local server installs need the API port — for example <code>http://127.0.0.1:12090</code> for a client-managed embeddings validation server.</>
-            : 'Check the URL and that the shared server is running.'}
-          <p className="note">{nested ? 'Nothing was saved. You can also clear the checkbox and connect later from the dashboard.' : 'Nothing was saved.'}</p>
-        </Notice>
-      ) : null}
-      {error?.kind === 'bad_token' ? (
-        <>
-          {serverPin ? <Notice tone="ok">Server reachable · pins <code>{serverPin.model} @ {serverPin.dim}</code></Notice> : null}
-          <Notice tone="fault" icon="lock" title="The token was rejected" role="alert">
-            Check it was copied whole (<code>tokenId.secret</code>, including the dot) and has not expired. Connector tokens are issued by a super-admin on the shared server.
-          </Notice>
-        </>
-      ) : null}
-      {whoami ? (
-        <Notice tone="ok" title="Connected">
-          <b>{whoami.userEmail ?? 'server user'}</b>{whoami.teamName ? <> on team <b>{whoami.teamName}</b></> : null}; role <b>{whoami.adminLevel}</b>.
-          <p className="note">Server pins <code>{serverPin?.model} @ {serverPin?.dim}</code>.</p>
-        </Notice>
-      ) : null}
-    </section>
-  )
-}
-
-// ── Pull model (engine flow — pull the server's exact pin) ────────────────────────
 function PullModel({ serverPin, setNextDisabled }: StepProps) {
   const model = serverPin?.model ?? ''
   const [pulled, setPulled] = useState<boolean | null>(null)
@@ -1592,9 +1445,7 @@ function Install({ flow, body, onToken, onDone, onBack, setFault }: { flow: Flow
   const total = steps.length || 1
   const failedIndex = steps.findIndex((step) => step.state === 'failed')
   const title = failed ? 'Install failed' : running ? 'Installing' : 'Install complete'
-  const sub = body.memoryInstallMode === 'personal-and-shared'
-    ? 'Bringing up the local personal stack, connecting Shared Memories, then registering the stream MCP. ~5–10 min.'
-    : 'Bringing up the local personal stack, then registering the stream MCP and writing the rule. ~5–10 min.'
+  const sub = 'Bringing up the local personal stack, then registering the stream MCP and writing the rule. ~5–10 min.'
   const [copied, setCopied] = useState(false)
   const copyLog = () => {
     try { void navigator.clipboard.writeText(log.join('')) } catch { /* clipboard unavailable */ }

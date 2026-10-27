@@ -163,6 +163,7 @@ export async function ingestRoutes(app: FastifyInstance): Promise<void> {
               data: {
                 id: sourceId,
                 teamId, // ← SERVER-STAMPED from identity, never from body
+                  ownerId: req.identity!.userId, ownershipState: 'personal',
                 project,
                 kind: 'document',
                 title: data.filename,

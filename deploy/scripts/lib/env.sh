@@ -158,28 +158,13 @@ pm_env_backfill_missing_from_template() {
 
 pm_env_reconcile_memory_surfaces() {
     local file="${1:?env file required}"
-    local deployment mode personal_enabled default_surface personal_api
+    # Retired connector credentials remain on disk for recovery, but cannot
+    # select remote/shared behavior or become prerequisites for personal startup.
+    pm_env_put PM_PERSONAL_MEMORY_ENABLED true "$file"
+    pm_env_put PM_MEMORY_INSTALL_MODE personal-only "$file"
+    pm_env_put PM_DEFAULT_MEMORY_SURFACE personal "$file"
+    [ -n "$(pm_env_get PM_PERSONAL_API_URL "" "$file")" ] || pm_env_put PM_PERSONAL_API_URL http://localhost:8090 "$file"
 
-    deployment="$(pm_env_get DEPLOYMENT_MODE server "$file")"
-    mode="$(pm_env_get PM_MEMORY_INSTALL_MODE "" "$file")"
-    personal_enabled="$(pm_env_get PM_PERSONAL_MEMORY_ENABLED "" "$file")"
-    default_surface="$(pm_env_get PM_DEFAULT_MEMORY_SURFACE "" "$file")"
-    personal_api="$(pm_env_get PM_PERSONAL_API_URL "" "$file")"
-
-    if [ "$deployment" = "local" ]; then
-        [ "$personal_enabled" = "true" ] || pm_env_put PM_PERSONAL_MEMORY_ENABLED true "$file"
-        if [ "$mode" != "personal-and-shared" ]; then
-            pm_env_put PM_MEMORY_INSTALL_MODE personal-only "$file"
-        fi
-        [ "$default_surface" = "personal" ] || pm_env_put PM_DEFAULT_MEMORY_SURFACE personal "$file"
-        [ -n "$personal_api" ] || pm_env_put PM_PERSONAL_API_URL http://localhost:8090 "$file"
-        return 0
-    fi
-
-    [ -n "$personal_enabled" ] || pm_env_put PM_PERSONAL_MEMORY_ENABLED false "$file"
-    [ -n "$mode" ] || pm_env_put PM_MEMORY_INSTALL_MODE shared-only "$file"
-    [ -n "$default_surface" ] || pm_env_put PM_DEFAULT_MEMORY_SURFACE shared "$file"
-    [ -n "$personal_api" ] || pm_env_put PM_PERSONAL_API_URL http://localhost:8090 "$file"
 }
 
 pm_env_ensure_database_urls() {
@@ -247,10 +232,7 @@ pm_env_validate_deploy_required() {
     if [ "$(pm_env_get PM_PERSONAL_MEMORY_ENABLED false "$file")" = "true" ] && [ -z "$(pm_env_get PM_PERSONAL_API_URL "" "$file")" ]; then
         missing+=("PM_PERSONAL_API_URL")
     fi
-    if [ "$(pm_env_get PM_MEMORY_INSTALL_MODE shared-only "$file")" = "personal-and-shared" ]; then
-        [ -n "$(pm_env_get PM_SHARED_API_URL "" "$file")" ] || missing+=("PM_SHARED_API_URL")
-        [ -n "$(pm_env_get PM_SHARED_USER_TOKEN "" "$file")" ] || missing+=("PM_SHARED_USER_TOKEN")
-    fi
+
 
     graph="$(pm_env_get GRAPH_BACKEND "" "$file")"
     if [ "$graph" = "falkordb" ]; then

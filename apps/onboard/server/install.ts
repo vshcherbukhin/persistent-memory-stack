@@ -136,41 +136,6 @@ function doWriteRule(ctx: InstallContext, emit: (e: InstallEvent) => void): bool
   }
 }
 
-async function doSharedConnect(ctx: InstallContext, emit: (e: InstallEvent) => void): Promise<boolean> {
-  const w = ctx.wizard
-  if (!w || w.memoryInstallMode !== 'personal-and-shared') {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared Memories not selected — skipping.\n' })
-    return true
-  }
-  if (!w.sharedApiUrl || !w.sharedUserToken) {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared API URL and connector token are required.\n' })
-    return false
-  }
-  try {
-    const res = await fetch(`${w.personalApiUrl ?? 'http://localhost:8090'}/dashboard/shared-connection`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ apiUrl: w.sharedApiUrl, token: w.sharedUserToken }),
-    })
-    if (!res.ok) {
-      let message = `${res.status}`
-      try {
-        const body = (await res.json()) as { message?: string; error?: string }
-        message = body.message ?? body.error ?? message
-      } catch {
-        /* ignore non-json error body */
-      }
-      emit({ type: 'stdout', id: 'shared-connect', chunk: `Shared connection failed: ${message}\n` })
-      return false
-    }
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared Memories connection saved in the local dashboard.\n' })
-    return true
-  } catch (e) {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: `Shared connection failed: ${e instanceof Error ? e.message : String(e)}\n` })
-    return false
-  }
-}
-
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 function waitLabel(step: InstallStep): string {
@@ -353,9 +318,7 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
     if (step.kind === 'fn') {
       const ok = step.fnId === 'register'
         ? doRegister(ctx, token, emit)
-        : step.fnId === 'shared-connect'
-          ? await doSharedConnect(ctx, emit)
-          : doWriteRule(ctx, emit)
+        : doWriteRule(ctx, emit)
       emit({ type: 'step-done', id: step.id, ok })
       if (!ok) {
         emit({ type: 'error', id: step.id, message: `Step "${step.name}" failed — see output above.` })

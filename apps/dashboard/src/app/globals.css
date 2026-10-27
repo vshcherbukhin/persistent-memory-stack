@@ -4581,6 +4581,13 @@ button.primary:hover,
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
+.brand small.brand-community {
+  font-size: 11.5px;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+}
 .space-switch-label {
   color: var(--muted);
   font-size: 10px;

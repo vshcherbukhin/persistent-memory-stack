@@ -326,18 +326,6 @@ app.get('/api/rule/default', async () => ({
 }))
 
 // ── Test a REMOTE server (flows 2/3): public /config + token-gated /whoami ─────────
-app.post<{ Body: { apiUrl: string; token: string } }>('/api/remote/test', async (req) => {
-  const base = (req.body.apiUrl ?? '').replace(/\/+$/, '')
-  if (!base) return { error: 'unreachable' as const, config: null, whoami: null }
-  const config = await fetch(`${base}/config`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-  if (!config) return { error: 'unreachable' as const, config: null, whoami: null }
-  const whoami = await fetch(`${base}/whoami`, { headers: { authorization: `Bearer ${req.body.token}` } })
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-  if (!whoami) return { error: 'bad_token' as const, config, whoami: null }
-  return { config, whoami }
-})
-
 interface ExtractionTestBody {
   provider?: ExtractionProvider
   model?: string
@@ -465,13 +453,10 @@ function buildWizardPayload(body: InstallBody): WizardPayload {
   const localApi = 'http://localhost:8090'
   const localOllama = 'http://localhost:11434'
   const streamUrl = 'http://127.0.0.1:8091/mcp'
-  const personalApiUrl = body.personalApiUrl ?? localApi
-  const sharedApiUrl = body.sharedApiUrl ?? body.remoteApiUrl
-  const sharedUserToken = body.sharedUserToken ?? body.remoteToken
-  const wantsShared = Boolean(sharedApiUrl && sharedUserToken)
-  const memoryInstallMode = body.memoryInstallMode ?? (wantsShared ? 'personal-and-shared' : 'personal-only')
+  const personalApiUrl = localApi
+  const memoryInstallMode = 'personal-only' as const
   const personalMemoryEnabled = true
-  const defaultMemorySurface = body.defaultMemorySurface ?? 'personal'
+  const defaultMemorySurface = 'personal' as const
   return {
     flow,
     mcpRuntime,
@@ -480,8 +465,6 @@ function buildWizardPayload(body: InstallBody): WizardPayload {
     defaultMemorySurface,
     personalApiUrl,
     personalUserToken: body.personalUserToken,
-    sharedApiUrl: memoryInstallMode === 'personal-and-shared' ? sharedApiUrl : undefined,
-    sharedUserToken: memoryInstallMode === 'personal-and-shared' ? sharedUserToken : undefined,
     apiUrl: personalApiUrl,
     ollamaUrl: localOllama,
     streamUrl,

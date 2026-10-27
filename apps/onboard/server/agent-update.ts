@@ -93,14 +93,12 @@ function asRuntime(_value: string | undefined): 'stream' {
   return 'stream'
 }
 
-function asInstallMode(value: string | undefined, deploymentMode: string | undefined): DerivedAgentEnv['memoryInstallMode'] {
-  if (value === 'personal-only' || value === 'personal-and-shared' || value === 'shared-only') return value
-  return deploymentMode === 'local' ? 'personal-only' : 'shared-only'
+function asInstallMode(_value: string | undefined, _deploymentMode: string | undefined): DerivedAgentEnv['memoryInstallMode'] {
+  return 'personal-only'
 }
 
-function asSurface(value: string | undefined, mode: DerivedAgentEnv['memoryInstallMode']): 'personal' | 'shared' {
-  if (value === 'personal' || value === 'shared') return value
-  return mode === 'shared-only' ? 'shared' : 'personal'
+function asSurface(_value: string | undefined, _mode: DerivedAgentEnv['memoryInstallMode']): 'personal' {
+  return 'personal'
 }
 
 function deriveAgentEnv(root: string, env: Record<string, string>): DerivedAgentEnv {
@@ -115,8 +113,6 @@ function deriveAgentEnv(root: string, env: Record<string, string>): DerivedAgent
     defaultMemorySurface: asSurface(envValue(env, 'PM_DEFAULT_MEMORY_SURFACE'), memoryInstallMode),
     personalApiUrl: envValue(env, 'PM_PERSONAL_API_URL') ?? 'http://localhost:8090',
     personalUserToken: envValue(env, 'PM_PERSONAL_USER_TOKEN'),
-    sharedApiUrl: envValue(env, 'PM_SHARED_API_URL'),
-    sharedUserToken: envValue(env, 'PM_SHARED_USER_TOKEN'),
   }
 }
 
@@ -149,8 +145,6 @@ function buildEntryFromExisting(existing: McpServerEntry | CodexEntry | undefine
     defaultMemorySurface: derived.defaultMemorySurface,
     personalApiUrl: derived.personalApiUrl,
     personalUserToken: derived.personalUserToken ?? oldEnv.PM_PERSONAL_USER_TOKEN,
-    sharedApiUrl: derived.sharedApiUrl ?? oldEnv.PM_SHARED_API_URL,
-    sharedUserToken: derived.sharedUserToken ?? oldEnv.PM_SHARED_USER_TOKEN,
   })
 }
 

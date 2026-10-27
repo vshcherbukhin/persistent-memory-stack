@@ -5,6 +5,8 @@ import { MemoryToolsScope, useMemoryToolState } from '@/components/MemoryToolsSt
 import { emptyMemoryImportResult, runMemoryImport } from '@/lib/memoryImportRunner'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
+import { Checkbox } from '@/components/ui/Checkbox'
+import { readMemoryArchive, archiveForExport, encryptMemoryArchive as encryptExport, decryptMemoryArchive as decryptExport, type SecureExportFile, type MemoryArchiveImport, type MemoryArchiveSchema } from '@/lib/memoryArchive'
 import { FileInput } from '@/components/ui/FileInput'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Icon } from '@/components/ui/Icon'
@@ -30,7 +32,7 @@ export interface DashboardToolsProps {
   busy: boolean
   pending: PendingEmbeddings | null
   onExport: (teamId?: string, project?: string) => Promise<MemoryExportEnvelope>
-  onImport: (memories: unknown[], teamId?: string, project?: string) => Promise<MemoryImportResult>
+  onImport: (archive: MemoryArchiveImport) => Promise<MemoryImportResult>
   onImportFinished?: (result: MemoryImportResult) => void
   onGraphRebuild: (input: { teamId?: string; project?: string; createdById?: string }) => Promise<MemoryGraphRebuildResult>
   onRequestBulkDelete: (project: string | undefined) => void
@@ -193,11 +195,11 @@ function ExportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
             project: selectedProject ?? envelope.filters?.project ?? null,
             createdById: envelope.filters?.createdById ?? null,
           }
-      const payload: MemoryExportEnvelope = {
+      const payload: MemoryExportEnvelope = archiveForExport({
         ...envelope,
         exportedAt: envelope.exportedAt ?? new Date().toISOString(),
         exportOptions,
-      }
+      })
       const ext = exportType === 'secure' ? 'pm' : 'json'
       const fileName = exportFileName(exportOptions, ext, isPersonalSurface ? 'personal' : 'shared')
       if (exportType === 'secure') {
@@ -264,17 +266,16 @@ type ImportPhase = 'idle' | 'verifying' | 'ready' | 'importing' | 'done' | 'erro
 type LocalImportDetail = { stage: string; message: string }
 type ImportDraft = {
   fileName: string
-  schema: string
+  schema: MemoryArchiveSchema
   secure: boolean
   memories: unknown[]
   options: MemoryExportOptions | null
   exportedAt?: string
 }
 
-function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, pending, canRunBackfill, onImport, onImportFinished, onBackfill }: DashboardToolsProps) {
+function ImportTab({ surface, busy, pending, canRunBackfill, onImport, onImportFinished, onBackfill }: DashboardToolsProps) {
   const [file, setFile] = useMemoryToolState<File | null>('import.file', null)
-  const [team, setTeam] = useMemoryToolState('import.team', '') // '' = keep each row's team from the file
-  const [project, setProject] = useMemoryToolState('import.project', '')
+  const [ownerConfirmed, setOwnerConfirmed] = useMemoryToolState('import.owner-confirmed', false)
   const [passphrase, setPassphrase] = useMemoryToolState('import.passphrase', '')
   const [status, setStatus] = useMemoryToolState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>('import.status', null)
   const [phase, setPhase] = useMemoryToolState<ImportPhase>('import.phase', 'idle')
@@ -285,37 +286,18 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
   const [loading, setLoading] = useMemoryToolState('import.loading', false)
   const [importing, setImporting] = useMemoryToolState('import.running', false)
   const isPersonalSurface = surface === 'personal'
-  const effectiveTeam = isPersonalSurface ? undefined : localTeamId ?? (team || undefined)
-  const projectOptions = useMemo(() => projectSelectOptions(projectScopes, effectiveTeam, project, 'project from file'), [effectiveTeam, project, projectScopes])
-  const selectedTeamLabel = isPersonalSurface
-    ? null
-    : localTeamId
-    ? teams.find((t) => t.id === localTeamId)?.name ?? 'your team'
-    : team
-      ? teams.find((t) => t.id === team)?.name ?? 'selected team'
-      : draft?.options?.teamName || 'team from file'
-  const selectedProjectLabel = project || draft?.options?.project || inferSingleProject(draft?.memories) || 'project from file'
+  const selectedProjectLabel = draft?.options?.project || inferSingleProject(draft?.memories) || 'original labels from file'
   const clearLoadedState = () => {
+    setOwnerConfirmed(false)
     setDraft(null)
     setResult(null)
     setLocalDetails([])
     setPhase('idle')
     setCompleted(0)
   }
-  const applyScope = (options?: MemoryExportOptions | null, memories?: unknown[]) => {
-    const optionTeam = options?.teamId ?? undefined
-    if (!localTeamId && isSuper && optionTeam && teams.some((t) => t.id === optionTeam)) setTeam(optionTeam)
-    if (options?.project) {
-      setProject(options.project)
-    } else {
-      const inferred = inferSingleProject(memories)
-      if (inferred) setProject(inferred)
-    }
-  }
   const onPickFile = async (picked: File | null) => {
     setFile(picked)
     setStatus(picked ? { kind: 'ok', text: 'File selected. Load and verify it before importing memories.' } : null)
-    setProject('')
     clearLoadedState()
   }
   const doLoadAndVerify = async () => {
@@ -337,8 +319,9 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
         return
       }
       const payload = secure ? await decryptExport(parsed, passphrase.trim()) : parsed
-      const memories = readMemoriesFromPayload(payload)
-      const details = validateImportMemories(memories, { requireTeam: !isPersonalSurface })
+      const archive = readMemoryArchive(payload)
+      const memories = archive.memories
+      const details = validateImportMemories(memories, { schema: archive.schema })
       if (details.length > 0) {
         setPhase('error')
         setStatus({ kind: 'error', text: `File verification failed: ${details.length.toLocaleString()} issue(s) found.` })
@@ -346,10 +329,9 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
         return
       }
       const options = readExportOptions(payload) ?? (secure ? parsed.exportOptions ?? null : null)
-      applyScope(options, memories)
       setDraft({
         fileName: file.name,
-        schema: isRecord(payload) && typeof payload.schema === 'string' ? payload.schema : secure ? 'pm.secure-memory-export/1' : 'unknown',
+        schema: archive.schema,
         secure,
         memories,
         options,
@@ -366,15 +348,13 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
     }
   }
   const doImport = async () => {
-    if (!draft || importing) return
+    if (!draft || importing || !ownerConfirmed) return
     setImporting(true)
     setStatus({ kind: 'ok', text: 'Importing memories and preparing embeddings…' })
     setLocalDetails([])
     setPhase('importing')
     try {
-      const targetTeam = isPersonalSurface ? undefined : localTeamId ?? (team || (isSuper && draft.options?.teamId ? draft.options.teamId : undefined))
-      const targetProject = project || draft.options?.project || inferSingleProject(draft.memories) || undefined
-      const outcome = await runMemoryImport(draft.memories, (rows) => onImport(rows, targetTeam, targetProject), (progress) => {
+      const outcome = await runMemoryImport(draft.memories, (rows) => onImport({ schema: draft.schema, memories: rows, ownerConfirmation: true }), (progress) => {
         setCompleted(progress.completed)
         setResult(progress.result)
         setStatus({ kind: 'ok', text: `Processed ${progress.completed.toLocaleString()} of ${draft.memories.length.toLocaleString()} memories (${progress.result.imported.toLocaleString()} imported, ${progress.result.errors.toLocaleString()} errors).` })
@@ -404,7 +384,7 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
     <>
       <p className="tool-desc">
         Import a previously-exported JSON or secure .pm file. Verify the package first; nothing is written until you confirm.{' '}
-        {isPersonalSurface ? 'Memories are imported into personal memories.' : localTeamId ? 'Memories are imported into your team.' : isSuper ? 'Pick a target team, or keep each row’s team from the file.' : 'Memories are imported into your team.'}
+        Original project labels and revision metadata are preserved. Confirm ownership before importing into your personal space.
       </p>
       <div className="tool-field">
         <span>File</span>
@@ -417,30 +397,6 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
           onFile={(picked) => void onPickFile(picked)}
         />
       </div>
-      {!isPersonalSurface && !localTeamId && isSuper ? (
-        <label className="tool-field">
-          <span>Target team</span>
-          <Select
-            ariaLabel="Import target team"
-            disabled={loading || importing}
-            value={team}
-            onChange={(v) => {
-              setTeam(v)
-              setProject('')
-              setResult(null)
-              setCompleted(0)
-              setPhase(draft ? 'ready' : 'idle')
-              setLocalDetails([])
-              setStatus(null)
-            }}
-            options={[{ value: '', label: 'team from file' }, ...teams.map((t) => ({ value: t.id, label: `→ ${t.name}` }))]}
-          />
-        </label>
-      ) : null}
-      <label className="tool-field">
-        <span>Target project</span>
-        <Select ariaLabel="Import target project" value={project} disabled={loading || importing} onChange={(v) => { setProject(v); setResult(null); setCompleted(0); setPhase(draft ? 'ready' : 'idle'); setLocalDetails([]); setStatus(null) }} options={projectOptions} />
-      </label>
       {file?.name.toLowerCase().endsWith('.pm') ? (
         <label className="tool-field">
           <span>Passphrase</span>
@@ -485,8 +441,8 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
               <div><span>File</span><b>{draft.fileName}</b></div>
               <div><span>Memories</span><b>{draft.memories.length.toLocaleString()}</b></div>
               <div><span>Format</span><b>{draft.secure ? 'Secure .pm' : 'Standard JSON'}</b></div>
-              {isPersonalSurface ? null : <div><span>Target team</span><b>{selectedTeamLabel}</b></div>}
-              <div><span>Target project</span><b>{selectedProjectLabel}</b></div>
+              <div><span>Original projects</span><b>{selectedProjectLabel}</b></div>
+              <div><span>Archive version</span><b>{draft.schema}</b></div>
               {draft.exportedAt ? <div><span>Exported</span><b>{new Date(draft.exportedAt).toLocaleString()}</b></div> : null}
             </div>
           </div>
@@ -501,8 +457,10 @@ function ImportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
               pending{pending && pending.embeddingMode !== 'server' ? ' (client-managed: the MCP client embeds these)' : ''}.
             </span>
           </div>
+          <Checkbox checked={ownerConfirmed} disabled={importing} onChange={setOwnerConfirmed} label="I confirm these records belong to my personal knowledge space." />
+          <p className="note">This confirmation does not authorize merging foreign partitions. Stop if ownership is unclear. Existing IDs with different content will not be overwritten.</p>
           <div className="btn-row">
-            <button type="button" className="btn primary" disabled={busy || loading || importing || completed === draft.memories.length} onClick={() => void doImport()}>
+            <button type="button" className="btn primary" disabled={!ownerConfirmed || busy || loading || importing || completed === draft.memories.length} onClick={() => void doImport()}>
               {importing ? 'Importing…' : phase === 'interrupted' ? 'Resume import' : 'Import & re-embed'}
             </button>
             {canRunBackfill ? (
@@ -592,8 +550,7 @@ function noticeClass(kind: 'ok' | 'warn' | 'error') {
   return 'notice ok'
 }
 
-function validateImportMemories(memories: unknown[], opts: { requireTeam: boolean }): LocalImportDetail[] {
-  const requireTeam = opts.requireTeam
+function validateImportMemories(memories: unknown[], opts: { schema: MemoryArchiveSchema }): LocalImportDetail[] {
   const details: LocalImportDetail[] = []
   if (memories.length === 0) return [{ stage: 'Validate rows', message: 'The selected file does not contain any memories.' }]
   memories.forEach((row, index) => {
@@ -602,14 +559,13 @@ function validateImportMemories(memories: unknown[], opts: { requireTeam: boolea
       details.push({ stage: `Row ${index + 1}`, message: 'Row is not an object.' })
       return
     }
-    const teamFields = requireTeam ? ['teamId'] : []
-    const missing = ['id', ...teamFields, 'content', 'category', 'shape', 'entities'].filter((key) => !(key in row))
+    const required = ['id', 'content', 'category', 'shape', 'entities', 'createdAt', 'recordUpdatedAt']
+    const missing = [...required, ...(opts.schema === 'pm.memory-export/2' ? ['revision', 'classification', 'revisionHistory'] : [])].filter((key) => !(key in row))
     if (missing.length > 0) {
       details.push({ stage: `Row ${index + 1}`, message: `Missing required field(s): ${missing.join(', ')}.` })
       return
     }
     if (typeof row.id !== 'string' || !isUuid(row.id)) details.push({ stage: `Row ${index + 1}`, message: 'Memory id is not a UUID.' })
-    if (requireTeam && (typeof row.teamId !== 'string' || !isUuid(row.teamId))) details.push({ stage: `Row ${index + 1}`, message: 'Team id is not a UUID.' })
     if (typeof row.content !== 'string' || row.content.trim().length === 0) details.push({ stage: `Row ${index + 1}`, message: 'Content is empty.' })
     if (!Array.isArray(row.entities)) details.push({ stage: `Row ${index + 1}`, message: 'Entities must be an array.' })
   })
@@ -627,21 +583,6 @@ type SavePickerHandle = { createWritable: () => Promise<{ write: (data: Blob) =>
 type SavePickerWindow = Window & {
   showSaveFilePicker?: (opts: { suggestedName?: string; types?: SavePickerType[] }) => Promise<SavePickerHandle>
 }
-
-type SecureExportFile = {
-  schema: 'pm.secure-memory-export/1'
-  exportOptions?: MemoryExportOptions
-  crypto: {
-    algorithm: 'AES-GCM'
-    kdf: 'PBKDF2-SHA256'
-    iterations: number
-    salt: string
-    iv: string
-  }
-  payload: string
-}
-
-const KDF_ITERATIONS = 210_000
 
 function projectSelectOptions(projectScopes: { name: string; teamId: string }[], teamId?: string, selected = '', emptyLabel = 'All projects') {
   const projects = [
@@ -692,74 +633,12 @@ async function saveTextFile(fileName: string, mime: string, text: string, types:
   URL.revokeObjectURL(url)
 }
 
-async function encryptExport(payload: MemoryExportEnvelope, passphrase: string): Promise<SecureExportFile> {
-  const salt = crypto.getRandomValues(new Uint8Array(16))
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const key = await deriveAesKey(passphrase, toArrayBuffer(salt))
-  const encoded = new TextEncoder().encode(JSON.stringify(payload))
-  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, encoded))
-  return {
-    schema: 'pm.secure-memory-export/1',
-    exportOptions: payload.exportOptions,
-    crypto: {
-      algorithm: 'AES-GCM',
-      kdf: 'PBKDF2-SHA256',
-      iterations: KDF_ITERATIONS,
-      salt: bytesToBase64(salt),
-      iv: bytesToBase64(iv),
-    },
-    payload: bytesToBase64(cipher),
-  }
-}
-
-async function decryptExport(file: SecureExportFile, passphrase: string): Promise<MemoryExportEnvelope> {
-  const salt = base64ToBytes(file.crypto.salt)
-  const iv = base64ToBytes(file.crypto.iv)
-  const key = await deriveAesKey(passphrase, toArrayBuffer(salt), file.crypto.iterations)
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(base64ToBytes(file.payload)))
-  return JSON.parse(new TextDecoder().decode(plain)) as MemoryExportEnvelope
-}
-
-async function deriveAesKey(passphrase: string, salt: BufferSource, iterations = KDF_ITERATIONS): Promise<CryptoKey> {
-  const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey'])
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-    baseKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  )
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-}
-
-function bytesToBase64(bytes: Uint8Array) {
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.slice(i, i + 0x8000))
-  return btoa(out)
-}
-
-function base64ToBytes(value: string) {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  return bytes
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
 function isSecureExport(value: unknown): value is SecureExportFile {
   return isRecord(value) && value.schema === 'pm.secure-memory-export/1' && typeof value.payload === 'string' && isRecord(value.crypto)
-}
-
-function readMemoriesFromPayload(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value
-  if (isRecord(value) && Array.isArray(value.memories)) return value.memories
-  return []
 }
 
 function readExportOptions(value: unknown): MemoryExportOptions | null {

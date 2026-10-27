@@ -6,7 +6,9 @@ parking notes, or historical debugging logs here.
 
 ## Start Here
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
+- Before non-trivial work, call `recall_context(query)` across the personal space; use
+  `contextHints.projects=["persistent-memory-stack"]` for relevance, and retain
+  `persistent-memory-stack` as the project classification for this repository writes.
   If the tool schema is deferred, load persistent-memory with `tool_search` first.
   If the MCP is unavailable, say so and continue from repo evidence.
 - The full persistent-memory protocol comes from the global installed rule
@@ -37,21 +39,18 @@ parking notes, or historical debugging logs here.
 
 ## Product Model
 
-- Client installs are personal-first: always install a local Personal Memories stack,
-  local dashboard, and stream MCP first, with local or API embeddings chosen for the host.
-- Shared Memories are optional and connected later from the local dashboard with a
-  server-issued connector token. The local dashboard is the single user surface for
-  Personal and Shared memory management.
-- Shared server dashboards are SSO/password operator consoles for super-admins only.
-  Regular users and team admins use their local dashboard; their Shared permissions
-  are exactly what the connector token grants.
-- Stream MCP is the only runtime. Legacy Node/stdio values are migration aliases only.
-- Use `server-managed embeddings` and `client-managed embeddings`; keep old
-  `server` / `client-bridge` values only as wire/config aliases.
-- Runnable app shells live under `apps/`; local/server deployment spaces live under
-  `spaces/local-personal`, `spaces/local-shared-client`, and `spaces/shared-server`;
-  capability code lives under `layers/`. Use dashboard wording for the product/app;
-  reserve `admin` and `super-admin` for roles or compatibility route names.
+- Community is a local personal knowledge space. Preserve the existing validated
+  owner boundary and authentication; projects/folders never establish ownership.
+- Authorized clients recall across that owner projects and general memories by
+  default. Explicit project/topic/type/status/time filters remain strict; context
+  hints change ranking only. Shared routing, connectors and grants are retired.
+- Use the canonical v2 classified-write and expected-revision update contracts;
+  discover catalog names, sources and resolution guidance through `memory_catalog`.
+- Legacy-owned memories remain readable with honest unclassified metadata.
+  Foreign/unresolved ownership remains preserved outside active personal recall.
+- Stream MCP is the only runtime; old Node/stdio settings are migration aliases.
+- Reuse functioning apps/layers/packages. `@pm/shared` is an internal library,
+  unrelated to the retired Shared Memories product functionality.
 
 ## Safety Rules
 

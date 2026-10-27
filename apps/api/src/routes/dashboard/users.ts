@@ -105,6 +105,13 @@ function assertCanAdminister(
 }
 
 export async function dashboardUserRoutes(app: FastifyInstance): Promise<void> {
+  // Preserve own profile/password operations while retiring multi-user sharing
+  // administration. Existing foreign users and their credentials remain stored.
+  app.addHook('preHandler', async req => {
+    const target = (req.params as { id?: string }).id
+    const body = req.body as { teamId?: string | null } | undefined
+    if (req.method === 'DELETE' || (req.method === 'POST' && !target) || (target && target !== req.identity!.userId) || req.url.includes('/admin-level') || (body?.teamId !== undefined && body.teamId !== req.identity!.teamId)) throw forbidden('sharing_retired', 'Community administers only the validated personal owner profile; sharing accounts and role reassignment are retired.')
+  })
   const z4 = app.withTypeProvider<ZodTypeProvider>()
 
   z4.get(
@@ -118,7 +125,7 @@ export async function dashboardUserRoutes(app: FastifyInstance): Promise<void> {
     async (req) => {
       // Observation is allowed across all teams (read-only); modification is gated
       // per-write below.
-      const where = req.query.teamId ? { teamId: req.query.teamId } : {}
+      const where = { id: req.identity!.userId, ...(req.query.teamId ? { teamId: req.query.teamId } : {}) }
       const rows = (await ownerPrisma.appUser.findMany({
         where,
         select: USER_SAFE_SELECT,

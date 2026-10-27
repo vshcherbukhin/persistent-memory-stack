@@ -8,7 +8,7 @@ afterEach(() => {
 describe('MCP startup surface routing', () => {
   it('does not inspect or expose a Shared connector in personal-only mode', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === 'http://personal.test/config') {
+      if (url === 'http://127.0.0.1:18090/config') {
         return new Response(JSON.stringify({
           embeddingMode: 'server',
           activeModel: 'qwen3-embedding:4b',
@@ -22,8 +22,8 @@ describe('MCP startup surface routing', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const context = await resolveStartupContext({
-      API_URL: 'http://personal.test',
-      PM_PERSONAL_API_URL: 'http://personal.test',
+      API_URL: 'http://127.0.0.1:18090',
+      PM_PERSONAL_API_URL: 'http://127.0.0.1:18090',
       PM_SHARED_API_URL: 'http://shared-leftover.test',
       PM_SHARED_USER_TOKEN: 'legacy-shared-token',
       PM_MEMORY_INSTALL_MODE: 'personal-only',
@@ -33,20 +33,21 @@ describe('MCP startup surface routing', () => {
     } as never)
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock).toHaveBeenCalledWith('http://personal.test/config', expect.any(Object))
-    expect(context.runtime.memorySurfaces).toMatchObject({ defaultSurface: 'personal' })
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18090/config', expect.any(Object))
+    expect(context.runtime.deploymentMode).toBe('local')
+    expect(context.runtime.memorySurfaces).toBeUndefined()
     expect(context.runtime.memorySurfaces?.shared).toBeUndefined()
   })
 
-  it('resolves a Shared connector only when personal-and-shared mode is selected', async () => {
+  it('keeps old personal-and-shared configuration inert', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === 'http://personal.test/config') {
+      if (url === 'http://127.0.0.1:18090/config') {
         return new Response(JSON.stringify({
           embeddingMode: 'server', activeModel: 'qwen3-embedding:4b', activeDim: 2560,
           activeVectorName: 'memory', deploymentMode: 'local',
         }), { status: 200 })
       }
-      if (url === 'http://personal.test/dashboard/shared-connection?includeToken=true') {
+      if (url === 'http://127.0.0.1:18090/dashboard/shared-connection?includeToken=true') {
         return new Response(JSON.stringify({
           configured: true, apiUrl: 'http://shared.test', tokenConfigured: true, token: 'shared-token',
         }), { status: 200 })
@@ -62,17 +63,22 @@ describe('MCP startup surface routing', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const context = await resolveStartupContext({
-      API_URL: 'http://personal.test', PM_PERSONAL_API_URL: 'http://personal.test',
+      API_URL: 'http://127.0.0.1:18090', PM_PERSONAL_API_URL: 'http://127.0.0.1:18090',
       PM_MEMORY_INSTALL_MODE: 'personal-and-shared', PM_DEFAULT_MEMORY_SURFACE: 'shared',
       PM_API_TIMEOUT_MS: 1_000,
     } as never)
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'http://personal.test/config',
-      'http://personal.test/dashboard/shared-connection?includeToken=true',
-      'http://shared.test/config',
+      'http://127.0.0.1:18090/config',
     ])
-    expect(context.runtime.memorySurfaces?.personal).toBeDefined()
-    expect(context.runtime.memorySurfaces?.shared).toBeDefined()
+    expect(context.runtime.memorySurfaces).toBeUndefined()
   })
+  it('rejects retired remote/shared-only endpoints before contacting the network', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(resolveStartupContext({ API_URL: 'https://foreign-memory.example', PM_MEMORY_INSTALL_MODE: 'personal-only' } as never)).rejects.toThrow('local personal API')
+    await expect(resolveStartupContext({ API_URL: 'http://127.0.0.1:18090', PM_MEMORY_INSTALL_MODE: 'shared-only' } as never)).rejects.toThrow('Shared-only operation is retired')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
 })

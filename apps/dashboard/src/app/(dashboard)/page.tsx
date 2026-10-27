@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { requireControlPlane } from '@/lib/session'
-import { api } from '@/lib/api'
+import { api, normalizeMemorySurface } from '@/lib/api'
 import { isSuperuserLevel } from '@/lib/authz'
 import type { MemoryGraphFacet, OverviewSummary } from '@/lib/types'
 import { capabilityHealthPresentation } from '@/lib/capabilityHealth'
@@ -133,12 +133,12 @@ export default async function OverviewPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = searchParams ? await searchParams : {}
-  const space = (Array.isArray(params.space) ? params.space[0] : params.space) === 'shared' ? 'shared' : 'personal'
+  const space = normalizeMemorySurface(Array.isArray(params.space) ? params.space[0] : params.space)
   const localWho = await requireControlPlane()
-  const who = space === 'shared' ? await api.memoryWhoami('shared') : localWho
+  const who = localWho
   const overview = await api.getOverview(space)
   const personalMode = localWho.deploymentMode === 'local' && space === 'personal'
-  const peopleHref = hrefWithSpace(space === 'shared' ? '/teams' : '/team-settings', space)
+  const peopleHref = hrefWithSpace('/team-settings', space)
   const showSettingsLink = isSuperuserLevel(who.adminLevel)
   const mcpSessions = overview.mcpSessions ?? { active: 0, stream: 0, legacy: 0, serviceStatus: 'unknown' as const }
   const servicesBadge = serviceBadge(overview.services)

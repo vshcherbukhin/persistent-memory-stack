@@ -30,9 +30,9 @@ import { requireAdmin } from '../../authz/guards.ts'
 import { dashboardTeamRoutes } from './teams.ts'
 import { dashboardUserRoutes } from './users.ts'
 import { dashboardTokenRoutes } from './tokens.ts'
-import { dashboardGrantRoutes } from './grants.ts'
 import { dashboardSettingsRoutes } from './settings.ts'
 import { dashboardMemoryRoutes } from './memories.ts'
+import { knowledgeArchiveRoutes } from '../knowledge-archive.ts'
 import { dashboardOverviewRoutes } from './overview.ts'
 import { dashboardSecurityAlertRoutes } from './security-alerts.ts'
 import { dashboardNotifySettingsRoutes } from './notify-settings.ts'
@@ -40,7 +40,6 @@ import { dashboardServiceRoutes } from './services.ts'
 import { dashboardUsageRoutes } from './usage.ts'
 import { dashboardWorkerRoutes } from './workers.ts'
 import { dashboardUpdateRoutes } from './update.ts'
-import { dashboardSharedConnectionRoutes } from './shared-connection.ts'
 import { dashboardBrowserPushRoutes } from './browser-push.ts'
 
 const CONTROL_PREFIXES = ['/dashboard', '/admin'] as const
@@ -55,12 +54,11 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
       await control.register(dashboardTeamRoutes, { prefix })
       await control.register(dashboardUserRoutes, { prefix })
       await control.register(dashboardTokenRoutes, { prefix })
-      await control.register(dashboardGrantRoutes, { prefix }) // "mounts" — cross-team MCP memory reads
       await control.register(dashboardSettingsRoutes, { prefix })
       await control.register(dashboardMemoryRoutes, { prefix })
+      await control.register(knowledgeArchiveRoutes, { prefix })
       await control.register(dashboardSecurityAlertRoutes, { prefix }) // DLP findings (own-team / super=all)
       await control.register(dashboardNotifySettingsRoutes, { prefix }) // per-team + global alert routing
-      await control.register(dashboardSharedConnectionRoutes, { prefix }) // local dashboard connector to one shared server
       await control.register(dashboardBrowserPushRoutes, { prefix }) // local personal browser Web Push subscriptions
     }
   })

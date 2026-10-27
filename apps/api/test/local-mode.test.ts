@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const db = vi.hoisted(() => ({
   localIdentityFindUnique: vi.fn(),
+  queryRaw: vi.fn(),
   localIdentityCreate: vi.fn(),
   teamFindUnique: vi.fn(),
   teamFindFirst: vi.fn(),
@@ -34,6 +35,7 @@ const cfg = vi.hoisted(() => ({
 }))
 vi.mock('@pm/db', () => ({
   ownerPrisma: {
+    $queryRaw: db.queryRaw,
     localIdentity: { findUnique: db.localIdentityFindUnique, create: db.localIdentityCreate },
     team: {
       findUnique: db.teamFindUnique,
@@ -106,6 +108,7 @@ describe('ensureLocalIdentity', () => {
     for (const fn of Object.values(db)) fn.mockReset()
     cfg.value.LOCAL_USER_PASSWORD = ''
     cfg.value.LOCAL_USER_PASSWORD_CONFIGURED_AT = ''
+    db.queryRaw.mockResolvedValue([{ count: 0n }])
     db.localIdentityFindUnique.mockResolvedValue(null)
     db.appUserFindFirst.mockResolvedValue(null)
   })
@@ -128,6 +131,14 @@ describe('ensureLocalIdentity', () => {
     expect(db.localIdentityCreate).toHaveBeenCalledWith({
       data: { id: 'singleton', teamId: SEEDED_TEAM_ID, userId: SEEDED_USER_ID },
     })
+  })
+
+  it('refuses to adopt existing historical data without a validated owner mapping', async () => {
+    db.queryRaw.mockResolvedValue([{ count: 12n }])
+    await expect(ensureLocalIdentity()).rejects.toThrow('no validated local owner mapping')
+    expect(db.teamUpsert).not.toHaveBeenCalled()
+    expect(db.appUserCreate).not.toHaveBeenCalled()
+    expect(db.localIdentityCreate).not.toHaveBeenCalled()
   })
 
   it('applies a newer onboarding password to an existing local identity', async () => {

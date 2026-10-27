@@ -11,7 +11,7 @@ initDb({ databaseUrl: config.DATABASE_URL, databaseMigrateUrl: config.DATABASE_M
 const result = await runGraphV2Migration({
   graphiti: new GraphitiClient(config.GRAPHITI_URL, config.GRAPHITI_TIMEOUT_MS),
   groupSecret: config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret',
-  surface: config.MEMORY_SURFACE ?? (config.DEPLOYMENT_MODE === 'local' ? 'personal' : 'shared'),
+  surface: 'personal',
   snapshotId,
 })
 console.log(`[${GRAPH_V2_MIGRATION_VERSION}] ${result.state}: ${JSON.stringify(result.metrics)}`)

@@ -15,6 +15,8 @@ import { requireTeamMember } from '../authz/guards.ts'
 import { config } from '../config.ts'
 import { graphiti } from '../services/graphiti.ts'
 import { currentMemorySurface, graphProjectGroup } from '../services/graph-project-group.ts'
+import { currentGraphFacts } from './graph.ts'
+import { knowledgeWhere } from '../services/knowledge.ts'
 
 const Relation = z.enum(['own', 'granted'])
 const Surface = z.enum(['personal', 'shared'])
@@ -81,6 +83,7 @@ type RelationValue = z.infer<typeof Relation>
 type SurfaceValue = z.infer<typeof Surface>
 
 interface MemoryGraphRow {
+  knowledge?: unknown
   id: string
   teamId: string
   project: string
@@ -143,7 +146,7 @@ function readCursor(raw: string | undefined, kind: SignedCursor['kind'], scope: 
 
 function memoryWhere(filters: GraphFilters): Prisma.MemoryWhereInput {
   return {
-    ...(filters.projects.length > 0 ? { project: { in: filters.projects } } : {}),
+    ...knowledgeWhere(filters.projects.length > 0 ? { projects: filters.projects } : {}),
     ...(filters.badges.length > 0 ? { category: { in: filters.badges } } : {}),
     ...(filters.tags.length > 0 ? { entities: { hasSome: filters.tags } } : {}),
   }
@@ -163,6 +166,7 @@ function safeMemoryLabel(id: string, category: string): string {
 }
 
 const MEMORY_SELECT = {
+  knowledge: true,
   id: true,
   teamId: true,
   project: true,
@@ -197,10 +201,13 @@ function appendMemoryTopology(
       graphStatus: row.graphStatus,
     })
     const groupId = graphProjectGroup(row.teamId, row.project)
+    const classification = row.knowledge as { topicTags?: string[] } | null | undefined
+    const resolvedTopics = new Set((classification?.topicTags ?? []).map(topic => `topic_${topic.replaceAll('-', '_')}`))
     for (const entity of row.entities) {
       const name = entity.trim()
       if (!name) continue
-      const entityId = entityKey(groupId, name)
+      const isResolvedTopic = resolvedTopics.has(name)
+      const entityId = entityKey(isResolvedTopic ? `${ownTeamId}:resolved-topics` : groupId, name)
       if (!nodes.has(entityId)) {
         nodes.set(entityId, {
           id: entityId,
@@ -221,7 +228,7 @@ function appendMemoryTopology(
         source: memoryNodeId,
         target: entityId,
         kind: 'mentions',
-        label: null,
+        label: isResolvedTopic ? 'ABOUT' : null,
         historical: false,
         project: row.project,
         relation,
@@ -329,7 +336,8 @@ export async function memoryGraphRoutes(app: FastifyInstance): Promise<void> {
           afterAt: cursor?.factAfterAt ?? undefined,
           afterUuid: cursor?.factAfterUuid ?? undefined,
         })
-        const facts = timeline.entries.filter((fact) => req.query.validity === 'all' || (req.query.validity === 'current' ? fact.status === 'valid' : fact.status === 'invalid'))
+          const provenLabels = new Map([...groupLabels].map(([id, label]) => [id, { ...label, surface: currentMemorySurface() }]))
+          const facts = (await currentGraphFacts(timeline.entries, provenLabels, req.query.projects.length ? req.query.projects : undefined)).filter((fact) => req.query.validity === 'all' || (req.query.validity === 'current' ? fact.status === 'valid' : fact.status === 'invalid'))
         nextFactAfterAt = timeline.next_after_at
         nextFactAfterUuid = timeline.next_after_uuid
         factsComplete = !nextFactAfterAt || !nextFactAfterUuid

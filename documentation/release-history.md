@@ -3,6 +3,43 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 2.0.0 - 2026-10-27
+
+[GitHub release v2.0.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.0)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| dashboard / docs / onboarding | 2.0.0 | Community branding, classified forms and personal-only setup. |
+| api / worker / database / shared / schema | 2.0.0 | Authoritative classified records, accepted revisions, source events and ownership-preserving migration. |
+| mcp / mcp-runtime / graph | 2.0.0 | Personal-space recall, canonical write discovery and revision-fenced graph evidence. |
+| memory-vector / evidence-files / security-dlp | 1.0.0 / 1.0.0 / 1.0.1 | Existing embedding model, evidence storage and content gates retained. |
+| update-runner / update-coordinator / gateway / docker-control | 1.0.1 / 1.0.1 / 1.0.0 / 1.0.0 | Existing snapshot, updater, front door and service control contracts retained. |
+
+- Community operates on one validated personal owner space. Shared connectors,
+  grants, surface selection and remote fallback are retired. Legacy partitions,
+  credentials and schema history remain preserved; they confer no access.
+- New saves require contract v2 classification, origin, applicability, source
+  evidence and idempotency. Updates require an exact ID and expected revision,
+  intent, explicit changes, reason and evidence. `memory_catalog` publishes the
+  actual schema, available names, strict filters and bounded resolution flow.
+- Recall combines semantic and lexical candidates with bounded resolved-topic
+  expansion. Omitted project filters search the personal space; explicit filters
+  stay strict. Projects and systems are associations, never ownership boundaries.
+- Additive migrations retain original IDs, content, timestamps and provenance.
+  Positively owned legacy memories stay readable as unclassified. Unknown/foreign
+  ownership is preserved outside active personal recall. No embedding-model
+  switch or automatic bulk graph inference is part of this migration.
+- Encrypted `.pm` keeps its existing encryption envelope. Inner archive format 2
+  carries classification and revisions; bounded historical format-1 conversion
+  preserves old readers without permitting legacy save/update bypasses.
+- The sidebar displays **Community version** below the existing product logo.
+
+This major release changes memory-tool inputs and retires sharing. Read the
+[contract and migration guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/spaces/personal/knowledge-contract.md)
+before upgrading. Public 1.0.0–1.3.1 installations first stop at 1.3.2; the
+versioned upgrade contract then declares the bridge to 2.0.0. Preserve the full
+snapshot and configuration: a source rollback is not a database rollback.
+
 ## 1.3.2 - 2026-10-24
 
 [GitHub release v1.3.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v1.3.2)

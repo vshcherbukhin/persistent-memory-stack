@@ -198,7 +198,7 @@ describe('renderEnv', () => {
     expect(isolatedEnv).toContain('PM_SHARED_API_URL=')
     expect(isolatedEnv).toContain('LOCAL_USER_PASSWORD_CONFIGURED_AT=2026-02-03T04:05:06.000Z')
   })
-  it('renders personal + shared routing settings for remote installs with isolated personal memory', () => {
+  it('cannot activate sharing from old installer answers', () => {
     const routedEnv = renderEnv({
       ...answers,
       personalMemoryEnabled: true,
@@ -209,13 +209,13 @@ describe('renderEnv', () => {
     }, testSecrets)
 
     expect(routedEnv).toContain('PM_PERSONAL_MEMORY_ENABLED=true')
-    expect(routedEnv).toContain('PM_MEMORY_INSTALL_MODE=personal-and-shared')
+    expect(routedEnv).toContain('PM_MEMORY_INSTALL_MODE=personal-only')
     expect(routedEnv).toContain('PM_DEFAULT_MEMORY_SURFACE=personal')
     expect(routedEnv).toContain('PM_PERSONAL_API_URL=http://localhost:8090')
-    expect(routedEnv).toContain('PM_SHARED_API_URL=https://memory.example.test')
-    expect(routedEnv).toContain('PM_SHARED_USER_TOKEN=tid.secret')
+    expect(routedEnv).not.toContain('https://memory.example.test')
+    expect(routedEnv).not.toContain('tid.secret')
   })
-  it('rewrites loopback shared API URLs for the Docker stream MCP service', () => {
+  it('does not write newly supplied connector settings', () => {
     const routedEnv = renderEnv({
       ...answers,
       mcpRuntime: 'stream',
@@ -226,8 +226,8 @@ describe('renderEnv', () => {
       sharedUserToken: 'tid.secret',
     }, testSecrets)
 
-    expect(routedEnv).toContain('PM_SHARED_API_URL=http://host.docker.internal:12090')
-    expect(routedEnv).toContain('PM_SHARED_USER_TOKEN=tid.secret')
+    expect(routedEnv).not.toContain('12090')
+    expect(routedEnv).not.toContain('tid.secret')
   })
   it('includes every required key the stack reads', () => {
     for (const key of ['QDRANT_URL', 'REDIS_URL', 'MINIO_ENDPOINT', 'GRAPHITI_URL', 'API_PORT', 'SEMAPHORE_LIMIT']) {
@@ -746,7 +746,7 @@ describe('install steps', () => {
     expect(steps.map((s) => s.id)).not.toContain('build-mcp-node')
     expect(steps.find((s) => s.id === 'compose-up')?.envOverride?.COMPOSE_PROFILES).toBe('mcp-stream')
   })
-  it('shared connection step happens after local personal stack verification', () => {
+  it('legacy connector answers never schedule a remote connection or model pull', () => {
     const steps = buildSteps({
       flow: 'engine',
       mcpRuntime: 'stream',
@@ -774,13 +774,11 @@ describe('install steps', () => {
       'restart-app',
       'wait-mcp',
       'verify',
-      'pull-shared-model',
-      'shared-connect',
       'register',
       'write-rule',
     ])
-    expect(steps.findIndex((s) => s.id === 'verify')).toBeLessThan(steps.findIndex((s) => s.id === 'shared-connect'))
-    expect(steps.find((s) => s.id === 'shared-connect')?.kind).toBe('fn')
+    expect(steps.map(step => step.id)).not.toContain('shared-connect')
+    expect(steps.map(step => step.id)).not.toContain('pull-shared-model')
   })
   it('extractToken matches the seed banner, "already present", or neither', () => {
     expect(extractToken('  Token: abc123.secretvalue\n')).toEqual({ token: 'abc123.secretvalue' })

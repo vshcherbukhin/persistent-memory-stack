@@ -18,16 +18,8 @@ export default async function MemoriesPage({
 }) {
   const params = searchParams ? await searchParams : {}
   const surface = normalizeMemorySurface(Array.isArray(params.surface) ? params.surface[0] : params.surface)
-  const localWho = await requireSession()
-  let surfaceAvailable = true
-  let who = localWho
-  if (surface === 'shared') {
-    try {
-      who = await api.memoryWhoami(surface)
-    } catch {
-      surfaceAvailable = false
-    }
-  }
+  const who = await requireSession()
+  const surfaceAvailable = true
   const isAdmin = surfaceAvailable && canAccessControlPlane(who.adminLevel)
 
   let initial: Memory[] = []

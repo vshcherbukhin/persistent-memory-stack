@@ -176,6 +176,7 @@ async function adoptExistingLocalSuperuser(): Promise<LocalIdentityRow | null> {
 export async function ensureLocalIdentity(): Promise<TenantCtx> {
   const existing = await readLocalIdentityRow()
   if (existing) {
+    if (existing.user.teamId !== existing.teamId) throw new Error('The validated personal owner mapping is inconsistent. Resolve ownership explicitly; the service will not reassign a user or merge partitions.')
     await upgradePlaceholderTeamName(existing.teamId)
     await repairLocalUser(existing)
     await syncLocalPasswordFromEnv(existing)
@@ -183,8 +184,8 @@ export async function ensureLocalIdentity(): Promise<TenantCtx> {
     return tenantCtxFromLocalRow(repaired ?? existing)
   }
 
-  const adopted = await adoptExistingLocalSuperuser()
-  if (adopted) return tenantCtxFromLocalRow(adopted)
+  const existingMemories = await ownerPrisma.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) AS count FROM memory`
+  if (Number(existingMemories[0]?.count ?? 0) > 0) throw new Error('Existing records have no validated local owner mapping. Preserve them and establish an explicit ownership mapping before personal recall; no historical partition is adopted automatically.')
 
   // First local install: let the DB/Prisma generate IDs, then remember those real
   // row IDs in the local_identity singleton. If the resolved team name already

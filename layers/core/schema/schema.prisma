@@ -483,6 +483,9 @@ model Source {
   minioObjectKey String?    @map("minio_object_key")
   sessionId      String?    @map("session_id")
   metadata       Json?
+  sourceFingerprint String? @map("source_fingerprint")
+  ownerId        String?    @map("owner_id") @db.Uuid
+  ownershipState String     @default("unresolved") @map("ownership_state")
 
   documents  Document[]
   ingestJobs IngestJob[]
@@ -492,6 +495,7 @@ model Source {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([teamId, project])
+  @@unique([teamId, sourceFingerprint])
   @@index([teamId, kind])
   @@index([sessionId])
   @@map("source")
@@ -582,6 +586,7 @@ model Entity {
   name       String
   entityType String    @map("entity_type")
   metadata   Json?
+  resolutionKey String? @map("resolution_key")
 
   relationshipsFrom Relationship[] @relation("RelationshipSubject")
   relationshipsTo   Relationship[] @relation("RelationshipObject")
@@ -591,6 +596,7 @@ model Entity {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([teamId, project])
+  @@unique([teamId, resolutionKey])
   @@index([teamId, name])
   @@index([documentId])
   @@map("entity")
@@ -610,11 +616,15 @@ model Claim {
   invalidAt       DateTime? @map("invalid_at")
   confidence      Float?
   metadata        Json?
+  memoryId        String?   @map("memory_id") @db.Uuid
+  memoryRevision  Int?      @map("memory_revision")
+  sourceIds       String[]  @default([]) @map("source_ids") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([teamId, project])
+  @@unique([memoryId, memoryRevision])
   @@index([teamId, validAt])
   @@index([teamId, invalidAt])
   @@index([subjectEntityId])
@@ -635,11 +645,14 @@ model Relationship {
   validAt         DateTime? @map("valid_at")
   invalidAt       DateTime? @map("invalid_at")
   metadata        Json?
+  memoryId        String?   @map("memory_id") @db.Uuid
+  memoryRevision  Int?      @map("memory_revision")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([teamId, project])
+  @@index([memoryId, memoryRevision])
   @@index([subjectEntityId])
   @@index([objectEntityId])
   @@index([teamId, predicate])
@@ -656,6 +669,8 @@ model Investigation {
   status      String  @default("open")
   sessionId   String? @map("session_id")
   metadata    Json?
+  ownerId     String? @map("owner_id") @db.Uuid
+  ownershipState String @default("unresolved") @map("ownership_state")
 
   links InvestigationLink[]
 
@@ -747,6 +762,18 @@ model Memory {
   graphGroupId     String?         @map("graph_group_id")
   graphEpisodeId   String?         @map("graph_episode_id")
   metadata         Json?
+  // Contract v2: authoritative classification; null is honest legacy metadata.
+  knowledge        Json?
+  relationshipDependencies Json? @map("relationship_dependencies")
+  revision         Int             @default(1)
+  memoryType       String          @default("legacy_unclassified") @map("memory_type")
+  assertionStatus  String          @default("legacy_unclassified") @map("assertion_status")
+  topicTags        String[]        @default([]) @map("topic_tags")
+  projectAssociations String[]     @default([]) @map("project_associations")
+  systemAssociations String[]      @default([]) @map("system_associations")
+  // Established from local_identity + original ownership evidence, never project.
+  ownershipState   String          @default("unresolved") @map("ownership_state")
+  deletedAt        DateTime?       @map("deleted_at")
 
   // Author (server-stamped from the token on create/import/migrate). Drives the
   // RLS ownership floor: a plain member may only edit/delete rows they created;
@@ -781,6 +808,9 @@ model Memory {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@index([teamId, project])
+  @@index([teamId, ownershipState, deletedAt])
+  @@index([projectAssociations], type: Gin)
+  @@index([topicTags], type: Gin)
   @@index([teamId, category])
   @@index([teamId, embeddingStatus])
   @@index([teamId, graphStatus])
@@ -795,6 +825,60 @@ model Memory {
   @@index([teamId, project, recordUpdatedAt])
   @@index([teamId, project, lastAccessedAt])
   @@map("memory")
+}
+
+/// Append-only accepted revisions. No cascade: history survives a deleted record.
+model MemoryRevision {
+  id        String   @id @default(uuid()) @db.Uuid
+  teamId    String   @map("team_id") @db.Uuid
+  memoryId  String   @map("memory_id") @db.Uuid
+  revision  Int
+  snapshot  Json
+  intent    String
+  reason    String
+  evidence  Json
+  actorId   String?  @map("actor_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([memoryId, revision])
+  @@index([teamId, memoryId])
+  @@map("memory_revision")
+}
+
+/// Transactional receipt binds one caller-owned retry key to one exact request.
+model MemoryWriteReceipt {
+  teamId      String   @map("team_id") @db.Uuid
+  key         String
+  requestHash String   @map("request_hash")
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@id([teamId, key])
+  @@map("memory_write_receipt")
+}
+
+/// Bounded catalog resolution; aliases never establish ownership or access.
+model KnowledgeTerm {
+  teamId    String   @map("team_id") @db.Uuid
+  kind      String
+  name      String
+  aliases   String[] @default([])
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at")
+  @@id([teamId, kind, name])
+  @@map("knowledge_term")
+}
+
+/// Historical import rows without a positively matched owner are preserved here,
+/// including original IDs/authorship, outside every active recall projection.
+model MemoryImportQuarantine {
+  id         String   @id @default(uuid()) @db.Uuid
+  teamId     String   @map("team_id") @db.Uuid
+  originalId String   @map("original_id") @db.Uuid
+  archiveHash String  @map("archive_hash")
+  payload    Json
+  reason     String
+  createdAt  DateTime @default(now()) @map("created_at")
+  @@unique([teamId, originalId, archiveHash])
+  @@map("memory_import_quarantine")
 }
 
 /// DATA plane (RLS): a Personal-stack binding from an authenticated user and a
@@ -831,6 +915,7 @@ model GraphLifecycleOperation {
   graphEpisodeId String                   @map("graph_episode_id")
   status      GraphLifecycleStatus        @default(pending)
   attempts    Int                         @default(0)
+  ownershipValidated Boolean              @default(false) @map("ownership_validated")
   lastError   String?                     @map("last_error")
   requestedAt DateTime                    @default(now()) @map("requested_at")
   completedAt DateTime?                   @map("completed_at")

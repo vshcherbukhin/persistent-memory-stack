@@ -19,6 +19,7 @@ export interface QdrantPayload {
 
 /** A scored search hit, payload-flattened for the api/worker merge layer. */
 export interface SearchHit {
+  revision?: number
   pointId: string
   rowId: string
   teamId: string

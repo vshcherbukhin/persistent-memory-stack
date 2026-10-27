@@ -1,9 +1,9 @@
 {
   "name": "persistent-memory",
   "private": true,
-  "version": "1.3.2",
+  "version": "2.0.0",
   "type": "module",
-  "description": "persistent-memory monorepo root — personal-first memory stack with stream MCP, optional Shared Memories connection, dashboard, API, worker, and reusable shared/db packages.",
+  "description": "Persistent Memory Community: a local personal knowledge space with classified capture, connected recall, dashboard, API and stream MCP.",
   "workspaces": [
     "layers/core/schema",
     "packages/shared",

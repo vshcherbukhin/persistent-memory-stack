@@ -220,6 +220,7 @@ test('MkDocs exposes user-facing Space guides and related documents for every St
     'spaces/personal/navigation-and-spaces.md',
     'spaces/personal/overview.md',
     'spaces/personal/memories.md',
+    'spaces/personal/knowledge-contract.md',
     'spaces/personal/services.md',
     'spaces/personal/workers.md',
     'spaces/personal/token-usage.md',
@@ -243,8 +244,9 @@ test('MkDocs exposes user-facing Space guides and related documents for every St
   ]
 
   assert.match(config, /- "Personal Space Documentation":/)
-  assert.match(config, /- "Shared Space Documentation":\n          - "In development": spaces\/shared\/index\.md/)
-  assert.match(config, /- "Hosted Server Dashboard Documentation":\n          - "In development": spaces\/hosted-server\/index\.md/)
+  assert.match(config, /- "Historical sharing":\n          - "Retired sharing": spaces\/shared\/index\.md/)
+  assert.match(config, /- "Historical sharing":\n          - "Retired sharing": spaces\/hosted-server\/index\.md/)
+  assert.doesNotMatch(config, /- "(?:Shared Space Documentation|Hosted Server Dashboard Documentation|In development)":/)
   for (const path of personalGuidePaths) assert.match(config, new RegExp(path.replaceAll('.', '\\.')))
   assert.doesNotMatch(config, /- Local Personal:/)
   assert.doesNotMatch(config, /- Local Shared Client:/)
@@ -353,8 +355,10 @@ test('every canonical Mermaid definition has a committed SVG fallback for plain 
   }
 
   const styles = await readFile(new URL('../../../documentation/stylesheets/pm-management.css', import.meta.url), 'utf8')
-  assert.equal(markdownWithDiagrams.length, 17)
-  assert.equal(diagrams, 17)
+  // The personal-only architecture and access-model guides use prose; the
+  // remaining canonical definitions still each require their own SVG fallback.
+  assert.equal(markdownWithDiagrams.length, 15)
+  assert.equal(diagrams, 15)
   assert.match(styles, /img\[alt\^="Diagram fallback:"\]/)
 })
 

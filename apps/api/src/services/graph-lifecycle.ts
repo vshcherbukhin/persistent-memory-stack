@@ -60,7 +60,7 @@ export async function enqueueGraphRemoval(
         project: input.project,
         subjectKind: input.subjectKind,
         subjectId: input.subjectId,
-        operation: 'remove',
+        operation: 'remove', ownershipValidated: true,
         graphGroupId: episode.groupId,
         graphEpisodeId: episode.episodeId,
       })),

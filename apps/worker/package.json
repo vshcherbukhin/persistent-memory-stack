@@ -1,9 +1,9 @@
 {
   "name": "persistent-memory-worker",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "persistent-memory BullMQ ingest worker (Phase 6) — consumes the pm.ingest queue and runs the 7-step pipeline (fetch → extract → chunk → persist → embed (Mode A) → graphiti → status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",
+  "description": "persistent-memory BullMQ ingest worker (Phase 6) \u2014 consumes the pm.ingest queue and runs the 7-step pipeline (fetch \u2192 extract \u2192 chunk \u2192 persist \u2192 embed (Mode A) \u2192 graphiti \u2192 status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b tsconfig.json",

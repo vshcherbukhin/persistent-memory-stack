@@ -5,6 +5,8 @@ import { memoryImportTransportError } from '@/lib/memoryImportError'
 import { requireSession, requireControlPlane, isSuperuser } from '@/lib/session'
 import { canAccessControlPlane } from '@/lib/authz'
 import type { MemoryUpdateActionResult } from '@/lib/memoryUpdateResult'
+import type { ClassifiedWrite, ClassifiedUpdate, KnowledgeCatalog } from '@/lib/knowledge'
+import type { MemoryArchiveImport } from '@/lib/memoryArchive'
 import type { Memory, MemoryExportEnvelope, MemoryGraphRebuildResult, MemoryImportResult, PendingEmbeddings, MemorySurface, GraphDeletePreview, BulkGraphDeletePreview, MemoryGraphActivityResult, MemoryGraphFacets, MemoryGraphFilters, MemoryGraphSnapshot } from '@/lib/types'
 
 export interface MemoryListResult {
@@ -132,18 +134,15 @@ export async function searchMemoriesAction(
   return { rows: res.results, total: res.results.length, nextCursor: null, badges: [] }
 }
 
-export async function updateMemoryAction(input: {
-  id: string
-  content?: string
-  project?: string
-  category?: string
-  surface?: MemorySurface
+export async function updateMemoryAction(input: ClassifiedUpdate & {
+  id: string; surface?: MemorySurface
 }): Promise<MemoryUpdateActionResult> {
   const surface = normalizeMemorySurface(input.surface)
   const { admin } = await role(surface)
   try {
-    if (admin) await api.updateMemory(input.id, { content: input.content, project: input.project, category: input.category }, surface)
-    else await api.dpUpdateMemory(input.id, { content: input.content, project: input.project }, surface)
+    const { id, surface: _surface, ...payload } = input
+    if (admin) await api.updateMemory(id, payload, surface)
+    else await api.dpUpdateMemory(id, payload, surface)
     return { ok: true }
   } catch (err) {
     // Expected API validation/conflict errors are data, not render failures. A
@@ -257,14 +256,13 @@ export async function exportMemoriesAction(input: { teamId?: string; project?: s
   }
 }
 
-/** Import (admin+ only). Accepts the export envelope's `memories` array. */
-export async function importMemoriesAction(memories: unknown[], teamId?: string, project?: string, surfaceInput?: MemorySurface): Promise<{ ok: true; result: MemoryImportResult } | { ok: false; error: string; rejected?: boolean }> {
+/** Import explicit versioned archives, preserving original provenance and revision metadata. */
+export async function importMemoriesAction(archive: MemoryArchiveImport, surfaceInput?: MemorySurface): Promise<{ ok: true; result: MemoryImportResult } | { ok: false; error: string; rejected?: boolean }> {
   try {
     const surface = normalizeMemorySurface(surfaceInput)
     const { admin } = await role(surface)
     if (!admin) return { ok: false, error: 'Import requires admin.', rejected: true }
-    const rows = surface === 'personal' ? stripTeamFieldsFromMemoryRows(memories) : memories
-    return { ok: true, result: await api.importMemories(rows, surface === 'personal' ? undefined : teamId, project, surface) }
+    return { ok: true, result: await api.importMemories(archive, surface) }
   } catch (err) {
     // Expected failures are data: thrown Server Action errors are redacted in production.
     if (err instanceof ApiError) return { ok: false, error: `HTTP ${err.status} · ${err.code}: ${err.message}${err.details ? ` (${err.details})` : ''}`, rejected: err.status >= 400 && err.status < 500 && err.status !== 408 }
@@ -274,24 +272,27 @@ export async function importMemoriesAction(memories: unknown[], teamId?: string,
   }
 }
 
+export async function getMemoryAction(id: string, surfaceInput?: MemorySurface): Promise<Memory> {
+  const surface = normalizeMemorySurface(surfaceInput)
+  const { admin } = await role(surface)
+  return admin ? api.getMemory(id, surface) : api.dpGetMemory(id, surface)
+}
+
+export async function getMemoryCatalogAction(cursor?: string): Promise<KnowledgeCatalog> {
+  await requireSession()
+  return api.getMemoryCatalog(cursor)
+}
+
 export async function createMemoryAction(
-  input: { content: string; project: string; category: string; entities: string[]; source: string },
+  input: ClassifiedWrite,
   surfaceInput?: MemorySurface,
-): Promise<{ ok: true; id: string; embeddingStatus: 'pending' | 'embedded' } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: string; embeddingStatus?: string; graphStatus?: string; processing?: string } | { ok: false; error: string }> {
   const surface = normalizeMemorySurface(surfaceInput)
   await requireSession()
   try {
-    const created = await api.createMemory(
-      {
-        content: input.content,
-        project: input.project,
-        metadata: { category: input.category, entities: input.entities, source: input.source },
-      },
-      surface,
-    )
-    return { ok: true, id: created.id, embeddingStatus: created.embeddingStatus }
+    const created = await api.createMemory(input, surface)
+    return { ok: true, id: created.id, embeddingStatus: created.embeddingStatus, graphStatus: created.graphStatus, processing: created.processing }
   } catch (err) {
-    // A 422 from the Shape gate carries its rewrite guidance in the message.
     if (err instanceof ApiError) return { ok: false, error: err.message }
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
