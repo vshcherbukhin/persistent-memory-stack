@@ -465,8 +465,8 @@ export function createUpdateHtml(initialState: HandoffState): string {
       if (state && state.active && state.phase === 'failed') return 'Persistent Memory update needs attention';
       const version = state && state.active ? (state.targetVersion || state.releaseNotesVersion) : null;
       return version
-        ? 'Updating Persistent Memory to the latest release ' + version
-        : 'Updating Persistent Memory to the latest release';
+        ? 'Updating Persistent Memory to version ' + version
+        : 'Updating Persistent Memory';
     }
 
     function render(state) {
@@ -564,8 +564,8 @@ function updateTitle(state: HandoffState): string {
   if (state.active && state.phase === 'failed') return 'Persistent Memory update needs attention'
   const version = state.active ? state.targetVersion ?? state.releaseNotesVersion : undefined
   return version
-    ? `Updating Persistent Memory to the latest release ${version}`
-    : 'Updating Persistent Memory to the latest release'
+    ? `Updating Persistent Memory to version ${version}`
+    : 'Updating Persistent Memory'
 }
 
 async function isDashboardReady(deps: GatewayDeps): Promise<boolean> {
