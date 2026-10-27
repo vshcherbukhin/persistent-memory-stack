@@ -63,6 +63,11 @@ payloads receive actionable upgrade errors, without guessed mandatory metadata.
 Identity, accepted revisions, timestamps, authorization and processing state remain
 server-owned. Content and metadata/evidence pass the existing fail-closed PII/secret
 gate before storage.
+The existing configured validation model checks assertion text after those local
+checks. Classification and source evidence stay local. Rejected or malformed
+verdicts and provider failures block storage; accepted text is not silently
+rewritten. Completed retry receipts avoid another validation call. Model acceptance
+does not independently verify the assertion or raise its stored provenance.
 
 ## Connected retrieval and provenance
 

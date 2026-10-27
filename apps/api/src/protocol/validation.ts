@@ -36,7 +36,7 @@ import {
   type ExtractionLLM,
   LlmResponseError,
 } from './llm/client.ts'
-import { FACT_EXTRACTION_PROMPT } from './prompt.ts'
+import { FACT_EXTRACTION_PROMPT, KNOWLEDGE_CONTENT_PROMPT } from './prompt.ts'
 import {
   factExtractionCacheKey,
   classifyFactExtraction,
@@ -168,6 +168,13 @@ export function __setExtractionLLM(llm: ExtractionLLM | null): void {
     _configuredLlm = null
     _configuredLlmKey = null
   }
+}
+
+/** Existing configured provider, health accounting and verdict parser. The v2
+ * adapter sends assertion text only; local classification/evidence stays local. */
+export async function classifyKnowledgeContent(content:string) {
+  const {llm,runtime}=await getLlm()
+  return classifyFactExtraction(llm,runtime,KNOWLEDGE_CONTENT_PROMPT,JSON.stringify({content}))
 }
 
 /** Lazily-built DLP client (one connection to the sidecar per process). */

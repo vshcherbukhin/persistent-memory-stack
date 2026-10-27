@@ -1,10 +1,11 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest'
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { initDb, ownerPrisma, prisma, tenantStore, runInTenant, type TenantCtx, type Tx } from '@pm/db'
 import { KnowledgeWrite, KnowledgeClassification, type Classification } from '@pm/shared'
 import { saveKnowledge, updateKnowledge, knowledgeWhere, knowledgeRequestHash } from '../../apps/api/src/services/knowledge.ts'
 import { searchMemoriesMerged } from '../../apps/api/src/services/merge.ts'
-import { __setDlpClient } from '../../apps/api/src/protocol/validation.ts'
+import { __setDlpClient, __setExtractionLLM } from '../../apps/api/src/protocol/validation.ts'
+import { LlmResponseError } from '../../apps/api/src/protocol/llm/client.ts'
 import { archiveFixture } from '../../apps/api/test/knowledge-harness.ts'
 
 const suffix=randomUUID().slice(0,8)
@@ -12,6 +13,7 @@ const topic=`synthetic-orbit-${suffix}`
 const projects=[`synthetic-observatory-${suffix}`,`synthetic-garden-${suffix}`]
 let ctx:TenantCtx
 const ids:string[]=[]
+const classify=vi.fn(async(_prompt:string,userJson:string)=>({outcome:'accept' as const,facts:[JSON.parse(userJson).content],restructured_content:'',reason:'',missing:[]}))
 const inOwner=<T>(fn:()=>Promise<T>)=>tenantStore.run(ctx,fn)
 const classification=(project:string|null,status:Classification['assertionStatus']='observation'):Classification=>({
   memoryType:'decision',assertionStatus:status,primaryTopic:topic,topicTags:[topic],origin:project?{kind:'project',name:project}:{kind:'general'},
@@ -30,8 +32,9 @@ beforeAll(async()=>{
   const owner=await ownerPrisma.localIdentity.findUniqueOrThrow({where:{id:'singleton'}})
   ctx={userId:owner.userId,teamId:owner.teamId,adminLevel:'superuser',isTeamMember:true,isTeamAdmin:false,isGlobalSuperuser:true,mountedTeamIds:[],insideTenantTx:false}
   __setDlpClient({scan:async()=>({pii:[],secrets:[],block:false})})
+  __setExtractionLLM({classify})
 })
-afterAll(async()=>{__setDlpClient(null);await Promise.allSettled([prisma?.$disconnect(),ownerPrisma?.$disconnect()])})
+afterAll(async()=>{__setDlpClient(null);__setExtractionLLM(null);await Promise.allSettled([prisma?.$disconnect(),ownerPrisma?.$disconnect()])})
 
 describe('Community canonical personal knowledge on a restored isolated database',()=>{
   it('rejects missing/conflicting metadata and server-owned fields before storage',async()=>{
@@ -54,6 +57,24 @@ describe('Community canonical personal knowledge on a restored isolated database
     expect(records).toHaveLength(3);expect(records.map(record=>record.assertionStatus).sort()).toEqual(['fact','observation','proposal'])
     const sourceIds=await inOwner(()=>runInTenant((tx:Tx)=>tx.claim.findMany({where:{memoryId:{in:ids}}})))
     expect(new Set(sourceIds.flatMap(claim=>claim.sourceIds)).size).toBe(1)
+    const before=classify.mock.calls.length
+    await inOwner(()=>saveKnowledge(first));expect(classify.mock.calls).toHaveLength(before)
+  })
+  it('keeps classification/evidence local and fails closed on rejected or malformed content verdicts',async()=>{
+    const content=`Synthetic validator ${suffix} reports an explicit assertion with separately classified local evidence.`
+    const submission=capture(null,content)
+    submission.classification.primaryTopic=`synthetic-validator-${suffix}`
+    submission.classification.topicTags=[submission.classification.primaryTopic]
+    submission.resolutions=[{kind:'topic',name:submission.classification.primaryTopic,action:'create',reason:'Keep validator behavior separate from the shared-concept retrieval fixture.'}]
+    const accepted=await inOwner(()=>saveKnowledge(submission)) as {id:string}
+    expect(JSON.parse(classify.mock.calls.at(-1)![1])).toEqual({content})
+    const before=await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.count()))
+    classify.mockResolvedValueOnce({outcome:'reject',facts:[],restructured_content:'',reason:'Missing a self-contained assertion.',missing:['self_contained_assertion']} as never)
+    await expect(inOwner(()=>saveKnowledge(capture(null,content+' Rejected.')))).rejects.toMatchObject({code:'content_validation_failed',statusCode:422})
+    classify.mockRejectedValueOnce(new LlmResponseError('fixture malformed verdict'))
+    await expect(inOwner(()=>updateKnowledge(accepted.id,{contractVersion:2,expectedRevision:1,intent:'correction',changes:{content:content+' Corrected.'},reason:'Synthetic malformed-validator rollback proof.',evidence:classification(null).sources,idempotencyKey:randomUUID()}))).rejects.toMatchObject({code:'content_validation_unavailable',statusCode:503})
+    expect(await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.count()))).toBe(before)
+    expect((await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.findUniqueOrThrow({where:{id:accepted.id}})))).revision).toBe(1)
   })
   it('recalls both projects and general across the owner space, with strict filters and bounded results',async()=>{
     const noVectors={query: `${suffix} orbit scheduling`,pin:{modelId:'synthetic',dim:2,vectorName:'synthetic'},limit:10}

@@ -20,7 +20,7 @@ deletions and archive restoration using a database-owner connection.
 5. Build shared/database packages and run
    `npx vitest run --config test/knowledge/vitest.config.ts` from the repository root.
 
-The suite uses a deterministic clean DLP stub and no content-validation model call.
+The suite uses deterministic DLP and content-validator stubs without provider calls.
 It proves the canonical database/HTTP boundaries, not live model quality, actual
 Codex/Claude acceptance, rendered dashboard behavior or full-store updater safety.
 Keep those evidence categories separate. Inspect resource labels/mounts and save

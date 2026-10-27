@@ -6,7 +6,8 @@ import {
   KnowledgeWrite, KnowledgeUpdate, KnowledgeClassification, KnowledgeFilters, KNOWLEDGE_UPGRADE_GUIDANCE,
   type Classification, type ClassifiedWrite, type ClassifiedUpdate, type KnowledgeFilter,
 } from '@pm/shared'
-import { assertNoPii } from '../protocol/validation.ts'
+import { assertNoPii, classifyKnowledgeContent } from '../protocol/validation.ts'
+import { LlmResponseError } from '../protocol/llm/client.ts'
 
 export class KnowledgeError extends Error {
   constructor(public code: string, public statusCode: number, message: string, public details: unknown = null) { super(message) }
@@ -194,11 +195,32 @@ async function withReceipt(key: string, request: unknown, apply: (tx: Tx) => Pro
   })
 }
 
+async function existingReceipt(key:string,request:unknown):Promise<{response:unknown}|null>{
+  const teamId=getCtx().teamId
+  if(!teamId)throw new KnowledgeError('personal_owner_required',403,'A validated personal owner is required.')
+  const receipt=await runInTenant((tx:Tx)=>tx.memoryWriteReceipt.findUnique({where:{teamId_key:{teamId,key}}}))
+  if(!receipt)return null
+  if(receipt.requestHash!==knowledgeRequestHash(request))throw new KnowledgeError('idempotency_conflict',409,'This retry key belongs to a different request; no new validation or write was performed.')
+  return {response:receipt.response}
+}
+async function assertKnowledgeContent(content:string):Promise<void>{
+  let verdict
+  try{verdict=await classifyKnowledgeContent(content)}catch(error){
+    if(error instanceof LlmResponseError)throw new KnowledgeError('content_validation_unavailable',503,'The configured validator returned a malformed verdict. Retry; no knowledge was saved.')
+    throw error
+  }
+  if(verdict.outcome!=='accept')throw new KnowledgeError('content_validation_failed',422,'Clarify the assertion and retry; no knowledge was saved.',{reason:verdict.reason||'The assertion needs clarification.',issues:verdict.missing,suggestion:verdict.suggestion??null})
+}
+
 export async function saveKnowledge(raw: unknown): Promise<unknown> {
   const input = parseKnowledge(KnowledgeWrite, raw)
+  const request={operation:'create',input}
+  const receipt=await existingReceipt(input.idempotencyKey,request)
+  if(receipt)return receipt.response
   // Scan content AND metadata/evidence. Metadata is not a DLP escape hatch.
   await assertNoPii(JSON.stringify(input))
-  return withReceipt(input.idempotencyKey, { operation: 'create', input }, async tx => {
+  await assertKnowledgeContent(input.content)
+  return withReceipt(input.idempotencyKey, request, async tx => {
     const classification = await resolveClassification(tx, input.classification, input.resolutions)
     let row = await tx.memory.create({ data: { id: randomUUID(), teamId: getCtx().teamId!, createdById: getCtx().userId,
       content: input.content, ownershipState: 'personal', ...classificationData(classification), graphVersion: new Date(),
@@ -214,8 +236,17 @@ export async function saveKnowledge(raw: unknown): Promise<unknown> {
 
 export async function updateKnowledge(memoryId: string, raw: unknown): Promise<unknown> {
   const input: ClassifiedUpdate = parseKnowledge(KnowledgeUpdate, raw)
-  await assertNoPii(JSON.stringify(input))
-  return withReceipt(input.idempotencyKey, { operation: 'update', memoryId, input }, async tx => {
+  const request={operation:'update',memoryId,input}
+  const receipt=await existingReceipt(input.idempotencyKey,request)
+  if(receipt)return receipt.response
+  const current=await runInTenant((tx:Tx)=>tx.memory.findUnique({where:{id:memoryId}}))
+  if(!current)throw new KnowledgeError('not_found',404,'No authorized personal memory has this ID.')
+  if(current.revision!==input.expectedRevision)throw new KnowledgeError('revision_conflict',409,'Read and reconcile the current accepted revision before retrying.')
+  const candidate=KnowledgeWrite.safeParse({contractVersion:2,content:input.changes.content??current.content,classification:input.changes.classification??current.knowledge,idempotencyKey:input.idempotencyKey})
+  if(!candidate.success)throw new KnowledgeError('memory_classification_invalid',422,'The resulting record must satisfy the complete current contract.',{issues:candidate.error.issues})
+  await assertNoPii(JSON.stringify({input,resulting:candidate.data}))
+  await assertKnowledgeContent(candidate.data.content)
+  return withReceipt(input.idempotencyKey, request, async tx => {
     const prior = await tx.memory.findUnique({ where: { id: memoryId } })
     if (!prior) throw new KnowledgeError('not_found', 404, 'No authorized personal memory has this ID.')
     if (prior.revision !== input.expectedRevision) throw new KnowledgeError('revision_conflict', 409, 'Read the current record and reconcile your explicit changes before retrying.', { expectedRevision: input.expectedRevision, currentRevision: prior.revision, id: memoryId })
