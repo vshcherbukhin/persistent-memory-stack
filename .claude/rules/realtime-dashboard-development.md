@@ -1,64 +1,53 @@
 # Real-Time Dashboard Development Rule
 
-Use this rule before dashboard/UI work, Chrome-specific debugging, notification
-debugging, or any task where the user will visually review local behavior.
+Use this shared rule for Codex and Claude when dashboard/UI behavior changes.
+Read `.agents/development-workflow.md` for the bounded verification/review policy.
 
-## Mandatory Chrome Setup
+## Proportionate browser verification
 
-- Use the Chrome/browser-control connector, not the in-app browser, Playwright,
-  screenshots-only workarounds, or Computer Use, unless the user explicitly
-  relaxes this rule for the current task.
-- At task start, verify Chrome is connected and usable in the active user
-  profile. Do not infer failure from internal profile directory names; inspect
-  connector/runtime metadata and retry/refresh before concluding the profile is
-  wrong.
-- Verify full operation before implementation: enumerate or reuse tabs,
-  navigate/click, read rendered state, capture a screenshot/DOM state, and
-  confirm DevTools/CDP access for console, network, DOM/style, or service worker
-  inspection when the task could need it.
-- If any Chrome, extension, tab, permission, or CDP capability is missing, stop
-  and guide the user through fixing Chrome connector setup, extension
-  connection, active-profile installation, site approval, or Browser Developer
-  mode. Do not switch to another browser-control path as a workaround.
+- Prefer the connected Chrome browser in the user's active profile. Discover the
+  actual available browser capabilities; no particular skill name or connector
+  API spelling is an implementation prerequisite.
+- Inspect only the capabilities needed for the changed flow. Check DevTools/CDP
+  when diagnosing console, network, notifications or service workers, not for
+  every label, spacing or instruction change.
+- If the preferred browser is unavailable, report that once and continue safe
+  implementation and automated tests. An available browser/Playwright route may
+  inspect the same deployed application with synthetic data when the task has no
+  explicit browser restriction. Label the actual tool/runtime used; never call
+  sandbox checks evidence from the user's Chrome or claim unperformed visuals.
+- Honor explicit task-specific browser/device requirements. If those cannot be
+  met, leave that acceptance check pending, continue independent work, and report
+  the concrete missing capability. Do not bypass login or weaken authentication.
 
-## Dashboard Session
+## Dashboard session and scope
 
-- Check existing Chrome tabs first. Reuse an open Persistent Memory dashboard tab
-  when one exists; otherwise open `http://127.0.0.1:3200`.
-- Treat the reused dashboard tab as the verification anchor. Do not open a
-  parallel `localhost:3000`, `127.0.0.1:3000`, or other dev-server tab merely
-  because the current dashboard bundle is stale. Use
-  `bash deploy/scripts/dev-redeploy.sh redeploy-dashboard`
-  or the appropriate safe redeploy path, then reload/inspect the existing `:3200` tab.
-- Ask the user before creating any extra browser tab for UI verification. If an
-  extra tab is opened by mistake, close it and return to the existing dashboard
-  tab.
-- If the dashboard requires login, ask the user to log in in Chrome and tell you
-  when ready. Do not bypass the login with alternate sources or credentials.
-- Keep the Chrome connection and dashboard tab available during the whole dev
-  loop: inspect -> edit -> redeploy/refresh -> verify visually -> ask the user
-  whether it looks right.
-- Never close the dashboard tab, disconnect Chrome, or end the browser session on
-  your own after a visual pass. Keep it running until the user approves the UI
-  state and has no more additions.
-- If the user closes the dashboard tab by mistake, reopen it and continue.
+- Inspect existing tabs and configured ports first. Reuse the matching dashboard
+  tab at the gateway (`http://127.0.0.1:3200` by default). Do not start a parallel
+  raw `:3000` application or capture stale/different code as current evidence.
+- Refresh a current bundle after the appropriate targeted redeploy, normally
+  `bash deploy/scripts/dev-redeploy.sh redeploy-dashboard`, following the local
+  development rule's environment, ownership and data-preservation checks.
+- Avoid duplicate review tabs. Ask before opening an extra user-facing tab when
+  a matching one already exists. Preserve the handoff tab during owner review.
+- Group related edits, then inspect the changed flow once. Recheck the affected
+  states after a correction; do not repeat the full application/device matrix.
+- For normal copy, spacing, branding-label or existing-component work, use the
+  running application and established components. No mandatory Figma round trip,
+  design-system promotion or full-app screenshot synchronization.
+- Use an approved design source when the user supplies one. Material redesigns
+  require their agreed design review; release QA covers supported themes,
+  viewports and journeys. Expand focused QA when the change actually affects them.
+- Request owner visual acceptance at the agreed feature/phase handoff, not after
+  every edit. A known visual/functional defect still needs a fix or an explicit
+  unresolved finding; passing a unit test is not visual acceptance.
 
-## Dev Loop Expectations
+## Preserve product controls
 
-- For UI changes, verify in the live dashboard with Chrome after edits. Prefer
-  direct rendered evidence over code-only confidence.
-- Use the local `material-icons` package through
-  `apps/dashboard/src/components/ui/Icon.tsx` for UI icons. Do not add inline SVGs,
-  Unicode symbol glyphs, emoji icons, browser-default icons, or external icon
-  sources for dashboard controls.
-- Use reusable custom UI components for repeated controls and browser-native
-  surfaces: `Tooltip`, `Checkbox`, `Select`, `Modal`, `StatusToggle`, `Input`,
-  and related components under `apps/dashboard/src/components/ui/`. Do not introduce
-  native browser/system controls, native `title` tooltips, raw checkbox visuals,
-  or one-off local implementations when a shared component can own the behavior
-  and styling.
-- For notification, service worker, local storage, console, or network behavior,
-  use Chrome DevTools/CDP evidence. If CDP access is unavailable, fix that setup
-  with the user first.
-- Keep updates short while the user reviews in Chrome, then continue iterating
-  until the visual/runtime issue is genuinely handled.
+- Use `apps/dashboard/src/components/ui/Icon.tsx` and the local `material-icons`
+  package. Do not introduce arbitrary SVG/emoji/external icon sources.
+- Reuse shared `Tooltip`, `Checkbox`, `Select`, `Modal`, `StatusToggle`, `Input`
+  and related components; do not replace their appearance/behavior with native
+  controls or one-off copies. Preserve accessibility and keyboard/focus behavior.
+- Use synthetic data and redact sensitive evidence. Do not change another
+  project's processes, ports, credentials or browser state to obtain screenshots.

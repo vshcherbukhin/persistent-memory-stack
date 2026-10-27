@@ -20,6 +20,16 @@ parking notes, or historical debugging logs here.
   install/update flow, docs, or package versions.
 - Use `rg`/`rg --files` first for repo search.
 
+## Repository Development Workflow
+
+- Read `.agents/development-workflow.md` from the repository root. Use its bounded
+  implementation, verification, review and resume flow, shared with Codex.
+- Global skills, named custom reviewers and local ledgers are optional aids;
+  a missing skill is not a reason to stop authorized implementation.
+- Current product descriptions are not a veto on an explicitly owner-approved
+  product change. Update the affected rules with the implementation while
+  preserving data-safety and merge/release authorization.
+
 ## Product Model
 
 - Client installs are personal-first: always install a local Personal Memories stack,
@@ -60,7 +70,8 @@ parking notes, or historical debugging logs here.
   list in an app, script, or config. `npm run docs:generate` derives `mkdocs.yml`
   from Markdown frontmatter, and the dashboard reader discovers
   `documentation/spaces/` from that same metadata.
-- For documentation changes, run `npm run docs:build` and `npm run docs:check-navigation`.
+- For product documentation changes under `documentation/`, run
+  `npm run docs:build` and `npm run docs:check-navigation`.
   Keep `mkdocs.template.yml` configuration-only: never hand-edit generated `mkdocs.yml`.
 - Development plans, investigation notes, temporary specs, status logs, and working
   documents must go under `.local/documents/`; they are local-only and never committed.
@@ -71,8 +82,12 @@ parking notes, or historical debugging logs here.
 
 ## Verification
 
-- Run the narrowest meaningful tests first, then root checks for commit candidates:
-  `npm run typecheck` and `npm test`.
-- For dashboard-only changes, also run tests from `apps/dashboard/`; for installer changes, run
-  tests from `apps/onboard/`.
+- Follow the evidence-reuse policy in `.agents/development-workflow.md`: focused
+  tests during edits; applicable integration/root checks for the completed code
+  candidate, not every micro-commit. Root code checks are `npm run typecheck`
+  and `npm test`; run affected dashboard/installer suites without duplicating
+  suites already covered by the root run.
+- Instruction-only edits require link/parity/diff checks, not unrelated builds,
+  stack redeploys, browser matrices or product releases. Product-doc changes
+  still require their documented documentation checks.
 - Report exactly what was verified and what was not.
