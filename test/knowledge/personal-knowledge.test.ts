@@ -208,6 +208,51 @@ describe('Community canonical personal knowledge on a restored isolated database
       expect(await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.count({where:{id:fabricatedLegacy.id}})))).toBe(0)
     } finally { await app.close() }
   })
+  it('scans archive semantic data while restoring exact numeric UUID identities and authenticated history',async()=>{
+    const id='11111111-1111-4111-8111-111111111111'
+    if(await ownerPrisma.memory.findUnique({where:{id}}))throw new Error('Refusing an occupied synthetic archive fixture ID')
+    const row=await ownerPrisma.memory.create({data:{id,teamId:ctx.teamId!,createdById:ctx.userId,ownershipState:'personal',content:'Synthetic historical archive evidence preserves its numeric UUID and original source data.',project:`synthetic-archive-privacy-${suffix}`,category:'fact',shape:'atomic',entities:[],createdAt:new Date('2020-01-01T00:00:00.000Z'),recordUpdatedAt:new Date('2020-01-01T00:00:00.000Z')}})
+    await ownerPrisma.memoryRevision.create({data:{id:randomUUID(),teamId:ctx.teamId!,memoryId:id,revision:1,snapshot:JSON.parse(JSON.stringify(row)),intent:'legacy_snapshot',reason:'Synthetic pre-migration archive fixture.',evidence:[],actorId:ctx.userId,createdAt:row.createdAt}})
+    const app=await archiveFixture(ctx),scans:string[]=[]
+    const clean=()=>__setDlpClient({scan:async text=>{scans.push(text);return {pii:[],secrets:[],block:false}}})
+    const countState=()=>inOwner(()=>runInTenant(async(tx:Tx)=>({rows:await tx.memory.count(),history:await tx.memoryRevision.count(),receipts:await tx.memoryWriteReceipt.count(),catalog:await tx.knowledgeTerm.count()})))
+    const importRecord=(record:unknown)=>app.inject({method:'POST',url:'/memories/import',payload:{schema:'pm.memory-export/2',ownerConfirmation:true,memories:[record]}})
+    try{
+      clean()
+      const exported=await app.inject({method:'GET',url:`/memories/export?project=${row.project}`})
+      expect(exported.statusCode).toBe(200)
+      const record=exported.json().memories[0]
+      expect(record.id).toBe(id)
+      const beforeModels=classify.mock.calls.length
+      expect((await importRecord(record)).json()).toMatchObject({errors:0,unchanged:1})
+      expect(scans).toHaveLength(1) // Unchanged imports still pass the privacy gate.
+      expect(JSON.parse(scans[0]!)).toMatchObject({id:'[validated memory identifier]',revisionHistory:[{memoryId:'[validated memory identifier]',snapshot:{id:'[validated memory identifier]'}}]})
+      const before=await countState()
+      __setDlpClient({scan:async()=>({pii:[{entity_type:'EMAIL_ADDRESS',start:0,end:1,score:1}],secrets:[],block:true})})
+      expect((await importRecord(record)).json()).toMatchObject({imported:0,errors:1})
+      __setDlpClient({scan:async()=>{throw new Error('Synthetic scanner outage')}})
+      expect((await importRecord(record)).json()).toMatchObject({imported:0,errors:1})
+      expect(await countState()).toEqual(before)
+      expect(classify.mock.calls.length).toBe(beforeModels)
+      clean()
+      // Only this positively identified synthetic row in the marked restore DB.
+      await ownerPrisma.memory.delete({where:{id}})
+      await ownerPrisma.memoryRevision.deleteMany({where:{memoryId:id}})
+      const tampered={...record,revisionHistory:record.revisionHistory.map((version:{snapshot:object})=>({...version,snapshot:{...version.snapshot,id:randomUUID()}}))}
+      expect((await importRecord(tampered)).json()).toMatchObject({imported:0,errors:1})
+      expect(await ownerPrisma.memory.count({where:{id}})).toBe(0)
+      expect((await importRecord(record)).json()).toMatchObject({imported:1,errors:0,quarantined:0})
+      const restored=await inOwner(()=>runInTenant((tx:Tx)=>tx.memory.findUniqueOrThrow({where:{id}})))
+      const history=await inOwner(()=>runInTenant((tx:Tx)=>tx.memoryRevision.findMany({where:{memoryId:id}})))
+      expect(restored.id).toBe(id);expect(restored.content).toBe(row.content)
+      expect(restored.recordUpdatedAt).toEqual(row.recordUpdatedAt)
+      expect(history).toHaveLength(1)
+      expect(history[0]!.snapshot).toEqual(record.revisionHistory[0].snapshot)
+      expect(JSON.stringify(restored)).not.toContain('[validated memory identifier]')
+      expect(JSON.stringify(history)).not.toContain('[validated memory identifier]')
+      expect(classify.mock.calls.length).toBe(beforeModels)
+    }finally{__setDlpClient({scan:async()=>({pii:[],secrets:[],block:false})});await app.close()}
+  })
   it('withholds memory relationships after the target changes or is deleted',async()=>{
     const app=await archiveFixture(ctx)
     try {

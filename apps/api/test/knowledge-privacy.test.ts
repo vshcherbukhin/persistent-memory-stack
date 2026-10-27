@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { knowledgePrivacyView } from '../src/protocol/knowledge-privacy.ts'
+import { knowledgePrivacyView, archivePrivacyView } from '../src/protocol/knowledge-privacy.ts'
 
 describe('knowledge privacy scan input', () => {
   it('keeps all UUID retry bytes and semantic fields without a credential assignment label', () => {
@@ -28,5 +28,34 @@ describe('knowledge privacy scan input', () => {
     expect(scan.input).toMatchObject({ expectedRevision: 1, changes: input.changes, reason: input.reason, evidence: input.evidence, receiptId: idempotencyKey })
     expect(scan.resulting).toEqual({ content: resulting.content, classification: resulting.classification, receiptId: idempotencyKey })
     expect(input.idempotencyKey).toBe(resulting.idempotencyKey)
+  })
+})
+
+describe('archive privacy scan input', () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  it('neutralizes only three matching storage identity paths, without changing the authenticated archive', () => {
+    const metadata = { id, note: `Semantic UUID literal: ${id}` }
+    const history = { id: 'other-history-id', memoryId: id, actorId: id, evidence: { id }, reason: id, snapshot: { id, content: id, metadata } }
+    const input = { id, createdById: id, archiveSignature: 'a'.repeat(64), content: id, metadata, classification: { sources: [{ evidence: id, reference: id }] }, catalog: [{ name: id }], revisionHistory: [history] }
+    const original = JSON.stringify(input)
+    const scanned = archivePrivacyView(input)
+    expect(scanned.id).toBe('[validated memory identifier]')
+    expect(scanned.revisionHistory[0]).toEqual({ ...history, memoryId: scanned.id, snapshot: { ...history.snapshot, id: scanned.id } })
+    expect(scanned.metadata).toBe(metadata)
+    expect(scanned.content).toBe(id)
+    expect(scanned.classification).toBe(input.classification)
+    expect(scanned.createdById).toBe(id)
+    expect(scanned.catalog).toBe(input.catalog)
+    expect(scanned.archiveSignature).toBe(input.archiveSignature)
+    expect(JSON.stringify(input)).toBe(original)
+  })
+  it('retains mismatched history identities and unrelated nested fields for scanning', () => {
+    const other = '22222222-2222-4222-8222-222222222222'
+    const version = { memoryId: other, snapshot: { id: other, nested: { id } } }
+    expect(archivePrivacyView({ id, revisionHistory: [version] }).revisionHistory[0]).toEqual(version)
+  })
+  it.each(['not-a-uuid', '11111111-1111-0111-8111-111111111111', '11111111-1111-4111-0111-111111111111'])('retains non-v4 or invalid root identifiers: %s', value => {
+    const input = { id: value, revisionHistory: [{ memoryId: value, snapshot: { id: value } }] }
+    expect(archivePrivacyView(input)).toBe(input)
   })
 })

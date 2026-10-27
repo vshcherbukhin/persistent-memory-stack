@@ -8,6 +8,7 @@ import { getCtx, runInTenant, ownerPrisma, Prisma, type Tx } from '@pm/db'
 import { PiiDetectedError } from '../authz/errors.ts'
 import { config } from '../config.ts'
 import { assertNoPii } from '../protocol/validation.ts'
+import { archivePrivacyView } from '../protocol/knowledge-privacy.ts'
 import { KnowledgeError, knowledgeRequestHash, knowledgeWhere, classificationData, resolveClassification, persistClaim } from '../services/knowledge.ts'
 
 const LegacyShape = z.enum(['gotcha_fix','user_correction','tool_gap','prd','atomic'])
@@ -95,7 +96,7 @@ export async function knowledgeArchiveRoutes(app:FastifyInstance):Promise<void>{
           const validated=KnowledgeWrite.safeParse({contractVersion:2,content:record.content,classification:record.classification,idempotencyKey:`archive:${record.id}`})
           if(!validated.success)throw new KnowledgeError('archive_classification_invalid',422,'The classified archive must satisfy the complete canonical write contract.')
         }
-        await assertNoPii(JSON.stringify(record))
+        await assertNoPii(JSON.stringify(archivePrivacyView(record)))
         const result=await runInTenant(async(tx:Tx)=>{
           const existing=await tx.memory.findUnique({where:{id:record.id}})
           if(existing){
