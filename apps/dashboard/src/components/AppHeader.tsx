@@ -512,9 +512,9 @@ function ReleaseHistoryCards({ releases, fallback }: { releases: ReleaseHistoryI
             <div>
               <div className="release-card-title">{release.version}</div>
               <div className="release-card-date">{release.date}</div>
-              <a href={githubReleaseUrl(release.version)} target="_blank" rel="noopener noreferrer">View on GitHub Releases</a>
+              <a href={githubReleaseUrl(release.version)} target="_blank" rel="noopener noreferrer">GitHub release page</a>
             </div>
-            {release.latest ? <span className="release-latest-badge">Latest release</span> : null}
+            {release.latest ? <span className="release-latest-badge">Version notes</span> : null}
           </div>
           {release.services.length > 0 ? (
             <div className="release-services">
