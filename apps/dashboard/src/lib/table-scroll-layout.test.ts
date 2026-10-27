@@ -108,7 +108,6 @@ describe('table scroll layout contract', () => {
   })
 
   it.each([
-    ['users', '../app/(dashboard)/users/page.tsx'],
     ['tokens', '../app/(dashboard)/tokens/page.tsx'],
   ])('%s page uses the fixed-shell internal table scroll pattern', (_name, file) => {
     const page = src(file)
@@ -547,18 +546,6 @@ describe('table scroll layout contract', () => {
     expect(triggerHover).toContain('border-color: var(--border-strong)')
     expect(optionActive).toContain('background: var(--elevated)')
     expect(optionActive).not.toContain('var(--accent')
-  })
-
-  it('keeps Teams mutations inside the reusable modal flow, not browser confirm prompts', () => {
-    const page = src('../app/(dashboard)/teams/page.tsx')
-    const client = src('../app/(dashboard)/teams/TeamsClient.tsx')
-
-    expect(page).toContain('<TeamsClient teams={teams} />')
-    expect(client).toContain("import { Modal } from '@/components/ui/Modal'")
-    expect(client).toContain('Rename team')
-    expect(client).toContain('Delete team')
-    expect(client).not.toContain('confirm(')
-    expect(client).not.toContain('confirm={`')
   })
 
   it('uses the custom token expiry picker and shows token issue dates', () => {

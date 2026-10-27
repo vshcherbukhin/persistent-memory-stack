@@ -59,9 +59,12 @@ describe('personal memory surface contract', () => {
     expect(layout).not.toContain('sharedConnection')
   })
 
-  it('retires old connector and grant pages', () => {
-    expect(src('../app/(dashboard)/connection/page.tsx')).toContain('notFound()')
-    expect(src('../app/(dashboard)/grants/page.tsx')).toContain('notFound()')
+  it('retires sharing and multi-owner administration pages in local production builds', () => {
+    for (const page of ['connection', 'grants', 'teams', 'users']) {
+      const source = src(`../app/(dashboard)/${page}/page.tsx`)
+      expect(source).toContain('notFound()')
+      expect(source).toContain("export const dynamic = 'force-dynamic'")
+    }
   })
 
   it('keeps personal notifications target-free and Slack-free', () => {
