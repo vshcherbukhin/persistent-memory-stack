@@ -118,6 +118,8 @@ services:
       # AOF persistence for durability plus a Redis/FalkorDB password. The
       # browser login uses user "default" with this password.
       FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}
+      # The upstream entrypoint appends --dir from this variable after REDIS_ARGS.
+      FALKORDB_DATA_PATH: /data
       REDIS_ARGS: "--appendonly yes --requirepass ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD must be set in .env.persistent-memory}"
       # FalkorDB images default TIMEOUT to 1000ms. Graphiti's bounded hybrid
       # full-text reads need a small but realistic budget; they retain the

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { prepareFalkorStorage } from './prepare-falkordb-storage.mjs'
 
 const OWNER = 'io.persistent-memory.install.owner'
 const ATTEMPT = 'io.persistent-memory.install.attempt'
@@ -428,7 +429,10 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...options] = process.argv.slice(2)
   if (options.some(option => !['--all-profiles', '--include-helpers'].includes(option))) throw new Error('Unsupported image lifecycle argument.')
-  imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles'), includeHelpers: options.includes('--include-helpers') }).catch(error => {
+  const storageReady=['up','up-storage','start-apps'].includes(mode)
+    ? prepareFalkorStorage({envPath:join(process.cwd(),'.env.persistent-memory'),requireReady:true})
+    : Promise.resolve()
+  storageReady.then(()=>imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles'), includeHelpers: options.includes('--include-helpers') })).catch(error => {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

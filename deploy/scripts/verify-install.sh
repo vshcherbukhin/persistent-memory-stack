@@ -174,6 +174,10 @@ cleanup_legacy_dashboard_container() {
     gateway_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' persistent-memory-dashboard-gateway 2>/dev/null || true)"
     if [ "$canonical_state" != "healthy" ] || [ "$gateway_state" != "healthy" ]; then
         yellow "Completing the dashboard service rename before removing legacy containers"
+        if ! node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs" --env-file "$ENV_FILE" --require-ready; then
+            red "Graph storage requires the supported updater before dependent services can be recreated; legacy containers preserved"
+            return 0
+        fi
         if ! "${compose[@]}" up -d documentation dashboard dashboard-gateway >/dev/null; then
             red "Could not start the canonical dashboard services; legacy containers preserved"
             return 0

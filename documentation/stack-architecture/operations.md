@@ -34,7 +34,7 @@ Defined in the root `package.json` `scripts`:
 |---|---|---|
 | `npm run check:host` | Host preflight | Check prerequisites without installing or registering agents |
 | `npm run install-persistent-memory` | `scripts/host-lifecycle.mjs` | First-time guided install (local web wizard) |
-| `npm run update-persistent-memory` | Host launcher → `deploy/scripts/update.sh` | Snapshot → pull → rebuild → migrate → validate Graph V2 → restart |
+| `npm run update-persistent-memory` | Host launcher → `deploy/scripts/update.sh` | Snapshot → pull → rebuild → migrate → inspect graph preservation → restart |
 | `npm run start-persistent-memory` | Host launcher → `deploy/scripts/start.sh` | Start the existing stack |
 | `npm run stop-persistent-memory` | Host launcher → `deploy/scripts/stop.sh` | Stop containers while preserving named volumes and the environment |
 | `npm run verify-persistent-memory` | Host launcher → `deploy/scripts/verify-install.sh` | Check the installed stack |
@@ -54,24 +54,26 @@ the recommended installation target. See
 [Windows preparation](../installation/windows-installation.md) for the manual
 prerequisite and first-install sequence.
 
-### Graph V2 update safety
+### Community graph update safety
 
-For a Personal installation, the updater runs the Graph V2 migration after the
-protected snapshot and database/RLS migration, but before final installation
-verification. It rebuilds project partitions from authoritative PostgreSQL
-memories, records each run in `graph_migration_run`, and validates current row
-provenance plus completed deletion probes before it removes an unread legacy
-team-wide group. An interrupted or failed migration is resumed by the next
-updater invocation; it never falls back to legacy graph reads or deletes the
-legacy group before validation. Correlated `graph_usage_event` rows preserve
-Graphiti model tokens and latency by memory/document, project, and stage.
+Community2 preserves existing graph namespaces and authoritative legacy records.
+After the protected snapshot and database/RLS migration, the updater performs a
+read-only inspection of personally owned legacy and classified rows. It does not
+replay the corpus through a model, purge old groups or label legacy evidence as
+newly validated. New classified writes use bounded revision-fenced projections;
+legacy enrichment requires a separate reviewed selection and provider authority.
+The progress probe reports inspected counts and the preservation state, separately
+from graph readiness. Its failure remains a warning, not permission to broaden
+reads or run an unapproved rebuild.
 
-While this rebuild runs, `update.sh` starts a short-lived, read-only progress
-probe. At the default 60-second interval (`PM_UPDATE_PROGRESS_PROBE_SECONDS`),
-it reports completed/total/remaining memories to the terminal and dashboard
-handoff. Invalid or unavailable probe data is a warning only: it neither
-changes the migration command nor blocks the update, and the probe exits with
-the foreground migration process.
+Before a FalkorDB recreation, the updater verifies actual persistence settings,
+backs up legacy container-layer RDB/AOF files and transfers them only into a
+positively identified destination with no graph files. The exact pristine image
+symlink may remain unchanged. Unknown/nonempty data and ambiguous ownership block
+the update. The new image uses `FALKORDB_DATA_PATH=/data`; the upstream entrypoint
+appends this directory after `REDIS_ARGS`. Read the
+[knowledge upgrade/recovery contract](../spaces/personal/knowledge-contract.md#upgrade-and-recovery)
+for the preserved storage receipt, conservative start guards and rollback boundary.
 
 ### Install (`scripts/host-lifecycle.mjs`)
 

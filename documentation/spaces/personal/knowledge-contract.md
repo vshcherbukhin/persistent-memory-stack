@@ -173,6 +173,24 @@ retrying `migrate deploy`. Do not delete migration history or edit an applied
 migration to hide a failure. Resume from recorded source/checkpoint and validated
 backup evidence. Reprocessing uses bounded retry jobs and accepted-version guards.
 
+Older FalkorDB containers may store RDB/AOF files in `/var/lib/falkordb/data` even
+though their volume mounts at `/data`. A volume-only archive is then insufficient.
+The updater captures the actual legacy RDB and, immediately before recreation,
+backs up the complete cleanly stopped graph directory and copies it only into its
+positively identified existing volume with no graph files. A sole legacy symlink
+is accepted only when it matches the pristine exact image and is preserved
+unchanged; no other destination entries are accepted. New containers explicitly
+persist under `/data`. Unknown data, ownership or paths block the update; existing
+files are never merged or overwritten. Preserve the private storage receipt and
+full backup for recovery. Failure resumes the exact original container when it
+still exists; a replacement is never mistaken for that original container.
+Start, install and full-stack developer redeploy paths check storage readiness and
+refuse legacy recreation. Use the supported updater for the migration. Before a
+manual whole-stack Compose start, run
+`node scripts/prepare-falkordb-storage.mjs --require-ready` from the installation.
+When the original container is stopped, inspect/start that same container ID first;
+do not recreate it merely to discover its persistence settings.
+
 If rollback is required, stop the affected writers, restore the consistent
 pre-upgrade stores/configuration using the recorded recovery procedure, then run
 the matching original code. Never run older code against the migrated database
