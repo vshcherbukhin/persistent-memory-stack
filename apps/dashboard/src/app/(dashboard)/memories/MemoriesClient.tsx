@@ -1,9 +1,8 @@
 'use client'
 
 /**
- * The interactive Memories UI. Reads are universal; edit/delete is gated per role
- * (member → own-created; admin → their team; super-admin → any team). Every
- * team member gets scoped bulk deletion; export/import/rebuild remain admin-only.
+ * The interactive personal Memories UI. The API validates owner scope for every
+ * read and mutation; historical internal roles cannot widen that boundary.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -425,7 +424,7 @@ export function MemoriesClient({
           </>
         ) : null}
       </div>
-        <span className="memory-toolbar-note">Universal read · edit and delete gated by role</span>
+        <span className="memory-toolbar-note">Your personal knowledge space</span>
       </div>
       {activeView === 'list' ? (
         <div className="memory-list-pane">
@@ -667,7 +666,7 @@ export function MemoriesClient({
           ) : null}
         </div>
       </div>
-      {/* Prototype d-memories: one footnote carries the loaded count and the role gate. */}
+      {/* Keep the loaded count and the personal mutation boundary together. */}
       <p className="note memory-footnote" role="status">
         {rows.length > 0 ? (
           <>
@@ -676,9 +675,7 @@ export function MemoriesClient({
             {!query.trim() && nextCursor ? ' · scroll to load more' : null}.{' '}
           </>
         ) : null}
-        {isPersonalSurface
-          ? 'Edit and delete are gated by role: members → own-authored, team-admin → own team.'
-          : <>Edit and delete are gated by role: members → own-authored, team-admin → own team, super-admin → any team. Cross-team rows show <b>Read-Only</b>.</>}
+        Edits and deletions apply only to your personal memories.
       </p>
         </div>
       ) : activeView === 'graph' ? (
