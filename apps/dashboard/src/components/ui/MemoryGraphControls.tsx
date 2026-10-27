@@ -139,7 +139,6 @@ export function GraphStatusLegend() {
     <div className="memory-graph-legend" aria-label="Graph legend">
       <span><i className="memory-dot" /> Memory</span>
       <span><i className="entity-dot" /> Entity</span>
-      <span><i className="granted-dot" /> Mounted</span>
       <span><i className="historical-line" /> Historical</span>
     </div>
   )

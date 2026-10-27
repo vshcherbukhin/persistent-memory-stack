@@ -223,7 +223,7 @@ function ExportTab({ surface, teams, projectScopes, localTeamId, isSuper, busy, 
   return (
     <>
       <p className="tool-desc">
-        Save a re-importable memory file for <b>{scope}</b>. Vectors are excluded — re-importing re-embeds them.
+        Save a re-importable memory file for <b>{scope}</b>. Vectors are excluded; restored records may need embedding.
       </p>
       {!isPersonalSurface && !localTeamId && isSuper ? (
         <label className="tool-field">
