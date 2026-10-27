@@ -102,7 +102,7 @@ describe('table scroll layout contract', () => {
   ])('%s grid table puts rows in a dedicated scroll body', (_name, file) => {
     const page = src(file)
 
-    expect(page).toContain('className="gt table-scroll"')
+    expect(page).toContain(_name === 'memories' ? 'className="gt table-scroll memory-table"' : 'className="gt table-scroll"')
     expect(page).toContain('className="gt-head"')
     expect(page).toContain('className="gt-scroll-body"')
   })
@@ -689,7 +689,8 @@ describe('table scroll layout contract', () => {
     expect(memories).toContain("type MemoryView = 'list' | 'graph' | 'tools'")
     expect(memories).toContain("const activeView: MemoryView = requestedView === 'graph'")
     expect(memories).toContain('const fixedMemoryColumn = (width: number) => `minmax(${width}px, ${width}px)`')
-    expect(memories).toContain("const contentTrack = 'minmax(0, 1fr)'")
+    expect(memories).toContain('const MEMORY_CONTENT_MIN_WIDTH = 300')
+    expect(memories).toContain('const contentTrack = `minmax(${MEMORY_CONTENT_MIN_WIDTH}px, 1fr)`')
     expect(memories).toContain('fixedMemoryColumn(projectWidth)')
     expect(memories).toContain('fixedMemoryColumn(categoryWidth)')
     expect(memories).toContain('fixedMemoryColumn(authorWidth)')
@@ -719,6 +720,27 @@ describe('table scroll layout contract', () => {
     expect(tools).toContain('Error details')
     expect(css).toContain('.import-steps')
     expect(css).toContain('.import-error-list')
+  })
+
+  it('keeps mobile memory content readable with one horizontal surface for the header and vertical body', () => {
+    const memories = src('../app/(dashboard)/memories/MemoriesClient.tsx')
+    expect(memories).toContain('minWidth: MEMORY_CONTENT_MIN_WIDTH + projectWidth + categoryWidth + MEMORY_TIME_WIDTH * 2 + teamWidth + authorWidth + actionsWidth')
+    const surface = memories.indexOf('className="memory-table-surface" style={{ minWidth: tableColumns.minWidth }}')
+    const header = memories.indexOf('className="gt-head" style={{ gridTemplateColumns: tableColumns.template }}', surface)
+    const body = memories.indexOf('ref={scrollBodyRef} className="gt-scroll-body"', header)
+    expect(surface).toBeGreaterThan(-1)
+    expect(header).toBeGreaterThan(surface)
+    expect(body).toBeGreaterThan(header)
+    expect(memories).toContain('style={{ gridTemplateColumns: tableColumns.template }}')
+    expect(memories).toContain('const root = scrollBodyRef.current')
+    expect(memories).toContain("{ root, rootMargin: '240px' }")
+    expect(cssRule('.memories-page .gt.table-scroll.memory-table')).toMatch(/overflow-x:\s*auto/)
+    expect(cssRule('.memories-page .gt.table-scroll.memory-table')).toMatch(/overflow-y:\s*hidden/)
+    expect(cssRule('.memories-page .memory-table-surface')).toMatch(/min-height:\s*0/)
+    expect(cssRule('.memories-page .memory-table-surface')).toMatch(/flex-direction:\s*column/)
+    // Other screens retain the shared grid-table behavior.
+    expect(cssRule('.gt.table-scroll')).toMatch(/overflow:\s*hidden/)
+    expect(cssRule('.gt-scroll-body')).toMatch(/overflow-y:\s*auto/)
   })
 
   it('keeps graph focus, rail sizing, and inspector scrolling in the app-owned layout', () => {

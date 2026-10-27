@@ -60,6 +60,7 @@ const CATEGORY_OPTS = [
 type MemoryView = 'list' | 'graph' | 'tools'
 
 const MEMORY_TIME_WIDTH = 112
+const MEMORY_CONTENT_MIN_WIDTH = 300
 const fixedMemoryColumn = (width: number) => `minmax(${width}px, ${width}px)`
 
 const estimateMemoryColumnWidth = (values: string[], min: number, extra = 28, charWidth = 6.8) => {
@@ -211,8 +212,8 @@ export function MemoriesClient({
         return Math.max(84, 28 + count * 26 + Math.max(0, count - 1) * 8)
       }),
     )
-    const contentTrack = 'minmax(0, 1fr)'
-    return showTeamColumn
+    const contentTrack = `minmax(${MEMORY_CONTENT_MIN_WIDTH}px, 1fr)`
+    const columns = showTeamColumn
       ? [
           contentTrack,
           fixedMemoryColumn(projectWidth),
@@ -222,7 +223,7 @@ export function MemoriesClient({
           fixedMemoryColumn(teamWidth),
           fixedMemoryColumn(authorWidth),
           fixedMemoryColumn(actionsWidth),
-        ].join(' ')
+        ]
       : [
           contentTrack,
           fixedMemoryColumn(projectWidth),
@@ -231,7 +232,11 @@ export function MemoriesClient({
           fixedMemoryColumn(MEMORY_TIME_WIDTH),
           fixedMemoryColumn(authorWidth),
           fixedMemoryColumn(actionsWidth),
-        ].join(' ')
+        ]
+    return {
+      template: columns.join(' '),
+      minWidth: MEMORY_CONTENT_MIN_WIDTH + projectWidth + categoryWidth + MEMORY_TIME_WIDTH * 2 + teamWidth + authorWidth + actionsWidth,
+    }
   }, [isAdmin, rows, showTeamColumn, teams, users, who.userId])
 
   const selectMemoryTab = (view: MemoryView) => {
@@ -508,8 +513,9 @@ export function MemoriesClient({
       </form>
 
       {/* The list */}
-      <div className="gt table-scroll">
-        <div className="gt-head" style={{ gridTemplateColumns: tableColumns }}>
+      <div className="gt table-scroll memory-table">
+        <div className="memory-table-surface" style={{ minWidth: tableColumns.minWidth }}>
+        <div className="gt-head" style={{ gridTemplateColumns: tableColumns.template }}>
           <div>Content</div>
           <div>Project</div>
           <div>Category</div>
@@ -534,7 +540,7 @@ export function MemoriesClient({
                   setViewing(m)
                 }
               }}
-              style={{ gridTemplateColumns: tableColumns }}
+              style={{ gridTemplateColumns: tableColumns.template }}
             >
               <div>
                 <Tooltip label="Open memory details">
@@ -664,6 +670,7 @@ export function MemoriesClient({
               </div>
             )
           ) : null}
+        </div>
         </div>
       </div>
       {/* Keep the loaded count and the personal mutation boundary together. */}
