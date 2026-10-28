@@ -39,7 +39,7 @@ access is kept separate from runtime data access.
 
 The dashboard stays behind its existing gateway (normally loopback port 3200),
 with the app's port 3000 internal to its container. The existing logo/name remain,
-with **Community version** directly below. Classification, relationships, accepted
+with **Community edition** directly below. Classification, relationships, accepted
 revisions, provenance and processing status can be inspected and corrected without
 an unrelated redesign. Existing navigation, encrypted archives and working import
 state are retained.

@@ -37,6 +37,20 @@ to the authenticated client, rather than this server's host.
 names even before their first request or test. **Unknown** means no health result
 has been observed yet; the selected model itself is still configured.
 
+For server-managed Ollama embeddings, **Embeddings** and **ollama (host)** show
+**Starting** while the configured model loads. A reachable Ollama process and an
+installed model do not establish readiness: a small synthetic embedding must
+return a valid vector for the current pin. Concurrent requests share that probe.
+Residency is checked again after readiness, so an unloaded model returns to
+Starting. The probe uses the normal five-minute keep-alive; it changes no pin,
+provider or host setting. An initially unreachable host has a two-minute startup
+grace before showing unavailable; a previously ready host that disappears is
+unavailable immediately after the next residency check.
+
+Memory operations during startup return a retryable `embeddings_starting`
+response before validation or storage begins. Retry shortly; the operation is
+not queued or replayed. The normal MCP request timeout remains 60 seconds.
+
 ![MCP sessions page](../../assets/spaces/personal/mcp-sessions.png)
 
 **MCP sessions** lists the client, connection type, last activity, idle-time termination time, and session log preview. A session can disappear after the configured idle timeout and reconnect when the client next uses the MCP.

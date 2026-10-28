@@ -117,7 +117,7 @@ describe('dashboard service list Ollama dependency', () => {
 
     const result = await servicesFor('qwen3-embedding:4b')
 
-    expect(ollamaInfo).toHaveBeenCalledWith({ provider: 'ollama', model: 'qwen3-embedding:4b' })
+    expect(ollamaInfo).toHaveBeenCalledWith({ provider: 'ollama', model: 'qwen3-embedding:4b', dim: 2560 })
     expect(result.services.find((row) => row.service === 'ollama (host)')).toMatchObject({ health: 'unhealthy' })
   })
 })

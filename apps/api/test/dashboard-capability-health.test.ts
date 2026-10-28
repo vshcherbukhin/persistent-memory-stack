@@ -5,8 +5,9 @@ const health = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/services/model-dependency-health.ts', () => ({ modelDependencyHealth: health }))
+vi.mock('../src/services/ollama-readiness.ts', () => ({ ollamaReadiness: { inspect: vi.fn(async () => ({ state: 'ready', message: 'Ready', observedAt: new Date(0), readyAt: new Date(0) })) } }))
 
-import { getDashboardCapabilityHealth } from '../src/services/dashboard-capability-health.ts'
+import { getDashboardCapabilityHealth, withOllamaReadiness } from '../src/services/dashboard-capability-health.ts'
 
 const safeHealth = (capability: string, observerScope: string) => ({
   capability,
@@ -87,8 +88,14 @@ describe('dashboard capability-health projection', () => {
       '51bb2e90-2cc2-49d8-b8f3-685d3e7e4f80',
     )).resolves.toMatchObject({
       factExtraction: { state: 'unknown', observerScope: 'server' },
-      embeddings: { state: 'unknown', observerScope: 'server' },
-      ollamaHost: { state: 'unknown', observerScope: 'host' },
+      embeddings: { state: 'healthy', observerScope: 'server' },
+      ollamaHost: { state: 'healthy', observerScope: 'host' },
     })
+  })
+  it('replaces yesterday green status with current starting, then reflects a successful real probe', () => {
+    const previous = { ...safeHealth('embeddings', 'server'), capability: 'embeddings' as const, state: 'healthy' as const }
+    const starting = withOllamaReadiness(previous, 'qwen3-embedding:4b', { state: 'starting', message: 'Still launching. Retry later.', observedAt: new Date(), readyAt: null })
+    expect(starting).toMatchObject({ state: 'starting', failureCode: 'embeddings_starting', retryable: true })
+    expect(withOllamaReadiness(starting, 'qwen3-embedding:4b', { state: 'ready', message: 'Ready', observedAt: new Date(), readyAt: new Date() })).toMatchObject({ state: 'healthy', failureCode: null })
   })
 })

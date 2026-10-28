@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from './session'
 import { readApiErrorPayload } from './apiErrorPayload'
 import type { ClassifiedWrite, ClassifiedUpdate, KnowledgeCatalog } from './knowledge'
 import type { MemoryArchiveImport } from './memoryArchive'
+import type { MemoryActivitySnapshot } from './memoryActivity'
 import type {
   WhoAmI,
   Team,
@@ -316,6 +317,7 @@ export const api = {
   },
 
   // ── Local service monitor (Docker socket; mutate ops are superuser-only) ──────
+  memoryActivity: (signal?: AbortSignal) => call<MemoryActivitySnapshot>('/dashboard/memory-activity', { signal }),
   listServices: () => call<{ services: ServiceStatus[]; mcpClients: McpClientStatus[]; capabilityHealth: DashboardCapabilityHealth }>('/dashboard/services'),
   serviceAction: (service: string, action: 'start' | 'stop' | 'restart' | 'terminate') =>
     call<{ ok: boolean }>(`/dashboard/services/${encodeURIComponent(service)}/${action}`, { method: 'POST' }),

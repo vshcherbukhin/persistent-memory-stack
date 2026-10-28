@@ -1,5 +1,6 @@
 import type { EffectiveSettings } from './settings.ts'
 import { dashboardOllamaTarget, type DashboardEmbeddingSettings } from './dashboard-ollama.ts'
+import { ollamaReadiness, type OllamaReadiness } from './ollama-readiness.ts'
 import {
   modelDependencyHealth,
   type SafeModelDependencyHealthDto,
@@ -62,12 +63,28 @@ export async function getDashboardCapabilityHealth(
   userId: string,
 ): Promise<DashboardCapabilityHealth> {
   const embeddingScope = dashboardEmbeddingObserverScope(settings, userId)
-  const [factExtraction, embeddings, ollamaHost] = await Promise.all([
+  const target = dashboardOllamaTarget(settings)
+  const [factExtraction, embeddings, ollamaHost, readiness] = await Promise.all([
     readSafeHealth('fact_extraction', 'server'),
     readSafeHealth('embeddings', embeddingScope),
-    dashboardOllamaTarget(settings)
+    target
       ? readSafeHealth('ollama_host', 'host')
       : unknownCapabilityHealth('ollama_host', 'host'),
+    target ? ollamaReadiness.inspect(target) : null,
   ])
-  return { factExtraction, embeddings, ollamaHost }
+  return { factExtraction, embeddings: target && readiness ? withOllamaReadiness(embeddings, target.model, readiness) : embeddings,
+    ollamaHost: target && readiness ? withOllamaReadiness(ollamaHost, target.model, readiness) : ollamaHost }
+}
+
+/** Current readiness supersedes historical success. Keep newer request failures. */
+export function withOllamaReadiness(health: SafeModelDependencyHealthDto, model: string, readiness: OllamaReadiness): SafeModelDependencyHealthDto {
+  if (readiness.state === 'ready' && health.model === model && health.observedAt && readiness.readyAt && health.observedAt > readiness.readyAt) return health
+  const ready = readiness.state === 'ready'
+  const starting = readiness.state === 'starting'
+  return { ...health, state: ready ? 'healthy' : starting ? 'starting' : 'unhealthy', provider: 'ollama', model,
+    lastSuccessAt: ready ? readiness.readyAt : health.lastSuccessAt,
+    failureCode: ready ? null : starting ? 'embeddings_starting' : readiness.state === 'unavailable' ? 'embedding_provider_unavailable' : 'embedding_model_unavailable',
+    safeMessage: ready ? null : readiness.message, retryable: ready ? null : starting || readiness.state === 'unavailable',
+    observedAt: readiness.observedAt, updatedAt: readiness.observedAt,
+  }
 }

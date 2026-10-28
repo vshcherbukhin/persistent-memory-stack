@@ -61,6 +61,7 @@ profile access.
 | State | Meaning |
 | --- | --- |
 | Test passed | The proposed provider or embedding configuration responded successfully. |
+| Starting | The local embedding model is loading or its readiness probe is pending. Wait briefly before retrying a memory operation. |
 | Re-embedding running | The new vector corpus is building in the background; the current pin still serves search. |
 | Re-embedding failed | The old pin remains active. Correct the cause and submit again. |
 | Re-embedding done | Search has flipped to the completed pin. |

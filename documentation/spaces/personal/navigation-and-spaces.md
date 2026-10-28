@@ -16,7 +16,7 @@ nav_order: 20
 # Navigation
 
 The sidebar begins with the existing Persistent Memory logo and product name,
-with **Community version** directly below it. Community has one personal knowledge
+with **Community edition** directly below it. Community has one personal knowledge
 space; there is no space switcher or remote Shared Memories connector.
 
 Choose Overview, Memories, Services, Workers, Token usage, Security, Notifications

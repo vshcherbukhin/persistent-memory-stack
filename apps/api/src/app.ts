@@ -26,6 +26,8 @@ import { ConflictError, NotFoundError } from './routes/dashboard/shared.ts'
 import { GraphitiError } from './clients/graphiti.ts'
 import { LlmProviderError } from './protocol/llm/client.ts'
 import { EmbeddingProviderError } from './services/embedding-health.ts'
+import { EmbeddingsNotReadyError } from './services/ollama-readiness.ts'
+import { registerMemoryRuntime } from './services/memory-activity.ts'
 import { authenticate, authenticateLocal, enterTenantScope } from './auth/authenticate.ts'
 import { config } from './config.ts'
 import { healthRoutes } from './routes/health.ts'
@@ -61,6 +63,7 @@ export function buildApp(): FastifyInstance {
   app.setSerializerCompiler(serializerCompiler)
 
   app.setErrorHandler((err, req, reply) => {
+    if (err instanceof EmbeddingsNotReadyError) return reply.code(503).header('retry-after', '5').send({ error: err.code, message: err.message, retryable: err.retryable })
     if (err instanceof KnowledgeError) return reply.code(err.statusCode).send({ error: err.code, message: err.message, details: err.details, contractVersion: 2 })
     if (err instanceof AuthError) {
       return reply.code(err.statusCode).send({ error: err.code, message: err.message })
@@ -156,6 +159,7 @@ export function buildApp(): FastifyInstance {
     // await, so the store survives to the handlers (the async authenticate hook
     // cannot do this post-await — confirmed Fastify+Node gotcha).
     secured.addHook('onRequest', enterTenantScope)
+    registerMemoryRuntime(secured)
     // Multipart for POST /ingest — stream-only (NO attachFieldsToBody, which would
     // buffer the whole file into memory). Registered INSIDE the secured scope so
     // the upload surface is gated. One file per request, capped at the env limit.
@@ -195,6 +199,7 @@ export function buildApp(): FastifyInstance {
   void app.register(async (dashboard) => {
     dashboard.addHook('onRequest', authHook)
     dashboard.addHook('onRequest', enterTenantScope)
+    registerMemoryRuntime(dashboard)
     await dashboard.register(dashboardRoutes)
   })
 

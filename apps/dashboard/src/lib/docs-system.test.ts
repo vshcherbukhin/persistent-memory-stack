@@ -647,7 +647,7 @@ describe('dashboard documentation integration', () => {
 
       const sections = ['navigation-and-spaces.md', 'knowledge-contract.md'].includes(file) ? [] : ['Purpose', 'Read the page', 'Actions', 'States', 'Cautions', 'Troubleshooting']
       if (file === 'navigation-and-spaces.md') {
-        expect(content).toContain('Community version')
+        expect(content).toContain('Community edition')
         expect(content).toContain('no space switcher')
       }
       if (file === 'knowledge-contract.md') {

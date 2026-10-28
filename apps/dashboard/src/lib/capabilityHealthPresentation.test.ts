@@ -47,8 +47,8 @@ describe('capability-health dashboard presentation', () => {
     expect(services).toContain('Selected model · ${s.configuredModel}')
     expect(services).toContain("s.service === 'ollama (host)' ? '' :")
     expect(services).toContain('Status updates after the latest request or a manual Fact extraction test in System Settings.')
-    expect(services).toContain('Status updates after the latest embedding request, backfill, or a manual Embeddings test in System Settings.')
-    expect(services).toContain('Host reachability is checked by the Ollama probe. Docker logs are not available.')
+    expect(services).toContain('Readiness checks confirm the loaded model can embed. Request, backfill and manual test results also update health.')
+    expect(services).toContain('The Ollama probe checks model residency and embedding readiness. Docker logs are not available.')
   })
 
   it('shows settled health recovery in settings and a keyboard-accessible usage error indicator', () => {

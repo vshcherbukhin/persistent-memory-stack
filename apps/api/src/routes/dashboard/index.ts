@@ -41,6 +41,7 @@ import { dashboardUsageRoutes } from './usage.ts'
 import { dashboardWorkerRoutes } from './workers.ts'
 import { dashboardUpdateRoutes } from './update.ts'
 import { dashboardBrowserPushRoutes } from './browser-push.ts'
+import { dashboardMemoryActivityRoutes } from './memory-activity.ts'
 
 const CONTROL_PREFIXES = ['/dashboard', '/admin'] as const
 
@@ -66,6 +67,7 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
   // OPERATIONAL reads — any authenticated user (NO requireAdmin). The Services
   // POST keeps its own per-route requireSuperuser; Usage is read-only.
   for (const prefix of CONTROL_PREFIXES) {
+    await app.register(dashboardMemoryActivityRoutes, { prefix })
     await app.register(dashboardServiceRoutes, { prefix }) // local stack monitor (Docker socket)
     await app.register(dashboardUpdateRoutes, { prefix }) // snapshot-safe stack updater
     await app.register(dashboardUsageRoutes, { prefix }) // model-usage metrics (Usage page)

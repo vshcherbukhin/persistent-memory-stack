@@ -51,7 +51,7 @@ describe('personal memory surface contract', () => {
   it('exposes one personal space and the Community label', () => {
     const nav = src('../components/Nav.tsx')
     const layout = src('../app/(dashboard)/layout.tsx')
-    expect(nav).toContain('Community version')
+    expect(nav).toContain('Community edition')
     expect(nav).not.toContain('space-switch')
     expect(nav).not.toContain('Shared memories')
     expect(nav).not.toContain('SHARED_LINKS')

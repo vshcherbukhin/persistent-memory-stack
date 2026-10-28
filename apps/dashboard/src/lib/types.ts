@@ -646,7 +646,7 @@ export interface OverviewSummary {
 export interface ModelDependencyHealth {
   capability: 'fact_extraction' | 'embeddings' | 'ollama_host'
   observerScope: string
-  state: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  state: 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | 'starting'
   provider: 'anthropic' | 'openai' | 'ollama' | 'voyage' | null
   model: string | null
   lastSuccessAt: string | null

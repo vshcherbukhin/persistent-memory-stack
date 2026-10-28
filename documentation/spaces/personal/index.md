@@ -41,7 +41,7 @@ The Overview cards summarize the local stack. Each **Open details** or **Open se
 
 ## Actions
 
-1. Confirm the sidebar displays **Community version** beneath the product name.
+1. Confirm the sidebar displays **Community edition** beneath the product name.
 2. Start on **Overview** and open any card marked error or attention.
 3. Use **Memories** for everyday record work.
 4. Use **Services** and **Workers** when the stack is unhealthy or background work is delayed.

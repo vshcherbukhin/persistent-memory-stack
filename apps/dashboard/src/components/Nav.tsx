@@ -105,7 +105,7 @@ export function Nav({
         <span className="brand-mark" aria-hidden="true">
           <ProductMark />
         </span>
-        <span>Persistent Memory<small className="brand-community">Community version</small></span>
+        <span>Persistent Memory<small className="brand-community">Community edition</small></span>
       </div>
       <div className="nav-list">
         {links.filter(

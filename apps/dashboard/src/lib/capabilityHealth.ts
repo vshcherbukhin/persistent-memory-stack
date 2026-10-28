@@ -18,6 +18,10 @@ function observationTime(value: string | null): string {
 }
 
 export function capabilityHealthPresentation(health: ModelDependencyHealth): CapabilityHealthPresentation {
+  if (health.state === 'starting') return {
+    badge: 'starting', tone: 'warn', message: health.safeMessage ?? 'Embeddings service is still launching.',
+    recovery: 'Wait for the embedding model to become ready, then retry.', observedAt: observationTime(health.observedAt),
+  }
   if (health.state === 'healthy') {
     return {
       badge: 'healthy',
