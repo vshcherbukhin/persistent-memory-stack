@@ -36,14 +36,25 @@ export function parseMemoryActivity(value: unknown): MemoryActivitySnapshot | nu
   return result
 }
 
-const activeLabels: Record<MemoryActivityOperation, string> = { read: 'reading', write: 'writing', update: 'updating' }
+export type MemoryActivityDots = Record<MemoryActivityOperation, boolean>
 
-export function memoryActivityLabel(operation: MemoryActivityOperation, status: MemoryActivityStatus | null): string {
-  if (!status) return 'unavailable'
-  if (status.active > 0 || status.state === 'active') {
-    return `${activeLabels[operation]}${status.active > 1 ? ` (${status.active})` : ''}`
-  }
-  return status.state === 'success' ? 'done' : status.state
+function activityDots(next: MemoryActivitySnapshot | null, previous: MemoryActivitySnapshot | null): MemoryActivityDots {
+  return Object.fromEntries(MEMORY_ACTIVITY_OPERATIONS.map(operation => [operation,
+    !!next && (next[operation].active > 0 || (!!previous && next[operation].lastCompletedAt !== null && next[operation].lastCompletedAt !== previous[operation].lastCompletedAt)),
+  ])) as MemoryActivityDots
+}
+
+/** Briefly flash requests that finish between samples; never replay old activity. */
+export function startMemoryActivityDotPolling(options: Omit<Parameters<typeof startMemoryActivityPolling>[0], 'onChange'> & { onChange: (dots: MemoryActivityDots) => void }): () => void {
+  let previous: MemoryActivitySnapshot | null = null
+  let flash: ReturnType<typeof setTimeout> | undefined
+  const stop = startMemoryActivityPolling({ ...options, onChange: next => {
+    clearTimeout(flash)
+    options.onChange(activityDots(next, previous))
+    previous = next
+    flash = setTimeout(() => options.onChange(activityDots(next, null)), 600)
+  } })
+  return () => { stop(); clearTimeout(flash) }
 }
 
 /** One request at a time; hidden tabs and failed/timed-out samples never retain green. */

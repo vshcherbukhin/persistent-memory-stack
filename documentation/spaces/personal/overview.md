@@ -39,22 +39,14 @@ Overview refreshes automatically, so there is no manual refresh control.
 
 ## Memory activity indicators
 
-The strip below the top panel shows **stream mcp**, **memory read**, **memory write**,
-and **memory update**, in that order. Stream MCP describes service availability;
-the other indicators describe authenticated memory requests for your personal identity.
-They show no memory content, queries, credentials, or client messages.
+The top panel shows **memory read**, **memory write** and **memory update**
+immediately after **stream mcp**. Each uses the same small dot: it blinks for
+activity and stays still when inactive. Labels, text and borders stay unchanged.
+A short request that finishes between samples produces one brief flash.
 
-| Activity state | Meaning |
-| --- | --- |
-| idle | No request is active and no completion remains in the recent window. |
-| reading / writing / updating | A request is in progress; a number indicates overlapping requests of that kind. |
-| done | A request completed successfully in the last 8 seconds. Saving is separate from embedding and graph processing. |
-| error | A request failed in the last 8 seconds; inspect the operation's own result for details. |
-| starting | The embedding dependency is starting. The request has not succeeded; wait for readiness before retrying. |
-| unavailable | A current activity observation could not be obtained. This does not mean a request succeeded or failed. |
-
-Activity refreshes about once per second while the page is visible. Recent completion
-states clear after 8 seconds; they are transient feedback, not an audit history.
+The indicators observe authenticated requests for your personal identity, about
+once per second while the page is visible. They show no memory content or results.
+Read the operation's response to learn whether it succeeded.
 
 ## Live MCP activity
 

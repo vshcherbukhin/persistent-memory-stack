@@ -418,12 +418,13 @@ p.muted, .muted { color: var(--muted); }
 }
 .app-header {
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
   gap: 16px;
-  height: 70px;
-  padding: 0 28px;
+  min-height: 70px;
+  padding: 12px 28px;
   border-bottom: 1px solid var(--divider-section);
   background: var(--header-bg);
 }
@@ -437,7 +438,8 @@ p.muted, .muted { color: var(--muted); }
 .app-header .head-actions {
   align-items: center;
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   justify-self: end;
   min-width: 0;
@@ -4642,42 +4644,10 @@ button.primary:hover,
 .runtime-pill.degraded { color: var(--marigold); border-color: var(--marigold-40); }
 .runtime-pill.degraded .runtime-dot { background: var(--marigold); box-shadow: 0 0 0 3px var(--marigold-12); }
 
-.header-status-strip {
-  align-items: center;
-  background: var(--header-bg);
-  border-bottom: 1px solid var(--divider-section);
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 28px;
-}
-.memory-activity-pill {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 11.5px;
-  gap: 7px;
-  padding: 5px 11px;
-  white-space: nowrap;
-}
-.memory-activity-dot { background: currentColor; border-radius: 50%; height: 7px; width: 7px; }
-.memory-activity-pill.active { border-color: var(--accent-40); color: var(--accent); }
-.memory-activity-pill.active .memory-activity-dot { animation: pulseDot 1.2s var(--ease) infinite; }
-.memory-activity-pill.success { border-color: var(--grass); color: var(--grass); }
-.memory-activity-pill.error { border-color: var(--coral-40); color: var(--coral); }
-.memory-activity-pill.starting { border-color: var(--marigold-40); color: var(--marigold); }
-.memory-activity-pill.unavailable { color: var(--dim); }
-@media (max-width: 760px) {
-  .header-status-strip { padding: 8px 16px; }
-}
+.memory-activity-pill .runtime-dot { animation: none; }
+.memory-activity-pill .runtime-dot.blinking { animation: pulseDot .6s var(--ease) infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .header-status-strip .runtime-dot,
-  .memory-activity-pill.active .memory-activity-dot { animation: none; }
+  .memory-activity-pill .runtime-dot.blinking { animation: none; }
 }
 
 /* ── Badges: rounded pills, uppercase, hairline border ────────────────────── */

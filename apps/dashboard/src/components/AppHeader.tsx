@@ -298,7 +298,6 @@ export function AppHeader({
           <div className="head-crumb">Personal memories</div>
           <Tooltip as="div" className="head-title" label={sub}>{title}</Tooltip>
         </div>
-        <div className="head-tabs" />
         <div className="head-actions">
           {/* Prototype d-workers: run every enabled job from the top bar (superuser control). */}
           {seg === 'workers' && roleClass === 'super' ? (
@@ -316,6 +315,13 @@ export function AppHeader({
               <Icon name="add" size={16} /> New memory
             </button>
           ) : null}
+          <Tooltip label={runtimeDegraded ? 'A service or worker needs attention' : 'Stream MCP service is running'}>
+            <span className={`runtime-pill${runtimeDegraded ? ' degraded' : ''}`}>
+              <i className="runtime-dot" aria-hidden="true" />
+              stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
+            </span>
+          </Tooltip>
+          <MemoryActivityIndicators />
           {teamName && !localMode ? <span className="head-badge head-team">{teamName}</span> : null}
           {!localMode ? <span className={`role-badge ${roleClass} head-role`}>{roleLabel}</span> : null}
           {showLogout ? (
@@ -352,15 +358,6 @@ export function AppHeader({
           </Tooltip>
         </div>
       </header>
-      <div className="header-status-strip" role="group" aria-label="Memory service and activity status">
-        <Tooltip label={runtimeDegraded ? 'A service or worker needs attention' : 'Stream MCP service is running'}>
-          <span className={`runtime-pill${runtimeDegraded ? ' degraded' : ''}`}>
-            <i className="runtime-dot" aria-hidden="true" />
-            stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
-          </span>
-        </Tooltip>
-        <MemoryActivityIndicators />
-      </div>
       {passwordTemporary ? (
         <div className="temp-password-banner" role="status">
           Please update your temporary{' '}

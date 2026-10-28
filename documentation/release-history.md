@@ -36,8 +36,8 @@ nav_hidden: true
 - Ollama and Embeddings show Starting until the configured model passes a real
   embedding probe. Memory operations return prompt retry guidance during launch;
   the existing 60-second MCP timeout is unchanged.
-- A live status strip shows memory read, write and update activity beside the
-  Stream MCP indicator, with owner-scoped counts and brief completion/error states.
+- Memory read, write and update indicators follow Stream MCP in the top panel.
+  Only their dots blink for activity; labels and badge styling stay fixed.
 
 This major release changes memory-tool inputs and retires sharing. Read the
 [contract and migration guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/spaces/personal/knowledge-contract.md)
