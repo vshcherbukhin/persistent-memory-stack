@@ -24,7 +24,7 @@ describe('capability-health dashboard presentation', () => {
   it('renders model capability cards through the reusable OverviewCard so badges use its shared top-right header slot', () => {
     const overview = source('../app/(dashboard)/page.tsx')
     const css = source('../app/globals.css')
-    const modelSettings = overview.slice(overview.indexOf('aria-label="Model settings"'))
+    const modelSettings = overview.slice(overview.indexOf("id: 'fact-extraction'"), overview.indexOf("id: 'live-mcp'"))
 
     expect(modelSettings.match(/<OverviewCard/g)).toHaveLength(2)
     expect(modelSettings).toContain('label="Fact extraction"')

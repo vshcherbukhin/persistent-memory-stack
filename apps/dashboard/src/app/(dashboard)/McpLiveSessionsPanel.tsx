@@ -17,7 +17,7 @@ import { listServicesAction, serviceLogsAction } from './services/actions'
 const LIST_POLL_MS = 5_000
 const OUTPUT_POLL_MS = 3_000
 const OUTPUT_TAIL_LINES = 400
-const MCP_LIVE_COLS = 'minmax(0, 1fr) 132px 104px 128px 32px'
+const MCP_LIVE_COLS = 'minmax(280px, 1fr) 132px 104px 128px 32px'
 
 type OpenSession = { id: string; name: string }
 
@@ -178,6 +178,7 @@ export function McpLiveSessionsPanel({
           <span>No active MCP streams. Sessions appear here while Claude or Codex is connected and leave when they disconnect.</span>
         </div>
       ) : (
+        <div className="mcp-live-table-scroll" role="region" aria-label="Live MCP sessions table" tabIndex={0}>
         <div className="gt mcp-live-table">
           <div className="gt-head" style={{ gridTemplateColumns: MCP_LIVE_COLS }}>
             <div>Client</div>
@@ -218,6 +219,7 @@ export function McpLiveSessionsPanel({
               )
             })}
           </div>
+        </div>
         </div>
       )}
     </section>

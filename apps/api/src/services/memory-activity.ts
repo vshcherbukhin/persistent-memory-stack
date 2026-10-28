@@ -19,6 +19,16 @@ export function memoryOperation(method: string, route: string): MemoryOperation 
   return method === 'POST' ? 'write' : null
 }
 
+/** SQL-only Overview feeds do not depend on a loaded embedding runner. Their
+ * normal authentication, owner filtering and activity observation still apply.
+ */
+export function needsEmbeddingReadiness(method: string, route: string): boolean {
+  return !(method === 'GET' && [
+    '/dashboard/memories', '/admin/memories',
+    '/dashboard/memories/pending', '/admin/memories/pending', '/graph/facets',
+  ].includes(route))
+}
+
 export function createMemoryActivity(now = Date.now) {
   const owners = new Map<string, { updated: number; values: Record<MemoryOperation, Activity> }>()
   const key = (owner: Identity) => JSON.stringify([owner.teamId, owner.userId])
@@ -83,7 +93,7 @@ export function registerMemoryRuntime(app: FastifyInstance, ensureReady = assert
     // Fastify onResponse. Finish is idempotent across all lifecycle events.
     reply.raw.once('close', () => { if (!reply.raw.writableFinished) request.finish('error') })
     reply.raw.once('error', () => request.finish('error'))
-    try { await ensureReady() } catch (error) {
+    try { if (needsEmbeddingReadiness(req.method, req.routeOptions.url ?? '')) await ensureReady() } catch (error) {
       request.starting = error instanceof EmbeddingsNotReadyError && error.readiness.state === 'starting'
       throw error
     }

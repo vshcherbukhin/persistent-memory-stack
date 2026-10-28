@@ -27,7 +27,7 @@ export function createOllamaReadiness(options: {
 }) {
   const request = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args))
   const now = options.now ?? Date.now
-  type Entry = { value: OllamaReadiness; checkedAt: number; createdAt: number; hasReady: boolean; check?: Promise<OllamaReadiness>; warming?: Promise<void> }
+  type Entry = { value: OllamaReadiness; checkedAt: number; createdAt: number; hasReady: boolean; lastLeaseAttempt: number; check?: Promise<OllamaReadiness>; warming?: Promise<void>; refreshing?: Promise<void> }
   // One active pin. A switch cannot let an older model's completion mark the new one ready.
   let active: { key: string; entry: Entry } | undefined
 
@@ -81,18 +81,45 @@ export function createOllamaReadiness(options: {
     })()
   }
 
+  /** Refresh the existing runner lease only while callers are using this stack.
+   * Empty input schedules the model but performs no text embedding. A dashboard
+   * read must neither wait for this nor claim a new successful vector probe.
+   */
+  function refreshLease(entry: Entry, target: OllamaTarget, expiresAt: number) {
+    if (!Number.isFinite(expiresAt) || expiresAt - now() > 60_000 || entry.refreshing || now() - entry.lastLeaseAttempt < 30_000) return
+    entry.lastLeaseAttempt = now()
+    entry.refreshing = (async () => {
+      try {
+        await json('/api/embed', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: target.model, input: [], keep_alive: '5m' }),
+        }, 3_000)
+      } catch {
+        // The next residency check remains authoritative. Back off instead of
+        // turning a failed lease refresh into false readiness or a retry storm.
+      } finally { entry.refreshing = undefined }
+    })()
+  }
+
   return {
     async inspect(target: OllamaTarget): Promise<OllamaReadiness> {
       const key = `${target.model}|${target.dim}`
-      if (active?.key !== key) active = { key, entry: { value: { state: 'starting', message: STARTING, observedAt: new Date(now()), readyAt: null }, checkedAt: -Infinity, createdAt: now(), hasReady: false } }
+      if (active?.key !== key) active = { key, entry: { value: { state: 'starting', message: STARTING, observedAt: new Date(now()), readyAt: null }, checkedAt: -Infinity, createdAt: now(), hasReady: false, lastLeaseAttempt: -Infinity } }
       const entry = active.entry
       if (entry.warming) return entry.value
       if (entry.check) return entry.check
       if (now() - entry.checkedAt < (options.cacheMs ?? 1_000)) return entry.value
       entry.check = (async () => {
         try {
-          const resident = names(await json('/api/ps', {}, options.checkTimeoutMs ?? 1_000)).some(name => sameModel(name, target.model))
-          if (resident && entry.value.state === 'ready') return entry.value
+          const running = await json('/api/ps', {}, options.checkTimeoutMs ?? 1_000)
+          const resident = names(running).some(name => sameModel(name, target.model))
+          const row = (running as { models: Array<{ name?: string; model?: string; expires_at?: string }> }).models
+            .find(model => [model.name, model.model].some(name => typeof name === 'string' && sameModel(name, target.model)))
+          const expiresAt = row?.expires_at ? Date.parse(row.expires_at) : NaN
+          if (resident && (!Number.isFinite(expiresAt) || expiresAt > now()) && entry.value.state === 'ready') {
+            refreshLease(entry, target, expiresAt)
+            return entry.value
+          }
           const installed = names(await json('/api/tags', {}, options.checkTimeoutMs ?? 1_000)).some(name => sameModel(name, target.model))
           if (!installed) return set(entry, 'model_missing', 'Configured Ollama embedding model is unavailable. Pull the configured model, then retry.')
           warm(entry, target)

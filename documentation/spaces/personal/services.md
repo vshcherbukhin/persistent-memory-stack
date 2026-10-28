@@ -42,14 +42,19 @@ For server-managed Ollama embeddings, **Embeddings** and **ollama (host)** show
 installed model do not establish readiness: a small synthetic embedding must
 return a valid vector for the current pin. Concurrent requests share that probe.
 Residency is checked again after readiness, so an unloaded model returns to
-Starting. The probe uses the normal five-minute keep-alive; it changes no pin,
-provider or host setting. An initially unreachable host has a two-minute startup
+Starting. While the dashboard or memory clients use the stack, a small empty-input
+request refreshes the loaded model's five-minute lease shortly before it expires.
+It performs no text embedding and does not turn a healthy model back to Starting.
+After activity ends, the normal idle expiry still applies. This changes no pin,
+provider or global host setting. An initially unreachable host has a two-minute startup
 grace before showing unavailable; a previously ready host that disappears is
 unavailable immediately after the next residency check.
 
 Memory operations during startup return a retryable `embeddings_starting`
 response before validation or storage begins. Retry shortly; the operation is
-not queued or replayed. The normal MCP request timeout remains 60 seconds.
+not queued or replayed. SQL-only Overview statistics remain readable during
+startup; a warming embedding runner does not make saved records disappear or
+prove the graph service is down. The normal MCP request timeout remains 60 seconds.
 
 ![MCP sessions page](../../assets/spaces/personal/mcp-sessions.png)
 

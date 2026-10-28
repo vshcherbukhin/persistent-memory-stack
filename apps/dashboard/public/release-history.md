@@ -37,6 +37,11 @@
   the existing 60-second MCP timeout is unchanged.
 - Memory read, write and update indicators follow Stream MCP in the top panel.
   Only their dots blink for activity; labels and badge styling stay fixed.
+- Overview cards can be rearranged and resized, with automatic saved browser layouts
+  and protected content widths. Live MCP activity and Corpus shape start equally split.
+- Active readiness checks refresh the local model lease before idle expiry. Startup
+  is counted separately from stopped services, and SQL-only Overview statistics
+  remain readable while embeddings warm up.
 
 This major release changes memory-tool inputs and retires sharing. Read the
 [contract and migration guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/spaces/personal/knowledge-contract.md)

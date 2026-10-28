@@ -37,7 +37,15 @@ describe('summarizeServiceRows', () => {
       failed: 1,
       healthy: 1,
       unhealthy: 2,
-      starting: 1,
+      starting: 0,
     })
+  })
+  it('counts actual startup separately from stopped or healthy services', () => {
+    const rows = [
+      { service: 'api', name: 'api', id: '1', state: 'running', status: 'Up', health: 'healthy' },
+      { service: 'ollama (host)', name: 'host Ollama', id: '', state: 'starting', status: 'Loading', health: 'starting' },
+      { service: 'worker', name: 'worker', id: '2', state: 'running', status: 'Up', health: 'starting' },
+    ] as ServiceInfo[]
+    expect(summarizeServiceRows(rows)).toMatchObject({ total: 3, active: 1, healthy: 1, starting: 2, stopped: 0, failed: 0 })
   })
 })

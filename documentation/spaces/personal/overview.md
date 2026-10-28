@@ -23,7 +23,7 @@ Overview is the fastest way to decide where attention is needed. It summarizes t
 
 ## Read the page
 
-The first row contains clickable summary cards. A large value gives the count or total; the smaller line explains the period or state; the badge gives the health category.
+The default layout starts with clickable summary cards. A large value gives the count or total; the smaller line explains the period or state; the badge gives the health category.
 
 | Card | How to read it |
 | --- | --- |
@@ -36,6 +36,32 @@ The first row contains clickable summary cards. A large value gives the count or
 | Embeddings | Current embedding model, vector dimension, mode, and vector name |
 
 Overview refreshes automatically, so there is no manual refresh control.
+
+## Arrange your Overview
+
+Every summary, model, and lower panel can move anywhere among the other cards.
+The defaults show three summary cards per row, then two equal model cards, then
+**Live MCP activity** and **Corpus shape** in equal halves when their minimum widths fit.
+Narrower views use fewer columns. Wide content scrolls inside its card rather than
+making the whole page wider.
+
+- Drag a card's move grip to its new position. With the grip focused, arrow keys
+  move it earlier or later, **Home** moves it first, and **End** moves it last.
+- Drag its resize handle horizontally. With that handle focused, **Left** and
+  **Right** adjust width, **Home** selects its minimum, and **End** fills the row.
+  **Escape** cancels a drag or resize in progress. Card links, session controls,
+  and text selection remain available inside the card.
+- Select **Restore defaults** to reset both the order and widths.
+
+Completed changes save automatically in this browser profile for your current
+personal identity. They survive page reloads, stack restarts, and reboots when you
+return using the same browser profile and address. Layouts do not transfer between
+devices or browser profiles. Clearing site data removes them. A storage warning
+means the current change could not be saved; an unreadable or unsupported layout
+shows defaults without overwriting the saved value until you change or reset it.
+
+Saved widths adapt to available space without replacing your preference. Below a
+card's minimum width, it fills the available row and its wide content scrolls internally.
 
 ## Memory activity indicators
 

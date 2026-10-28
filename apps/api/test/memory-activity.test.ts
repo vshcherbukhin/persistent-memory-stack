@@ -17,6 +17,24 @@ describe('private memory activity and startup gate', () => {
     expect(memoryOperation('GET', '/dashboard/memory-activity')).toBeNull()
     expect(memoryOperation('GET', '/memories/pending-embeddings')).toBeNull()
   })
+  it('keeps only SQL Overview feeds readable during launch and still blocks search and writes', async () => {
+    const app = Fastify(), activity = createMemoryActivity()
+    const ensure = vi.fn(async () => { throw new EmbeddingsNotReadyError({ state: 'starting', message: 'Still launching.', observedAt: new Date(), readyAt: null }) })
+    app.addHook('onRequest', (req, _reply, done) => { req.identity = owner as typeof req.identity; done() })
+    app.setErrorHandler((_err, _req, reply) => reply.code(503).send({ error: 'embeddings_starting' }))
+    registerMemoryRuntime(app, ensure, activity)
+    for (const route of ['/dashboard/memories', '/dashboard/memories/pending', '/graph/facets']) app.get(route, async () => ({ available: true }))
+    app.post('/dashboard/memories/search', async () => ({ result: 'must not run' }))
+    app.post('/memories', async () => ({ saved: true }))
+    try {
+      for (const route of ['/dashboard/memories', '/dashboard/memories/pending', '/graph/facets']) expect((await app.inject({ method: 'GET', url: route })).statusCode).toBe(200)
+      expect(ensure).not.toHaveBeenCalled()
+      expect(activity.snapshot(owner).read.state).toBe('success')
+      expect((await app.inject({ method: 'POST', url: '/dashboard/memories/search', payload: {} })).statusCode).toBe(503)
+      expect((await app.inject({ method: 'POST', url: '/memories', payload: {} })).statusCode).toBe(503)
+      expect(ensure).toHaveBeenCalledTimes(2)
+    } finally { await app.close() }
+  })
   it('clears active when the caller disconnects after its full body was received', async () => {
     const app = Fastify(), activity = createMemoryActivity()
     let started!: () => void, complete!: () => void

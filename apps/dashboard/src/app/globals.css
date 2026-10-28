@@ -4321,7 +4321,7 @@ button.primary:hover,
 
 .overview-lower {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   align-items: start;
 }
@@ -5499,3 +5499,28 @@ button.primary:hover,
 .mcp-live-notice .icon-btn { margin-left: auto; }
 .mcp-live-output .log-output-lines { max-height: 320px; min-height: 180px; }
 .mcp-live-table .gt-head > div { white-space: nowrap; }
+
+/* Overview card arrangement: handles own gestures; card bodies retain normal controls and selection. */
+.overview-layout { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.overview-layout-toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; }
+.overview-layout-toolbar .note { margin: 0; }
+.overview-layout-notice { margin: 0; }
+.overview-layout-grid { align-items: stretch; display: flex; flex-wrap: wrap; gap: 20px; min-width: 0; }
+.overview-layout-item { display: flex; flex: 0 0 auto; flex-direction: column; max-width: 100%; min-width: 0; position: relative; }
+.overview-layout-card-tools { align-items: center; display: flex; flex: 0 0 auto; gap: 2px; justify-content: flex-end; min-height: 28px; }
+.overview-layout-card-tools .icon-btn { height: 26px; width: 28px; }
+.overview-move-handle { cursor: grab; touch-action: none; }
+.overview-move-handle:active { cursor: grabbing; }
+.overview-resize-handle { cursor: ew-resize; touch-action: none; }
+.overview-resize-handle .ui-icon { transform: rotate(90deg); }
+.overview-layout-item.moving { opacity: .6; }
+.overview-layout-item[data-drop-edge] { outline: 2px solid var(--accent); outline-offset: 4px; }
+.overview-layout-scroll { display: flex; flex: 1; flex-direction: column; max-width: 100%; min-width: 0; overflow-x: auto; }
+.overview-layout-body { display: flex; flex: 1; flex-direction: column; min-width: var(--overview-content-min); }
+.overview-layout-body > .overview-card,
+.overview-layout-body > .overview-panel { flex: 1; margin: 0; }
+.overview-layout .overview-card { overflow: visible; }
+.overview-layout .overview-card-value,
+.overview-layout .overview-card-value.overview-card-model { white-space: nowrap; word-break: normal; }
+.mcp-live-table-scroll { max-width: 100%; min-width: 0; overflow-x: auto; }
+.mcp-live-table { min-width: 676px; }
