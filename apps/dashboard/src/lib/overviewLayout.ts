@@ -1,4 +1,4 @@
-export const OVERVIEW_LAYOUT_VERSION = 1
+export const OVERVIEW_LAYOUT_VERSION = 2
 export const OVERVIEW_LAYOUT_GAP = 20
 const OVERVIEW_RESIZE_COLUMNS = 12
 
@@ -32,35 +32,61 @@ export const OVERVIEW_CARD_SPECS = {
 } as const
 
 export type OverviewCardId = keyof typeof OVERVIEW_CARD_SPECS
+export interface OverviewPlacement { row: number; column: number; span: number }
+export const OVERVIEW_MAX_GRID_ROWS = 256
 export interface OverviewLayoutState {
-  version: 1
+  version: 2
   order: OverviewCardId[]
-  /** Fractions of the available row; retain the v1 storage meaning when snapping. */
+  /** Original v1 fractions of available row pixels, never reinterpreted as cell fractions. */
   widths: Partial<Record<OverviewCardId, number>>
+  placements?: Partial<Record<OverviewCardId, OverviewPlacement>>
 }
 export interface LayoutStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
 
 const knownId = (id: unknown): id is OverviewCardId => typeof id === 'string' && Object.hasOwn(OVERVIEW_CARD_SPECS, id)
 
-export function overviewLayoutKey(identity: { userId: string; teamId: string | null }): string {
-  return `pm:overview-layout:v${OVERVIEW_LAYOUT_VERSION}:${encodeURIComponent(JSON.stringify([identity.userId, identity.teamId]))}`
+export function overviewLayoutKey(identity: { userId: string; teamId: string | null }, version: 1 | 2 = 2): string {
+  return `pm:overview-layout:v${version}:${encodeURIComponent(JSON.stringify([identity.userId, identity.teamId]))}`
+}
+export function overviewLegacyLayoutKey(identity: { userId: string; teamId: string | null }): string {
+  return overviewLayoutKey(identity, 1)
 }
 
 export function defaultOverviewLayout(ids: OverviewCardId[]): OverviewLayoutState {
   return { version: OVERVIEW_LAYOUT_VERSION, order: [...ids], widths: {} }
 }
 
-export function decodeOverviewLayout(raw: string | null, available: OverviewCardId[]): {
-  layout: OverviewLayoutState; status: 'default' | 'saved' | 'invalid' | 'unsupported'
-} {
+/** Validate the full stored map before filtering cards that are not currently visible. */
+export function validOverviewPlacements(value: unknown, ids?: OverviewCardId[]): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const entries: OverviewPlacement[] = []
+  for (const [id, raw] of Object.entries(value)) {
+    if (!knownId(id) || (ids && !ids.includes(id)) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+    const item = raw as Record<string, unknown>
+    if (Object.keys(item).some((key) => !['row', 'column', 'span'].includes(key)) ||
+      !Number.isSafeInteger(item.row) || (item.row as number) < 1 || (item.row as number) > OVERVIEW_MAX_GRID_ROWS ||
+      !Number.isSafeInteger(item.column) || (item.column as number) < 1 ||
+      !Number.isSafeInteger(item.span) || (item.span as number) < 1 || (item.span as number) > 12 ||
+      (item.column as number) + (item.span as number) > 13) return false
+    const placement = item as unknown as OverviewPlacement
+    if (entries.some((other) => other.row === placement.row && other.column < placement.column + placement.span && placement.column < other.column + other.span)) return false
+    entries.push(placement)
+  }
+  return true
+}
+
+type DecodeResult = { layout: OverviewLayoutState; status: 'default' | 'saved' | 'invalid' | 'unsupported'; sourceVersion: 1 | 2 | null }
+export function decodeOverviewLayout(raw: string | null, available: OverviewCardId[]): DecodeResult {
   const fallback = defaultOverviewLayout(available)
-  if (raw === null) return { layout: fallback, status: 'default' }
+  if (raw === null) return { layout: fallback, status: 'default', sourceVersion: null }
   try {
     const value: unknown = JSON.parse(raw)
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid')
     const data = value as Record<string, unknown>
-    if (data.version !== OVERVIEW_LAYOUT_VERSION) return { layout: fallback, status: 'unsupported' }
-    if (!Array.isArray(data.order) || data.order.length > Object.keys(OVERVIEW_CARD_SPECS).length ||
+    if (data.version !== 1 && data.version !== 2) return { layout: fallback, status: 'unsupported', sourceVersion: null }
+    const allowedKeys = data.version === 1 ? ['version', 'order', 'widths'] : ['version', 'order', 'widths', 'placements']
+    if (Object.keys(data).some((key) => !allowedKeys.includes(key)) ||
+      !Array.isArray(data.order) || data.order.length > Object.keys(OVERVIEW_CARD_SPECS).length ||
       !data.order.every(knownId) || new Set(data.order).size !== data.order.length ||
       !data.widths || typeof data.widths !== 'object' || Array.isArray(data.widths)) throw new Error('invalid')
     const widths: OverviewLayoutState['widths'] = {}
@@ -68,24 +94,37 @@ export function decodeOverviewLayout(raw: string | null, available: OverviewCard
       if (!knownId(id) || typeof width !== 'number' || !Number.isFinite(width) || width <= 0 || width > 1) throw new Error('invalid')
       widths[id] = width
     }
+    if (data.placements !== undefined && !validOverviewPlacements(data.placements, data.order)) throw new Error('invalid')
     const order = data.order.filter((id) => available.includes(id))
-    return { layout: { version: 1, order: [...order, ...available.filter((id) => !order.includes(id))], widths }, status: 'saved' }
+    const layout: OverviewLayoutState = { version: 2, order: [...order, ...available.filter((id) => !order.includes(id))], widths }
+    if (data.placements !== undefined) {
+      layout.placements = {}
+      for (const [id, placement] of Object.entries(data.placements as Record<OverviewCardId, OverviewPlacement>)) {
+        if (available.includes(id as OverviewCardId)) layout.placements[id as OverviewCardId] = { ...placement }
+      }
+    }
+    return { layout, status: 'saved', sourceVersion: data.version }
   } catch {
-    return { layout: fallback, status: 'invalid' }
+    return { layout: fallback, status: 'invalid', sourceVersion: null }
   }
 }
 
-export function loadOverviewLayout(storage: LayoutStorage, key: string, available: OverviewCardId[]) {
-  try { return { ...decodeOverviewLayout(storage.getItem(key), available), storageAvailable: true } }
-  catch { return { layout: defaultOverviewLayout(available), status: 'default' as const, storageAvailable: false } }
+export function loadOverviewLayout(storage: LayoutStorage, key: string, available: OverviewCardId[], legacyKey?: string) {
+  try {
+    let raw = storage.getItem(key)
+    const usedLegacy = raw === null && legacyKey !== undefined && legacyKey !== key
+    if (usedLegacy) raw = storage.getItem(legacyKey!)
+    return { ...decodeOverviewLayout(raw, available), storageAvailable: true, usedLegacy }
+  } catch { return { layout: defaultOverviewLayout(available), status: 'default' as const, sourceVersion: null, storageAvailable: false, usedLegacy: false } }
 }
 
-/** Called on completed user actions only, never during hydration or measuring. */
+/** Explicit completed actions save v2 only; reads never mutate or remove the v1 key. */
 export function saveOverviewLayout(storage: LayoutStorage, key: string, layout: OverviewLayoutState): boolean {
   try {
+    if (layout.version !== 2) return false
     const raw = JSON.stringify(layout)
     const decoded = decodeOverviewLayout(raw, layout.order)
-    if (decoded.status !== 'saved') return false
+    if (decoded.status !== 'saved' || decoded.sourceVersion !== 2) return false
     storage.setItem(key, raw)
     return true
   } catch { return false }

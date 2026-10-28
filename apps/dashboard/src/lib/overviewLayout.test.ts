@@ -1,266 +1,137 @@
-import { readFileSync } from 'node:fs'
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { OverviewLayout } from '../app/(dashboard)/OverviewLayout'
 import {
-  completeOverviewGesture,
-  decodeOverviewLayout,
-  defaultOverviewLayout,
-  loadOverviewLayout,
-  moveOverviewCard,
-  overviewCardWidth,
-  overviewDropTarget,
-  overviewLayoutKey,
-  overviewMoveKey,
-  overviewResizeKey,
-  resizeOverviewCard,
-  saveOverviewLayout,
+  OVERVIEW_MAX_GRID_ROWS, decodeOverviewLayout, defaultOverviewLayout, loadOverviewLayout,
+  overviewLayoutKey, overviewLegacyLayoutKey, saveOverviewLayout, validOverviewPlacements,
   type OverviewCardId,
 } from './overviewLayout'
+import { resolveOverviewGrid } from './overviewGrid'
 
-const ids: OverviewCardId[] = ['memories', 'services', 'sessions', 'workers', 'usage', 'graph', 'fact-extraction', 'embeddings', 'live-mcp', 'corpus']
+const ids: OverviewCardId[] = ['memories', 'services', 'fact-extraction', 'embeddings', 'live-mcp', 'corpus']
+const identity = { userId: 'synthetic-owner', teamId: 'synthetic-personal' }
+const key = overviewLayoutKey(identity)
+const legacyKey = overviewLegacyLayoutKey(identity)
 const defaults = () => defaultOverviewLayout(ids)
+const v1 = () => ({ version: 1, order: ids, widths: { memories: .37 } })
 
-describe('Overview widths and order', () => {
-  it('defaults to three metrics and equal halves for both models and lower panels', () => {
-    const layout = defaults()
-    expect(overviewCardWidth('memories', 1_600, layout)).toBe(520)
-    expect(overviewCardWidth('services', 1_600, layout)).toBe(520)
-    for (const id of ['fact-extraction', 'embeddings', 'live-mcp', 'corpus'] as const) {
-      expect(overviewCardWidth(id, 1_600, layout)).toBe(790)
-    }
-  })
+function storage(initial: Record<string, string> = {}) {
+  const records = new Map(Object.entries(initial))
+  return { records, getItem: vi.fn((name: string) => records.get(name) ?? null),
+    setItem: vi.fn((name: string, value: string) => { records.set(name, value) }) }
+}
 
-  it('reduces columns at meaningful floors and never makes a card wider than its row', () => {
-    expect(overviewCardWidth('memories', 600, defaults())).toBe(600)
-    expect(overviewCardWidth('live-mcp', 600, defaults())).toBe(600)
-    expect(overviewCardWidth('live-mcp', 320, defaults())).toBe(320)
-    for (const width of [200, 390, 800, 1_280, 3_840]) {
-      for (const id of ids) expect(overviewCardWidth(id, width, defaults())).toBeLessThanOrEqual(width)
-    }
-    expect(overviewCardWidth('memories', 0, defaults())).toBe(0)
-  })
-
-  it('keeps unsized lower cards equally wide at 1200 and wide rows while explicit widths respect each content floor', () => {
-    const layout = defaults()
-    expect(overviewCardWidth('live-mcp', 1_200, layout)).toBe(1_200)
-    expect(overviewCardWidth('corpus', 1_200, layout)).toBe(1_200)
-    expect(overviewCardWidth('fact-extraction', 1_200, layout)).toBe(590)
-    expect(overviewCardWidth('embeddings', 1_200, layout)).toBe(590)
-    const narrowed = resizeOverviewCard(layout, 'live-mcp', 360, 1_200)
-    expect(overviewCardWidth('live-mcp', 1_200, narrowed)).toBe(720)
-    const corpus = resizeOverviewCard(layout, 'corpus', 100, 1_200)
-    expect(overviewCardWidth('corpus', 1_200, corpus)).toBe(360)
-    expect(overviewCardWidth('memories', 1_201, layout) * 3 + 40).toBeLessThanOrEqual(1_201)
-  })
-
-  it('clamps resizing, preserves the preference through responsive measurements, and allows the full row', () => {
-    const large = resizeOverviewCard(defaults(), 'live-mcp', 9_000, 1_000)
-    expect(large.widths['live-mcp']).toBe(1)
-    const small = resizeOverviewCard(defaults(), 'memories', 5, 1_000)
-    expect(overviewCardWidth('memories', 1_000, small)).toBe(340)
-    const saved = resizeOverviewCard(defaults(), 'live-mcp', 800, 1_000)
-    expect(overviewCardWidth('live-mcp', 320, saved)).toBe(320)
-    expect(overviewCardWidth('live-mcp', 1_000, saved)).toBe(830)
-    expect(saved.widths['live-mcp']).toBe(.83)
-    expect(resizeOverviewCard(saved, 'live-mcp', NaN, 1_000)).toBe(saved)
-  })
-
-  it('moves freely across metric, model and lower-panel categories without dropping cards', () => {
-    const layout = moveOverviewCard(defaults(), 'corpus', 'memories', 'before')
-    expect(layout.order[0]).toBe('corpus')
-    const moved = moveOverviewCard(layout, 'services', 'embeddings', 'after')
-    expect(moved.order.indexOf('services')).toBe(moved.order.indexOf('embeddings') + 1)
-    expect(new Set(moved.order)).toEqual(new Set(ids))
-    expect(moveOverviewCard(layout, 'corpus', 'corpus', 'after')).toBe(layout)
-  })
-
-  it('offers keyboard moves and width adjustments including first/last and min/max', () => {
-    expect(overviewMoveKey(defaults(), 'corpus', 'Home')!.order[0]).toBe('corpus')
-    expect(overviewMoveKey(defaults(), 'memories', 'End')!.order.at(-1)).toBe('memories')
-    expect(overviewMoveKey(defaults(), 'services', 'ArrowUp')!.order[0]).toBe('services')
-    expect(overviewMoveKey(defaults(), 'memories', 'ArrowDown')!.order[1]).toBe('memories')
-    const layout = defaults()
-    expect(overviewMoveKey(layout, 'memories', 'ArrowLeft')).toBe(layout)
-    expect(overviewMoveKey(layout, 'memories', 'Tab')).toBeNull()
-    expect(overviewResizeKey('ArrowLeft', 745, 'live-mcp', 1_000)).toBe(720)
-    expect(overviewResizeKey('ArrowRight', 745, 'live-mcp', 1_000)).toBe(830)
-    expect(overviewResizeKey('Home', 500, 'live-mcp', 1_000)).toBe(720)
-    expect(overviewResizeKey('End', 500, 'live-mcp', 1_000)).toBe(1_000)
-  })
-
-  it('snaps near-half drags to equal halves that fit beside an unsized card, including fractional rows', () => {
-    for (const available of [1_201, 1_600, 2_330, 2_330.375]) {
-      const half = overviewCardWidth('embeddings', available, defaults())
-      for (const offset of [-12, 0, 12]) {
-        const changed = resizeOverviewCard(defaults(), 'fact-extraction', half + offset, available)
-        expect(overviewCardWidth('fact-extraction', available, changed)).toBe(half)
-        expect(half * 2 + 20).toBeLessThanOrEqual(available)
-        const reloaded = decodeOverviewLayout(JSON.stringify(changed), ids).layout
-        expect(overviewCardWidth('fact-extraction', available, reloaded)).toBe(half)
-      }
-    }
-  })
-
-  it('keeps thirds aligned and adapts a saved half to another viewport without rounding overflow', () => {
-    const savedHalf = resizeOverviewCard(defaults(), 'fact-extraction', 795, 1_600)
-    for (const available of [1_201, 1_600, 2_330.375]) {
-      const third = overviewCardWidth('memories', available, defaults())
-      const resized = resizeOverviewCard(defaults(), 'services', third + 8, available)
-      expect(overviewCardWidth('services', available, resized)).toBe(third)
-      expect(third * 3 + 40).toBeLessThanOrEqual(available)
-      expect(overviewCardWidth('fact-extraction', available, savedHalf)).toBe(overviewCardWidth('embeddings', available, defaults()))
-    }
-  })
-
-  it('renders legacy near-half preferences on the grid without rewriting storage or card order', () => {
-    const legacy = { ...defaults(), widths: { 'fact-extraction': .50001 } }
-    const storage = { getItem: () => JSON.stringify(legacy), setItem: vi.fn() }
-    const loaded = loadOverviewLayout(storage, 'legacy', ids)
-    expect(loaded.layout).toEqual(legacy)
-    expect(storage.setItem).not.toHaveBeenCalled()
-    expect(overviewCardWidth('fact-extraction', 1_601, loaded.layout)).toBe(overviewCardWidth('embeddings', 1_601, defaults()))
-  })
-
-  it('preserves the v1 fraction meaning across snap bands and subsequent saves', () => {
-    const legacy = { ...defaults(), widths: { memories: .37 } }
-    const storage = { getItem: () => JSON.stringify(legacy), setItem: vi.fn() }
-    const loaded = loadOverviewLayout(storage, 'legacy', ids)
-    // 37% of 1600 is 592: nearest stop655, rather than520 from a changed codec.
-    expect(overviewCardWidth('memories', 1_600, loaded.layout)).toBe(655)
-    expect(loaded.layout).toEqual(legacy)
-    expect(storage.setItem).not.toHaveBeenCalled()
-    const changed = resizeOverviewCard(loaded.layout, 'memories', 592, 1_600)
-    expect(changed.widths.memories).toBe(655 / 1_600)
-    expect(overviewCardWidth('memories', 1_600, decodeOverviewLayout(JSON.stringify(changed), ids).layout)).toBe(655)
-  })
-
-  it('uses the same grid for keyboard steps and pointer widths, respecting minimum and full-row endpoints', () => {
-    let layout = resizeOverviewCard(defaults(), 'memories', 0, 1_600)
-    const widths = [overviewCardWidth('memories', 1_600, layout)]
-    while (widths.at(-1)! < 1_600) {
-      const next = overviewResizeKey('ArrowRight', widths.at(-1)!, 'memories', 1_600)!
-      layout = resizeOverviewCard(layout, 'memories', next, 1_600)
-      const width = overviewCardWidth('memories', 1_600, layout)
-      expect(width).toBeGreaterThan(widths.at(-1)!)
-      widths.push(width)
-      expect(widths.length).toBeLessThanOrEqual(13)
-    }
-    expect(widths).toContain(790)
-    for (let index = widths.length - 1; index > 0; index--) {
-      expect(overviewResizeKey('ArrowLeft', widths[index], 'memories', 1_600)).toBe(widths[index - 1])
-    }
-    expect(overviewResizeKey('ArrowLeft', 340, 'memories', 1_600)).toBe(340)
-    expect(overviewResizeKey('ArrowRight', 1_600, 'memories', 1_600)).toBe(1_600)
-    expect(overviewCardWidth('memories', 320, layout)).toBe(320)
-  })
-})
-
-describe('identity-scoped automatic layout persistence', () => {
-  const identity = { userId: 'synthetic-owner', teamId: 'synthetic-personal-space' }
-  const key = overviewLayoutKey(identity)
-
-  it('uses distinct keys for user and team identities, without ambiguous concatenation', () => {
-    expect(key).not.toBe(overviewLayoutKey({ ...identity, userId: 'other-owner' }))
-    expect(key).not.toBe(overviewLayoutKey({ ...identity, teamId: 'other-space' }))
+describe('Overview version2 persistence codec', () => {
+  it('scopes both storage generations by user and team without key collisions', () => {
+    expect(key).toContain('pm:overview-layout:v2:')
+    expect(legacyKey).toContain('pm:overview-layout:v1:')
+    expect(key).not.toBe(legacyKey)
+    expect(key).not.toBe(overviewLayoutKey({ ...identity, userId: 'other' }))
+    expect(key).not.toBe(overviewLayoutKey({ ...identity, teamId: 'other' }))
     expect(overviewLayoutKey({ userId: 'a:b', teamId: 'c' })).not.toBe(overviewLayoutKey({ userId: 'a', teamId: 'b:c' }))
   })
 
-  it('synchronously saves a completed change and restores it from retained browser storage after a fresh load', () => {
-    const records = new Map<string, string>()
-    const storage = { getItem: (name: string) => records.get(name) ?? null, setItem: vi.fn((name: string, value: string) => { records.set(name, value) }) }
-    const firstLoad = loadOverviewLayout(storage, key, ids)
-    expect(firstLoad.status).toBe('default')
-    expect(storage.setItem).not.toHaveBeenCalled()
-    const changed = resizeOverviewCard(moveOverviewCard(firstLoad.layout, 'corpus', 'memories', 'before'), 'corpus', 600, 1_000)
-    expect(saveOverviewLayout(storage, key, changed)).toBe(true)
-    expect(records.has(key)).toBe(true) // no debounce or pending effect before navigation/restart
-    expect(loadOverviewLayout(storage, key, ids).layout).toEqual(changed)
-    expect(loadOverviewLayout(storage, overviewLayoutKey({ ...identity, userId: 'other-owner' }), ids).status).toBe('default')
+  it('loads v1 into memory only, preserving the original .37 raw fraction and source bytes', () => {
+    const raw = JSON.stringify(v1())
+    const store = storage({ [legacyKey]: raw })
+    const result = loadOverviewLayout(store, key, ids, legacyKey)
+    expect(result.status).toBe('saved')
+    expect(result.sourceVersion).toBe(1)
+    expect(result.usedLegacy).toBe(true)
+    expect(result.layout).toEqual({ ...v1(), version: 2 })
+    expect(result.layout.widths.memories).toBe(.37)
+    resolveOverviewGrid(result.layout, 1_600)
+    expect(store.records.get(legacyKey)).toBe(raw)
+    expect(store.records.has(key)).toBe(false)
+    expect(store.setItem).not.toHaveBeenCalled()
   })
 
-  it('validates corrupt data and unknown versions without overwriting them during initial loading', () => {
-    for (const raw of ['not json', 'null', JSON.stringify({ ...defaults(), order: ['memories', 'memories'] }),
-      JSON.stringify({ ...defaults(), widths: { memories: 0 } }), JSON.stringify({ ...defaults(), widths: { corpus: 1.1 } }),
-      JSON.stringify({ ...defaults(), order: ['unknown'] })]) {
-      const storage = { getItem: () => raw, setItem: vi.fn() }
-      expect(loadOverviewLayout(storage, key, ids).status).toBe('invalid')
-      expect(storage.setItem).not.toHaveBeenCalled()
+  it('uses legacy fallback only when the v2 key is absent, never for corrupt or future v2 data', () => {
+    for (const current of ['bad json', 'null', JSON.stringify({ version: 99 })]) {
+      const store = storage({ [key]: current, [legacyKey]: JSON.stringify(v1()) })
+      const loaded = loadOverviewLayout(store, key, ids, legacyKey)
+      expect(loaded.status).toBe(current.includes('99') ? 'unsupported' : 'invalid')
+      expect(store.getItem).toHaveBeenCalledTimes(1)
+      expect(store.getItem).not.toHaveBeenCalledWith(legacyKey)
+      expect(store.setItem).not.toHaveBeenCalled()
     }
-    const storage = { getItem: () => JSON.stringify({ version: 200 }), setItem: vi.fn() }
-    expect(loadOverviewLayout(storage, key, ids).status).toBe('unsupported')
-    expect(storage.setItem).not.toHaveBeenCalled()
+    const store = storage({ [legacyKey]: JSON.stringify({ version: 42 }) })
+    expect(loadOverviewLayout(store, key, ids, legacyKey).status).toBe('unsupported')
+    expect(store.setItem).not.toHaveBeenCalled()
   })
 
-  it('admits newly available cards in default order, filters absent cards, and persists restored defaults', () => {
-    const raw = JSON.stringify({ version: 1, order: ['corpus', 'people', 'memories'], widths: { corpus: .75 } })
+  it('does not look up an implicit global legacy key', () => {
+    const store = storage({ [legacyKey]: JSON.stringify(v1()) })
+    expect(loadOverviewLayout(store, key, ids).status).toBe('default')
+    expect(store.getItem).toHaveBeenCalledTimes(1)
+  })
+
+  it('synchronously saves version2 and reloads placements without altering the preserved v1 value', () => {
+    const legacy = JSON.stringify(v1())
+    const store = storage({ [legacyKey]: legacy })
+    const materialized = resolveOverviewGrid(loadOverviewLayout(store, key, ids, legacyKey).layout, 1_600)
+    expect(saveOverviewLayout(store, key, materialized)).toBe(true)
+    expect(store.records.has(key)).toBe(true)
+    expect(JSON.parse(store.records.get(key)!)).toEqual(materialized)
+    expect(store.records.get(legacyKey)).toBe(legacy)
+    const loaded = loadOverviewLayout(store, key, ids, legacyKey)
+    expect(loaded.sourceVersion).toBe(2)
+    expect(loaded.usedLegacy).toBe(false)
+    expect(loaded.layout).toEqual(materialized)
+  })
+
+  it('validates finite integral placements, bounds, allowed ids and unknown fields', () => {
+    for (const item of [
+      { row: 0, column: 1, span: 4 }, { row: OVERVIEW_MAX_GRID_ROWS + 1, column: 1, span: 4 },
+      { row: 1.5, column: 1, span: 4 }, { row: 1, column: 0, span: 4 },
+      { row: 1, column: 1, span: 0 }, { row: 1, column: 12, span: 2 },
+      { row: 1, column: Infinity, span: 4 }, { row: 1, column: 1, span: 4.5 },
+      { row: 1, column: 1, span: 4, extra: true },
+    ]) {
+      expect(validOverviewPlacements({ memories: item }, ids)).toBe(false)
+      expect(decodeOverviewLayout(JSON.stringify({ ...defaults(), placements: { memories: item } }), ids).status).toBe('invalid')
+    }
+    expect(validOverviewPlacements({ unknown: { row: 1, column: 1, span: 4 } })).toBe(false)
+    expect(validOverviewPlacements({ memories: { row: 1, column: 1, span: 4 } }, ['corpus'])).toBe(false)
+  })
+
+  it('rejects overlap before filtering hidden cards, while adjacency and distinct rows are valid', () => {
+    const overlap = { memories: { row: 1, column: 1, span: 4 }, services: { row: 1, column: 4, span: 4 } }
+    expect(validOverviewPlacements(overlap)).toBe(false)
+    expect(decodeOverviewLayout(JSON.stringify({ ...defaults(), placements: overlap }), ['memories']).status).toBe('invalid')
+    const adjacent = { memories: { row: 1, column: 1, span: 4 }, services: { row: 1, column: 5, span: 4 }, corpus: { row: 2, column: 1, span: 4 } }
+    expect(validOverviewPlacements(adjacent)).toBe(true)
+    expect(decodeOverviewLayout(JSON.stringify({ ...defaults(), placements: adjacent }), ids).status).toBe('saved')
+  })
+
+  it('filters unavailable cards and appends newly available cards without inventing stored positions', () => {
+    const raw = JSON.stringify({ version: 2, order: ['corpus', 'people', 'memories'], widths: { corpus: .75 },
+      placements: { corpus: { row: 1, column: 7, span: 6 }, people: { row: 1, column: 1, span: 6 } } })
     const decoded = decodeOverviewLayout(raw, ids)
     expect(decoded.layout.order.slice(0, 2)).toEqual(['corpus', 'memories'])
     expect(decoded.layout.order).not.toContain('people')
     expect(decoded.layout.order).toHaveLength(ids.length)
-    const storage = { getItem: () => raw, setItem: vi.fn() }
-    expect(saveOverviewLayout(storage, key, defaults())).toBe(true)
-    expect(JSON.parse(storage.setItem.mock.calls[0][1])).toEqual(defaults())
+    expect(decoded.layout.placements).toEqual({ corpus: { row: 1, column: 7, span: 6 } })
+    expect(decoded.layout.widths.corpus).toBe(.75)
   })
 
-  it('reports blocked browser storage honestly and refuses malformed writes', () => {
+  it('rejects malformed orders, widths, mixed version formats, and saves of invalid state', () => {
+    for (const candidate of [
+      { ...defaults(), order: ['memories', 'memories'] }, { ...defaults(), order: ['unknown'] },
+      { ...defaults(), widths: { corpus: 0 } }, { ...defaults(), widths: { corpus: 1.1 } },
+      { ...defaults(), widths: { unknown: .5 } }, { ...defaults(), placements: [] },
+      { ...v1(), placements: {} }, { ...defaults(), unknown: true },
+    ]) expect(decodeOverviewLayout(JSON.stringify(candidate), ids).status).toBe('invalid')
+    const store = storage()
+    expect(saveOverviewLayout(store, key, { ...defaults(), widths: { corpus: Infinity } })).toBe(false)
+    expect(store.setItem).not.toHaveBeenCalled()
+  })
+
+  it('reports blocked reads/writes and persists explicit reset without deleting old data', () => {
     const blocked = { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('quota') } }
-    expect(loadOverviewLayout(blocked, key, ids).storageAvailable).toBe(false)
+    expect(loadOverviewLayout(blocked, key, ids, legacyKey).storageAvailable).toBe(false)
     expect(saveOverviewLayout(blocked, key, defaults())).toBe(false)
-    const storage = { getItem: () => null, setItem: vi.fn() }
-    expect(saveOverviewLayout(storage, key, { ...defaults(), widths: { corpus: Infinity } })).toBe(false)
-    expect(storage.setItem).not.toHaveBeenCalled()
-  })
-})
-
-describe('Overview gesture commits and unaffected card bodies', () => {
-  const rects = [
-    { id: 'memories' as const, left: 0, right: 320, top: 0, bottom: 200 },
-    { id: 'services' as const, left: 340, right: 660, top: 0, bottom: 200 },
-    { id: 'corpus' as const, left: 0, right: 490, top: 220, bottom: 500 },
-  ]
-
-  it('finds before/after targets across rows and rejects an outside drop', () => {
-    expect(overviewDropTarget(rects, 350, 50)).toEqual({ id: 'services', edge: 'before' })
-    expect(overviewDropTarget(rects, 650, 50)).toEqual({ id: 'services', edge: 'after' })
-    expect(overviewDropTarget(rects, 480, 250)).toEqual({ id: 'corpus', edge: 'after' })
-    expect(overviewDropTarget(rects, -200, 0)).toBeNull()
-  })
-
-  it('commits only a completed movement/resize, restoring a cancelled preview without a storage write', () => {
-    const initial = defaults()
-    const preview = resizeOverviewCard(initial, 'memories', 900, 1_000)
-    const interaction = { kind: 'resize' as const, id: 'memories' as const, moved: true, cancelled: true, target: null }
-    expect(completeOverviewGesture(initial, preview, interaction)).toEqual({ layout: initial, commit: false })
-    expect(completeOverviewGesture(initial, preview, { ...interaction, cancelled: false })).toEqual({ layout: preview, commit: true })
-    expect(completeOverviewGesture(initial, preview, { ...interaction, cancelled: false, moved: false }).commit).toBe(false)
-    expect(completeOverviewGesture(initial, initial, { ...interaction, kind: 'move', cancelled: false }).commit).toBe(false)
-    const moved = completeOverviewGesture(initial, initial, { ...interaction, kind: 'move', cancelled: false, target: { id: 'corpus', edge: 'after' } })
-    expect(moved.commit).toBe(true)
-    expect(moved.layout.order.indexOf('memories')).toBe(moved.layout.order.indexOf('corpus') + 1)
-  })
-
-  it('keeps links intact with a focusable card and right-edge resize control, without position labels or tool rows', () => {
-    const html = renderToStaticMarkup(createElement(OverviewLayout, {
-      identity: { userId: 'synthetic-owner', teamId: null },
-      cards: [{ id: 'memories', content: createElement('a', { href: '/memories' }, 'Saved memories detail') }],
-    }))
-    expect(html).toContain('aria-label="Saved Memories"')
-    expect(html).toContain('aria-keyshortcuts="Alt+ArrowLeft')
-    expect(html).toContain('aria-label="Resize Saved Memories"')
-    expect(html).toContain('aria-orientation="vertical"')
-    expect(html).toContain('<a href="/memories">Saved memories detail</a>')
-    expect(html).not.toContain('draggable=')
-    expect(html).not.toContain('Position ')
-    expect(html).not.toContain('overview-layout-card-tools')
-    expect(html).toContain('overview-layout-sr-only')
-    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
-    expect(css).toMatch(/\.overview-layout-item\s*\{[^}]*max-width:\s*100%/s)
-    expect(css).toMatch(/\.overview-layout-scroll\s*\{[^}]*overflow-x:\s*auto/s)
-    expect(css).toMatch(/\.mcp-live-table\s*\{[^}]*min-width:\s*676px/s)
-    expect(css).toMatch(/\.overview-layout-sr-only\s*\{[^}]*clip-path:\s*inset\(50%\)/s)
-    expect(css).toMatch(/\.overview-resize-handle \.ui-icon\s*\{[^}]*top:\s*50%[^}]*opacity:\s*0/s)
-    expect(css).toMatch(/\.overview-layout-grid\.dragging \.overview-layout-scroll\s*\{[^}]*visibility:\s*hidden/s)
+    const store = storage({ [legacyKey]: JSON.stringify(v1()) })
+    expect(saveOverviewLayout(store, key, defaults())).toBe(true)
+    expect(JSON.parse(store.records.get(key)!)).toEqual(defaults())
+    expect(store.records.has(legacyKey)).toBe(true)
   })
 })

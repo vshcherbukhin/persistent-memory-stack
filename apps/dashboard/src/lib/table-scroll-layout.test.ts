@@ -72,7 +72,7 @@ describe('table scroll layout contract', () => {
     expect(overview).toContain('badgeTone={mcpBadge.tone}')
     expect(overview).toContain('serviceBadge(overview.services)')
     expect(overview).toContain('workerBadge(overview.workers)')
-    expect(overview).toContain('`${overview.services.active} active, ${overview.services.stopped} stopped, ${overview.services.failed} failed`')
+    expect(overview).toContain("`${overview.services.active} active, ${overview.services.starting > 0 ? `${overview.services.starting} starting, ` : ''}${overview.services.stopped} stopped, ${overview.services.failed} failed`")
     expect(overview).toContain('`${overview.workers.enabled} active, ${workerStoppedCount} stopped, ${overview.workers.failed} failed`')
     expect(overview).toContain('tone="neutral"')
     expect(types).toContain('mcpSessions: {')
