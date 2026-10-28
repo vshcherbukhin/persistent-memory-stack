@@ -4644,8 +4644,8 @@ button.primary:hover,
 .runtime-pill.degraded { color: var(--marigold); border-color: var(--marigold-40); }
 .runtime-pill.degraded .runtime-dot { background: var(--marigold); box-shadow: 0 0 0 3px var(--marigold-12); }
 
-.memory-activity-pill .runtime-dot { animation: none; }
-.memory-activity-pill .runtime-dot.blinking { animation: pulseDot .6s var(--ease) infinite; }
+.memory-activity-pill .runtime-dot { background: var(--dim); box-shadow: none; animation: none; }
+.memory-activity-pill .runtime-dot.blinking { background: var(--grass); box-shadow: 0 0 0 3px var(--grass-12); animation: pulseDot .6s var(--ease) infinite; }
 @media (prefers-reduced-motion: reduce) {
   .memory-activity-pill .runtime-dot.blinking { animation: none; }
 }
