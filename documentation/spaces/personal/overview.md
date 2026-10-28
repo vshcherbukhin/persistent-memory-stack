@@ -45,12 +45,18 @@ The defaults show three summary cards per row, then two equal model cards, then
 Narrower views use fewer columns. Wide content scrolls inside its card rather than
 making the whole page wider.
 
-- Drag a card's move grip to its new position. With the grip focused, arrow keys
-  move it earlier or later, **Home** moves it first, and **End** moves it last.
-- Drag its resize handle horizontally. With that handle focused, **Left** and
+- Press and hold a card for one second to activate dragging. The selected card
+  follows your pointer, and the other positions become faint empty placeholders.
+  Release over a placeholder to move it. A quick click keeps its normal action;
+  buttons and links inside panels remain available.
+- Move the pointer close to a card's right border to highlight that edge and
+  reveal its resize handle at the middle. Drag horizontally to change width.
+  With that handle focused, **Left** and
   **Right** adjust width, **Home** selects its minimum, and **End** fills the row.
   **Escape** cancels a drag or resize in progress. Card links, session controls,
   and text selection remain available inside the card.
+- With the card itself focused, **Alt + arrow keys** move it earlier or later;
+  **Alt + Home** moves it first and **Alt + End** moves it last.
 - Select **Restore defaults** to reset both the order and widths.
 
 Completed changes save automatically in this browser profile for your current

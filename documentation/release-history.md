@@ -40,6 +40,7 @@ nav_hidden: true
   Only their dots blink for activity; labels and badge styling stay fixed.
 - Overview cards can be rearranged and resized, with automatic saved browser layouts
   and protected content widths. Live MCP activity and Corpus shape start equally split.
+  Hold a card to reveal faint drop positions; resize from its highlighted right edge.
 - Active readiness checks refresh the local model lease before idle expiry. Startup
   is counted separately from stopped services, and SQL-only Overview statistics
   remain readable while embeddings warm up.

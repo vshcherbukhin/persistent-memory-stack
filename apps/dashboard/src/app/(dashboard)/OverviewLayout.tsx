@@ -1,29 +1,22 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { armOverviewHold, guardOverviewTouchScroll } from '@/lib/overviewHold'
 import {
-  OVERVIEW_CARD_SPECS,
-  completeOverviewGesture,
-  defaultOverviewLayout,
-  loadOverviewLayout,
-  overviewCardWidth,
-  overviewDropTarget,
-  overviewLayoutKey,
-  overviewMoveKey,
-  overviewResizeKey,
-  resizeOverviewCard,
-  saveOverviewLayout,
-  type OverviewCardId,
-  type OverviewLayoutState,
+  OVERVIEW_CARD_SPECS, completeOverviewGesture, defaultOverviewLayout, loadOverviewLayout,
+  overviewCardWidth, overviewDropTarget, overviewLayoutKey, overviewMoveKey, overviewResizeKey,
+  resizeOverviewCard, saveOverviewLayout, type OverviewCardId, type OverviewLayoutState,
 } from '@/lib/overviewLayout'
 
 export interface OverviewLayoutCard { id: OverviewCardId; content: ReactNode }
 type Gesture = {
   kind: 'move' | 'resize'; id: OverviewCardId; pointerId: number; startX: number; startY: number;
-  initial: OverviewLayoutState; width: number; available: number; moved: boolean
+  initial: OverviewLayoutState; width: number; available: number; moved: boolean; active: boolean;
+  element: HTMLElement; hold?: ReturnType<typeof armOverviewHold>; releaseTouchGuard?: () => void
 }
+type MovingCard = { id: OverviewCardId; left: number; top: number; width: number; height: number }
 
 export function OverviewLayout({ identity, cards }: {
   identity: { userId: string; teamId: string | null }; cards: OverviewLayoutCard[]
@@ -31,17 +24,21 @@ export function OverviewLayout({ identity, cards }: {
   const key = overviewLayoutKey(identity)
   const ids = cards.map((card) => card.id)
   const idsKey = ids.join(',')
+  const helpId = useId()
   const [layout, setLayout] = useState(() => defaultOverviewLayout(ids))
   const layoutRef = useRef(layout)
   const [ready, setReady] = useState(false)
   const [available, setAvailable] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
-  const [moving, setMoving] = useState<OverviewCardId | null>(null)
+  const [moving, setMoving] = useState<MovingCard | null>(null)
+  const [resizing, setResizing] = useState<OverviewCardId | null>(null)
   const [drop, setDrop] = useState<ReturnType<typeof overviewDropTarget>>(null)
   const dropRef = useRef(drop)
   const grid = useRef<HTMLDivElement>(null)
   const gesture = useRef<Gesture | null>(null)
+  const finishRef = useRef<(cancel: boolean) => void>(() => {})
+  const suppressedClick = useRef<{ id: OverviewCardId; until: number } | null>(null)
   const hydratedKey = useRef<string | null>(null)
 
   const apply = (next: OverviewLayoutState) => { layoutRef.current = next; setLayout(next) }
@@ -55,6 +52,7 @@ export function OverviewLayout({ identity, cards }: {
   }
 
   useEffect(() => {
+    finishRef.current(true)
     setReady(false)
     let loaded
     try { loaded = loadOverviewLayout(window.localStorage, key, idsKey.split(',') as OverviewCardId[]) }
@@ -71,7 +69,11 @@ export function OverviewLayout({ identity, cards }: {
   useEffect(() => {
     const element = grid.current
     if (!element) return
-    const measure = () => setAvailable(Math.max(0, element.getBoundingClientRect().width))
+    const measure = () => {
+      const width = Math.max(0, element.getBoundingClientRect().width)
+      if (gesture.current && Math.abs(gesture.current.available - width) > 1) finishRef.current(true)
+      setAvailable(width)
+    }
     measure()
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(element)
@@ -79,109 +81,162 @@ export function OverviewLayout({ identity, cards }: {
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
   }, [])
 
-  const begin = (event: PointerEvent<HTMLButtonElement>, id: OverviewCardId, kind: Gesture['kind']) => {
-    if (!ready || event.button !== 0 || available <= 0) return
-    event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+  useEffect(() => {
+    const release = (event: globalThis.PointerEvent) => {
+      if (gesture.current?.pointerId === event.pointerId) finishRef.current(false)
+    }
+    const cancel = () => finishRef.current(true)
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && gesture.current) { event.preventDefault(); cancel() }
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('blur', cancel)
+    window.addEventListener('keydown', escape)
+    return () => {
+      cancel()
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('blur', cancel)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [])
+
+  const finish = (cancel: boolean) => {
+    const current = gesture.current
+    if (!current) return
+    gesture.current = null
+    current.hold?.cancel()
+    current.releaseTouchGuard?.()
+    const result = completeOverviewGesture(current.initial, layoutRef.current, { ...current, cancelled: cancel, target: dropRef.current })
+    if (result.commit) persist(result.layout, `${OVERVIEW_CARD_SPECS[current.id].label} ${current.kind === 'move' ? 'moved' : 'resized'}.`)
+    else if (current.active) apply(result.layout)
+    if (current.active) suppressedClick.current = { id: current.id, until: Date.now() + 500 }
+    setMoving(null)
+    setResizing(null)
+    setDrop(null)
     dropRef.current = null
-    gesture.current = { kind, id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
-      initial: layoutRef.current, width: overviewCardWidth(id, available, layoutRef.current), available, moved: false }
+    current.element.style.removeProperty('--overview-drag-x')
+    current.element.style.removeProperty('--overview-drag-y')
+    if (current.element.hasPointerCapture(current.pointerId)) current.element.releasePointerCapture(current.pointerId)
   }
-  const updateGesture = (event: PointerEvent<HTMLButtonElement>) => {
+  finishRef.current = finish
+
+  const beginMove = (event: PointerEvent<HTMLElement>, id: OverviewCardId) => {
+    if (!ready || gesture.current || event.button !== 0 || event.isPrimary === false || available <= 0) return
+    // Whole summary links support holding, while buttons and links inside panels keep their own gestures.
+    const control = (event.target as Element).closest('button, input, select, textarea, a, [role="button"], [contenteditable]:not([contenteditable="false"])')
+    if (control && !control.matches('a.overview-card')) return
+    const element = event.currentTarget
+    const current: Gesture = { kind: 'move', id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+      initial: layoutRef.current, width: overviewCardWidth(id, available, layoutRef.current), available, moved: false, active: false, element }
+    gesture.current = current
+    if (event.pointerType === 'touch') current.releaseTouchGuard = guardOverviewTouchScroll(element, () => current.active)
+    current.hold = armOverviewHold(event.clientX, event.clientY, () => {
+      if (gesture.current !== current || !element.isConnected) return
+      try { element.setPointerCapture(current.pointerId) } catch { finishRef.current(true); return }
+      const { left, top, width, height } = element.getBoundingClientRect()
+      current.active = true
+      suppressedClick.current = { id, until: Infinity }
+      setMoving({ id, left, top, width, height })
+      setAnnouncement(`${OVERVIEW_CARD_SPECS[id].label} ready to move. Drop on an empty card position; Escape cancels.`)
+    })
+  }
+  const beginResize = (event: PointerEvent<HTMLButtonElement>, id: OverviewCardId) => {
+    if (!ready || gesture.current || event.button !== 0 || event.isPrimary === false || available <= 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const element = event.currentTarget.closest<HTMLElement>('[data-overview-card]')!
+    element.setPointerCapture(event.pointerId)
+    gesture.current = { kind: 'resize', id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+      initial: layoutRef.current, width: overviewCardWidth(id, available, layoutRef.current), available, moved: false, active: true, element }
+    setResizing(id)
+  }
+  const updateGesture = (event: PointerEvent<HTMLElement>) => {
     const current = gesture.current
     if (!current || current.pointerId !== event.pointerId) return
+    if (!current.active) {
+      if (!current.hold?.move(event.clientX, event.clientY)) finish(true)
+      return
+    }
+    event.preventDefault()
     if (!current.moved && Math.hypot(event.clientX - current.startX, event.clientY - current.startY) < 5) return
     current.moved = true
     if (current.kind === 'resize') {
       apply(resizeOverviewCard(current.initial, current.id, current.width + event.clientX - current.startX, current.available))
     } else {
-      setMoving(current.id)
+      current.element.style.setProperty('--overview-drag-x', `${event.clientX - current.startX}px`)
+      current.element.style.setProperty('--overview-drag-y', `${event.clientY - current.startY}px`)
       const rects = [...(grid.current?.querySelectorAll<HTMLElement>('[data-overview-card]') ?? [])].map((element) => {
         const { left, right, top, bottom } = element.getBoundingClientRect()
         return { id: element.dataset.overviewCard as OverviewCardId, left, right, top, bottom }
       })
-      dropRef.current = overviewDropTarget(rects, event.clientX, event.clientY)
-      setDrop(dropRef.current)
+      const target = overviewDropTarget(rects, event.clientX, event.clientY)
+      if (target?.id !== dropRef.current?.id || target?.edge !== dropRef.current?.edge) {
+        dropRef.current = target
+        setDrop(target)
+      }
     }
   }
-  const finish = (event: PointerEvent<HTMLButtonElement>, cancel = false) => {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
-    gesture.current = null
-    const result = completeOverviewGesture(current.initial, layoutRef.current, { ...current, cancelled: cancel, target: dropRef.current })
-    if (result.commit) persist(result.layout, `${OVERVIEW_CARD_SPECS[current.id].label} ${current.kind === 'move' ? 'moved' : 'resized'}.`)
-    else apply(result.layout)
-    setMoving(null)
-    setDrop(null)
-    dropRef.current = null
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-  }
-  const cancelWithEscape = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const current = gesture.current
-    if (event.key !== 'Escape' || !current) return false
+  const moveKey = (event: KeyboardEvent<HTMLElement>, id: OverviewCardId) => {
+    if (event.target !== event.currentTarget || !event.altKey || !ready || gesture.current) return
+    const next = overviewMoveKey(layoutRef.current, id, event.key)
+    if (!next) return
     event.preventDefault()
-    gesture.current = null
-    apply(current.initial)
-    setMoving(null)
-    setDrop(null)
-    dropRef.current = null
-    if (event.currentTarget.hasPointerCapture(current.pointerId)) event.currentTarget.releasePointerCapture(current.pointerId)
-    return true
+    if (next !== layoutRef.current) persist(next, `${OVERVIEW_CARD_SPECS[id].label} moved.`)
   }
 
   return (
     <section className="overview-layout" aria-label="Overview cards">
       <div className="overview-layout-toolbar">
-        <span className="note">Move cards with the grip; drag the resize handle to change width.</span>
-        <button type="button" className="btn sm ghost" disabled={!ready} onClick={() => persist(defaultOverviewLayout(ids), 'Default layout restored.')}>
+        <span className="note">Hold a card for one second to move it. Resize from its right edge.</span>
+        <button type="button" className="btn sm ghost" disabled={!ready || !!moving || !!resizing} onClick={() => persist(defaultOverviewLayout(ids), 'Default layout restored.')}>
           <Icon name="restart_alt" size={15} /> Restore defaults
         </button>
       </div>
       {notice ? <div className="notice overview-layout-notice" role="status">{notice}</div> : null}
-      <span className="sr-only" aria-live="polite">{announcement}</span>
-      <div className="overview-layout-grid" ref={grid}>
+      <span id={helpId} className="overview-layout-sr-only">Hold for one second to move. With the card focused, use Alt and arrow keys to reorder, or Alt and Home or End to move first or last. Escape cancels. Focus the right edge to resize with arrow keys, Home or End.</span>
+      <span className="overview-layout-sr-only" aria-live="polite">{announcement}</span>
+      <div className={`overview-layout-grid${moving ? ' dragging' : ''}`} ref={grid}>
         {layout.order.map((id) => {
           const card = cards.find((candidate) => candidate.id === id)
           if (!card) return null
           const spec = OVERVIEW_CARD_SPECS[id]
           const width = overviewCardWidth(id, available, layout)
-          const style = { '--overview-content-min': `${spec.minWidth}px`, width: width > 0 ? `${width}px` : '100%' } as CSSProperties
-          const position = layout.order.indexOf(id)
+          const isMoving = moving?.id === id
+          const style = { '--overview-content-min': `${spec.minWidth}px`, width: width > 0 ? `${width}px` : '100%',
+            ...(isMoving ? { minHeight: moving.height, '--overview-drag-left': `${moving.left}px`, '--overview-drag-top': `${moving.top}px`,
+              '--overview-drag-width': `${moving.width}px`, '--overview-drag-height': `${moving.height}px` } : {}) } as CSSProperties
           return (
-            <article key={id} className={`overview-layout-item${moving === id ? ' moving' : ''}`} style={style}
-              data-overview-card={id} data-drop-edge={drop?.id === id && moving !== id ? drop.edge : undefined} aria-label={spec.label}>
-              <div className="overview-layout-card-tools">
-                <Tooltip label={`Move ${spec.label}. Drag, or use arrow keys to move earlier or later; Home moves first and End moves last.`}>
-                  <button type="button" className="icon-btn overview-move-handle" disabled={!ready} aria-label={`Move ${spec.label}`} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Home End"
-                    onPointerDown={(event) => begin(event, id, 'move')} onPointerMove={updateGesture} onPointerUp={(event) => finish(event)} onPointerCancel={(event) => finish(event, true)}
-                    onLostPointerCapture={(event) => finish(event, true)} onKeyDown={(event) => {
-                      if (cancelWithEscape(event)) return
-                      const next = overviewMoveKey(layoutRef.current, id, event.key)
-                      if (!next) return
-                      event.preventDefault()
-                      if (next === layoutRef.current) return
-                      persist(next, `${spec.label} moved to position ${next.order.indexOf(id) + 1} of ${next.order.length}.`)
-                    }}>
-                    <Icon name="drag_indicator" size={17} />
-                  </button>
-                </Tooltip>
-                <span className="sr-only">Position {position + 1} of {layout.order.length}.</span>
-                <Tooltip label={`Resize ${spec.label}. Drag horizontally, or use Left/Right to adjust; Home sets the minimum and End fills the row.`}>
-                  <button type="button" className="icon-btn overview-resize-handle" role="separator" aria-orientation="vertical" disabled={!ready || available <= 0}
-                    aria-label={`Resize ${spec.label}`} aria-valuemin={Math.round(Math.min(spec.minWidth, available))} aria-valuemax={Math.round(available)} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels wide`}
-                    onPointerDown={(event) => begin(event, id, 'resize')} onPointerMove={updateGesture} onPointerUp={(event) => finish(event)} onPointerCancel={(event) => finish(event, true)}
-                    onLostPointerCapture={(event) => finish(event, true)} onKeyDown={(event) => {
-                      if (cancelWithEscape(event)) return
-                      const pixels = overviewResizeKey(event.key, overviewCardWidth(id, available, layoutRef.current), id, available)
-                      if (pixels === null) return
-                      event.preventDefault()
-                      persist(resizeOverviewCard(layoutRef.current, id, pixels, available), `${spec.label} resized.`)
-                    }}>
-                    <Icon name="drag_handle" size={17} />
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="overview-layout-scroll"><div className="overview-layout-body">{card.content}</div></div>
+            <article key={id} className={`overview-layout-item${isMoving ? ' moving' : ''}${resizing === id ? ' resizing' : ''}`} style={style}
+              data-overview-card={id} data-drop-edge={drop?.id === id && !isMoving ? drop.edge : undefined}
+              tabIndex={ready ? 0 : -1} aria-label={spec.label} aria-describedby={helpId} aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End"
+              onPointerDown={(event) => beginMove(event, id)} onPointerMove={updateGesture}
+              onPointerUp={(event) => { if (gesture.current?.pointerId === event.pointerId) finish(false) }}
+              onPointerCancel={() => finish(true)} onLostPointerCapture={(event) => { if (gesture.current?.pointerId === event.pointerId && event.target === event.currentTarget) finish(true) }}
+              onPointerLeave={() => { if (gesture.current?.id === id && !gesture.current.active) finish(true) }}
+              onDragStart={(event) => { if (gesture.current) { event.preventDefault(); if (!gesture.current.active) finish(true) } }}
+              onContextMenu={(event) => { if (gesture.current?.id === id) event.preventDefault() }} onKeyDown={(event) => moveKey(event, id)}
+              onClickCapture={(event) => {
+                const suppressed = suppressedClick.current
+                if (event.detail > 0 && suppressed?.id === id && Date.now() <= suppressed.until) {
+                  event.preventDefault(); event.stopPropagation(); suppressedClick.current = null
+                }
+              }}>
+              <div className="overview-layout-scroll" inert={!!moving}><div className="overview-layout-body">{card.content}</div></div>
+              <Tooltip as="div" className="overview-resize-zone" label={`Resize ${spec.label}. Drag the right edge, or use Left/Right; Home selects minimum width and End fills the row.`}>
+                <button type="button" className="overview-resize-handle" role="separator" aria-orientation="vertical" disabled={!ready || available <= 0 || !!moving}
+                  aria-label={`Resize ${spec.label}`} aria-valuemin={Math.round(Math.min(spec.minWidth, available))} aria-valuemax={Math.round(available)} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels wide`}
+                  onPointerDown={(event) => beginResize(event, id)} onKeyDown={(event) => {
+                    if (gesture.current) return
+                    const pixels = overviewResizeKey(event.key, overviewCardWidth(id, available, layoutRef.current), id, available)
+                    if (pixels === null) return
+                    event.preventDefault()
+                    persist(resizeOverviewCard(layoutRef.current, id, pixels, available), `${spec.label} resized.`)
+                  }}>
+                  <Icon name="drag_handle" size={17} />
+                </button>
+              </Tooltip>
             </article>
           )
         })}

@@ -175,19 +175,26 @@ describe('Overview gesture commits and unaffected card bodies', () => {
     expect(moved.layout.order.indexOf('memories')).toBe(moved.layout.order.indexOf('corpus') + 1)
   })
 
-  it('renders separate accessible handles around intact links and never makes card bodies draggable', () => {
+  it('keeps links intact with a focusable card and right-edge resize control, without position labels or tool rows', () => {
     const html = renderToStaticMarkup(createElement(OverviewLayout, {
       identity: { userId: 'synthetic-owner', teamId: null },
       cards: [{ id: 'memories', content: createElement('a', { href: '/memories' }, 'Saved memories detail') }],
     }))
-    expect(html).toContain('aria-label="Move Saved Memories"')
+    expect(html).toContain('aria-label="Saved Memories"')
+    expect(html).toContain('aria-keyshortcuts="Alt+ArrowLeft')
     expect(html).toContain('aria-label="Resize Saved Memories"')
     expect(html).toContain('aria-orientation="vertical"')
     expect(html).toContain('<a href="/memories">Saved memories detail</a>')
     expect(html).not.toContain('draggable=')
+    expect(html).not.toContain('Position ')
+    expect(html).not.toContain('overview-layout-card-tools')
+    expect(html).toContain('overview-layout-sr-only')
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
     expect(css).toMatch(/\.overview-layout-item\s*\{[^}]*max-width:\s*100%/s)
     expect(css).toMatch(/\.overview-layout-scroll\s*\{[^}]*overflow-x:\s*auto/s)
     expect(css).toMatch(/\.mcp-live-table\s*\{[^}]*min-width:\s*676px/s)
+    expect(css).toMatch(/\.overview-layout-sr-only\s*\{[^}]*clip-path:\s*inset\(50%\)/s)
+    expect(css).toMatch(/\.overview-resize-handle \.ui-icon\s*\{[^}]*top:\s*50%[^}]*opacity:\s*0/s)
+    expect(css).toMatch(/\.overview-layout-grid\.dragging \.overview-layout-scroll\s*\{[^}]*visibility:\s*hidden/s)
   })
 })
