@@ -1,5 +1,21 @@
 export const OVERVIEW_LAYOUT_VERSION = 1
 export const OVERVIEW_LAYOUT_GAP = 20
+const OVERVIEW_RESIZE_COLUMNS = 12
+
+// Include gutters in the grid unit so equal halves/thirds always share a row.
+const gridWidth = (available: number, span: number) =>
+  Math.floor(((available + OVERVIEW_LAYOUT_GAP) * span / OVERVIEW_RESIZE_COLUMNS - OVERVIEW_LAYOUT_GAP) * 64) / 64
+
+function resizeStops(id: OverviewCardId, available: number): number[] {
+  const minimum = Math.min(OVERVIEW_CARD_SPECS[id].minWidth, available)
+  return [...new Set([minimum, ...Array.from({ length: OVERVIEW_RESIZE_COLUMNS }, (_, index) => gridWidth(available, index + 1))
+    .filter((width) => width >= minimum), available])].sort((a, b) => a - b)
+}
+
+function snapWidth(id: OverviewCardId, pixels: number, available: number): number {
+  return resizeStops(id, available).reduce((closest, width) =>
+    Math.abs(width - pixels) < Math.abs(closest - pixels) ? width : closest)
+}
 
 export const OVERVIEW_CARD_SPECS = {
   memories: { label: 'Saved Memories', columns: 3, minWidth: 340 },
@@ -19,7 +35,7 @@ export type OverviewCardId = keyof typeof OVERVIEW_CARD_SPECS
 export interface OverviewLayoutState {
   version: 1
   order: OverviewCardId[]
-  /** Fractions of the available row, independent of device pixels. */
+  /** Fractions of the available row; retain the v1 storage meaning when snapping. */
   widths: Partial<Record<OverviewCardId, number>>
 }
 export interface LayoutStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
@@ -78,9 +94,8 @@ export function saveOverviewLayout(storage: LayoutStorage, key: string, layout: 
 export function overviewCardWidth(id: OverviewCardId, available: number, layout: OverviewLayoutState): number {
   if (!Number.isFinite(available) || available <= 0) return 0
   const spec = OVERVIEW_CARD_SPECS[id]
-  const minimum = Math.min(spec.minWidth, available)
   const saved = layout.widths[id]
-  if (saved !== undefined) return Math.min(available, Math.max(minimum, Math.round(available * saved)))
+  if (saved !== undefined) return snapWidth(id, available * saved, available)
   // Unsized lower panels remain an equal pair, using the larger content floor.
   const defaultMinimum = id === 'live-mcp' || id === 'corpus'
     ? Math.max(OVERVIEW_CARD_SPECS['live-mcp'].minWidth, OVERVIEW_CARD_SPECS.corpus.minWidth)
@@ -94,8 +109,8 @@ export function overviewCardWidth(id: OverviewCardId, available: number, layout:
 
 export function resizeOverviewCard(layout: OverviewLayoutState, id: OverviewCardId, pixels: number, available: number): OverviewLayoutState {
   if (!Number.isFinite(available) || available <= 0 || !Number.isFinite(pixels)) return layout
-  const clamped = Math.min(available, Math.max(Math.min(OVERVIEW_CARD_SPECS[id].minWidth, available), pixels))
-  return { ...layout, widths: { ...layout.widths, [id]: Math.round(clamped / available * 100_000) / 100_000 } }
+  const snapped = snapWidth(id, pixels, available)
+  return { ...layout, widths: { ...layout.widths, [id]: snapped / available } }
 }
 
 export function moveOverviewCard(layout: OverviewLayoutState, id: OverviewCardId, target: OverviewCardId, edge: 'before' | 'after'): OverviewLayoutState {
@@ -116,8 +131,8 @@ export function overviewMoveKey(layout: OverviewLayoutState, id: OverviewCardId,
 }
 
 export function overviewResizeKey(key: string, current: number, id: OverviewCardId, available: number): number | null {
-  if (key === 'ArrowLeft') return current - 24
-  if (key === 'ArrowRight') return current + 24
+  if (key === 'ArrowLeft') return resizeStops(id, available).findLast((width) => width < current - 1 / 64) ?? Math.min(OVERVIEW_CARD_SPECS[id].minWidth, available)
+  if (key === 'ArrowRight') return resizeStops(id, available).find((width) => width > current + 1 / 64) ?? available
   if (key === 'Home') return Math.min(OVERVIEW_CARD_SPECS[id].minWidth, available)
   if (key === 'End') return available
   return null

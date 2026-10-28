@@ -50,9 +50,12 @@ making the whole page wider.
   Release over a placeholder to move it. A quick click keeps its normal action;
   buttons and links inside panels remain available.
 - Move the pointer close to a card's right border to highlight that edge and
-  reveal its resize handle at the middle. Drag horizontally to change width.
+  reveal its resize handle at the middle. Drag horizontally to snap between
+  twelve equal row sections, including exact halves and thirds. The space between
+  cards is included, so two half-width cards fit evenly on the same row when their
+  minimum widths allow it. Existing saved widths snap to the nearest allowed size.
   With that handle focused, **Left** and
-  **Right** adjust width, **Home** selects its minimum, and **End** fills the row.
+  **Right** move one snap step, **Home** selects its minimum, and **End** fills the row.
   **Escape** cancels a drag or resize in progress. Card links, session controls,
   and text selection remain available inside the card.
 - With the card itself focused, **Alt + arrow keys** move it earlier or later;

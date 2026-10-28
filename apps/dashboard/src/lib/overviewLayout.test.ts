@@ -62,8 +62,8 @@ describe('Overview widths and order', () => {
     expect(overviewCardWidth('memories', 1_000, small)).toBe(340)
     const saved = resizeOverviewCard(defaults(), 'live-mcp', 800, 1_000)
     expect(overviewCardWidth('live-mcp', 320, saved)).toBe(320)
-    expect(overviewCardWidth('live-mcp', 1_000, saved)).toBe(800)
-    expect(saved.widths['live-mcp']).toBe(.8)
+    expect(overviewCardWidth('live-mcp', 1_000, saved)).toBe(830)
+    expect(saved.widths['live-mcp']).toBe(.83)
     expect(resizeOverviewCard(saved, 'live-mcp', NaN, 1_000)).toBe(saved)
   })
 
@@ -84,10 +84,76 @@ describe('Overview widths and order', () => {
     const layout = defaults()
     expect(overviewMoveKey(layout, 'memories', 'ArrowLeft')).toBe(layout)
     expect(overviewMoveKey(layout, 'memories', 'Tab')).toBeNull()
-    expect(overviewResizeKey('ArrowLeft', 500, 'live-mcp', 1_000)).toBe(476)
-    expect(overviewResizeKey('ArrowRight', 500, 'live-mcp', 1_000)).toBe(524)
+    expect(overviewResizeKey('ArrowLeft', 745, 'live-mcp', 1_000)).toBe(720)
+    expect(overviewResizeKey('ArrowRight', 745, 'live-mcp', 1_000)).toBe(830)
     expect(overviewResizeKey('Home', 500, 'live-mcp', 1_000)).toBe(720)
     expect(overviewResizeKey('End', 500, 'live-mcp', 1_000)).toBe(1_000)
+  })
+
+  it('snaps near-half drags to equal halves that fit beside an unsized card, including fractional rows', () => {
+    for (const available of [1_201, 1_600, 2_330, 2_330.375]) {
+      const half = overviewCardWidth('embeddings', available, defaults())
+      for (const offset of [-12, 0, 12]) {
+        const changed = resizeOverviewCard(defaults(), 'fact-extraction', half + offset, available)
+        expect(overviewCardWidth('fact-extraction', available, changed)).toBe(half)
+        expect(half * 2 + 20).toBeLessThanOrEqual(available)
+        const reloaded = decodeOverviewLayout(JSON.stringify(changed), ids).layout
+        expect(overviewCardWidth('fact-extraction', available, reloaded)).toBe(half)
+      }
+    }
+  })
+
+  it('keeps thirds aligned and adapts a saved half to another viewport without rounding overflow', () => {
+    const savedHalf = resizeOverviewCard(defaults(), 'fact-extraction', 795, 1_600)
+    for (const available of [1_201, 1_600, 2_330.375]) {
+      const third = overviewCardWidth('memories', available, defaults())
+      const resized = resizeOverviewCard(defaults(), 'services', third + 8, available)
+      expect(overviewCardWidth('services', available, resized)).toBe(third)
+      expect(third * 3 + 40).toBeLessThanOrEqual(available)
+      expect(overviewCardWidth('fact-extraction', available, savedHalf)).toBe(overviewCardWidth('embeddings', available, defaults()))
+    }
+  })
+
+  it('renders legacy near-half preferences on the grid without rewriting storage or card order', () => {
+    const legacy = { ...defaults(), widths: { 'fact-extraction': .50001 } }
+    const storage = { getItem: () => JSON.stringify(legacy), setItem: vi.fn() }
+    const loaded = loadOverviewLayout(storage, 'legacy', ids)
+    expect(loaded.layout).toEqual(legacy)
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(overviewCardWidth('fact-extraction', 1_601, loaded.layout)).toBe(overviewCardWidth('embeddings', 1_601, defaults()))
+  })
+
+  it('preserves the v1 fraction meaning across snap bands and subsequent saves', () => {
+    const legacy = { ...defaults(), widths: { memories: .37 } }
+    const storage = { getItem: () => JSON.stringify(legacy), setItem: vi.fn() }
+    const loaded = loadOverviewLayout(storage, 'legacy', ids)
+    // 37% of 1600 is 592: nearest stop655, rather than520 from a changed codec.
+    expect(overviewCardWidth('memories', 1_600, loaded.layout)).toBe(655)
+    expect(loaded.layout).toEqual(legacy)
+    expect(storage.setItem).not.toHaveBeenCalled()
+    const changed = resizeOverviewCard(loaded.layout, 'memories', 592, 1_600)
+    expect(changed.widths.memories).toBe(655 / 1_600)
+    expect(overviewCardWidth('memories', 1_600, decodeOverviewLayout(JSON.stringify(changed), ids).layout)).toBe(655)
+  })
+
+  it('uses the same grid for keyboard steps and pointer widths, respecting minimum and full-row endpoints', () => {
+    let layout = resizeOverviewCard(defaults(), 'memories', 0, 1_600)
+    const widths = [overviewCardWidth('memories', 1_600, layout)]
+    while (widths.at(-1)! < 1_600) {
+      const next = overviewResizeKey('ArrowRight', widths.at(-1)!, 'memories', 1_600)!
+      layout = resizeOverviewCard(layout, 'memories', next, 1_600)
+      const width = overviewCardWidth('memories', 1_600, layout)
+      expect(width).toBeGreaterThan(widths.at(-1)!)
+      widths.push(width)
+      expect(widths.length).toBeLessThanOrEqual(13)
+    }
+    expect(widths).toContain(790)
+    for (let index = widths.length - 1; index > 0; index--) {
+      expect(overviewResizeKey('ArrowLeft', widths[index], 'memories', 1_600)).toBe(widths[index - 1])
+    }
+    expect(overviewResizeKey('ArrowLeft', 340, 'memories', 1_600)).toBe(340)
+    expect(overviewResizeKey('ArrowRight', 1_600, 'memories', 1_600)).toBe(1_600)
+    expect(overviewCardWidth('memories', 320, layout)).toBe(320)
   })
 })
 

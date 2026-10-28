@@ -224,7 +224,7 @@ export function OverviewLayout({ identity, cards }: {
                 }
               }}>
               <div className="overview-layout-scroll" inert={!!moving}><div className="overview-layout-body">{card.content}</div></div>
-              <Tooltip as="div" className="overview-resize-zone" label={`Resize ${spec.label}. Drag the right edge, or use Left/Right; Home selects minimum width and End fills the row.`}>
+              <Tooltip as="div" className="overview-resize-zone" label={`Resize ${spec.label}. Drag the right edge to snap between widths, or use Left/Right; Home selects minimum width and End fills the row.`}>
                 <button type="button" className="overview-resize-handle" role="separator" aria-orientation="vertical" disabled={!ready || available <= 0 || !!moving}
                   aria-label={`Resize ${spec.label}`} aria-valuemin={Math.round(Math.min(spec.minWidth, available))} aria-valuemax={Math.round(available)} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels wide`}
                   onPointerDown={(event) => beginResize(event, id)} onKeyDown={(event) => {
