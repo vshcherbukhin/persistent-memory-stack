@@ -3,11 +3,9 @@ nav_hidden: true
 ---
 # Documentation Release History
 
-## 2.0.0 - 2026-10-27
+## 2.0.0 - 2026-10-29
 
 [GitHub release v2.0.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.0)
-
-This entry describes the 2.0.0 candidate; publication is pending.
 
 | Service | Version | Change |
 | --- | --- | --- |
@@ -35,11 +33,13 @@ This entry describes the 2.0.0 candidate; publication is pending.
   carries classification and revisions; bounded historical format-1 conversion
   preserves old readers without permitting legacy save/update bypasses.
 - The sidebar displays **Community edition** below the existing product logo.
+- Restore the **Test embeddings** action in Settings.
 - Ollama and Embeddings show Starting until the configured model passes a real
   embedding probe. Memory operations return prompt retry guidance during launch;
   the existing 60-second MCP timeout is unchanged.
 - Memory read, write and update indicators follow Stream MCP in the top panel.
-  Only their dots blink for activity; labels and badge styling stay fixed.
+  Their dots are grey when idle and green and blinking during activity; labels
+  and badge styling stay fixed.
 - Overview cards can be rearranged and resized, with automatic saved browser layouts
   and protected content widths. Live MCP activity and Corpus shape start equally split.
   Hold a card to reveal faint drop positions. Either resize edge snaps to the
@@ -57,14 +57,34 @@ This entry describes the 2.0.0 candidate; publication is pending.
   prerequisite repairs have explicit Install/Start actions.
 - Claude extraction setup explains the one-year subscription token obtained with
   `claude setup-token`, separately from Anthropic Console API billing.
-- Personal document requirements no longer require company accounts or page IDs;
-  obsolete notification and external-page update instructions are removed.
 
 This major release changes memory-tool inputs and retires sharing. Read the
 [contract and migration guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/spaces/personal/knowledge-contract.md)
 before upgrading. Public 1.0.0–1.3.1 installations first stop at 1.3.2; the
 versioned upgrade contract then declares the bridge to 2.0.0. Preserve the full
 snapshot and configuration: a source rollback is not a database rollback.
+
+To update an existing installation, run from its repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 2.0.0
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 2.0.0`.
+For a new installation, follow the
+[v2.0.0 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/README.md).
+
+Validation includes native Codex and Claude client checks, migration and
+backup/restore fixtures, revision and isolation checks, focused browser checks,
+clean dependency installation and isolated Linux image builds. A complete
+fresh-machine wizard installation and the full browser/device matrix were not
+rerun for the final dependency update. Hosted CI is not configured.
+
+Dependency audits report no high or critical findings. Four upstream moderate
+findings remain in the MinIO JavaScript client tree and two low findings in the
+documentation toolchain. See the
+[dependency reproducibility guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/installation/dependency-reproducibility.md)
+for supported versions and compatibility holds.
 
 ## 1.3.2 - 2026-10-24
 
