@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
@@ -24,6 +24,7 @@ test('resolved bridge validation works without installed settings and ignores a 
     writeFileSync(join(root,'docker-compose.yml'),'services:\n  unexpected:\n    image: alpine:3.20\n')
     assert.throws(run)
   } finally {
+    assert.equal(dirname(root), resolve(tmpdir()), 'Cleanup must stay in the owned temporary directory')
     rmSync(root,{recursive:true,force:true})
   }
 })
