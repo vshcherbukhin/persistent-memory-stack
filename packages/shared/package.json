@@ -1,6 +1,6 @@
 {
   "name": "@pm/shared",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "description": "persistent-memory shared core — embedding adapter (ollama/voyage/openai), Qdrant multi-tenant vector layer (named vectors + is_tenant), the dimension/provider switch tool, MinIO blob storage, the BullMQ ingest queue contract, and text extraction + token-aware chunking. Prisma-FREE: deals in plain bytes/vectors/payloads + string ids; callers own the DB.",
@@ -48,12 +48,14 @@
     "switch": "tsx src/switch/cli.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1159.0",
+    "@aws-sdk/lib-storage": "3.1159.0",
+    "@aws-sdk/s3-request-presigner": "3.1159.0",
     "@qdrant/js-client-rest": "1.18.0",
     "bullmq": "5.81.5",
     "ioredis": "5.11.1",
     "js-tiktoken": "1.0.21",
     "mammoth": "1.13.0",
-    "minio": "8.0.7",
     "unpdf": "1.9.1",
     "zod": "4.6.7"
   },

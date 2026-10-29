@@ -17,21 +17,24 @@ nav_order: 80
 
 ## Release dependency notes
 
-Community 1.3.2 refreshes the dashboard, HTTP handling, MCP SDK, Prisma, schema
-validation and mail dependencies to patched releases. The production npm audit
-still reports four moderate package findings in the MinIO 8 client dependency
-chain. The reviewed product uses `query-string.stringify()`, not its affected
-decoding path, and does not call MinIO's notification API that imports the
-affected `stream-json` package. No reachable path to those affected APIs was
-identified in the current product. This is a scoped assessment, not an upstream
-fix; reassess before adding notification or parsing APIs.
+Community 2.0.1 removes the vulnerable parser dependency chains from the storage
+client. A maintained S3 SDK serves the existing local MinIO endpoint with explicit
+local credentials. The server, evidence bucket, object keys and stored data do not
+move. No AWS account is required.
 
-The underlying advisories cover [URI decoding](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr),
-[JSON path filters](https://github.com/advisories/GHSA-528h-pc64-c93x),
-[JSONC parsing](https://github.com/advisories/GHSA-hqr4-qq8f-hg3x), and
-[JSON assembly](https://github.com/advisories/GHSA-mjw6-4jj6-33hc).
-The release retains the supported MinIO client rather than forcing an incompatible
-major override or downgrade solely to suppress an audit finding.
+The documentation CLI uses patched KaTeX 0.18.10, matching the supported renderer
+already used by Mermaid. Its exact override is recorded in the manifest and lock.
+This addresses the [KaTeX trust-restriction advisory](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
+
+`npm run audit:dependencies` checks the workspace, dashboard, wizard and documentation
+lockfiles, including development dependencies. Validation fails on every reported
+severity and on failed or incomplete registry responses. A successful audit records
+no known npm advisories at that time; it does not certify unknown vulnerabilities
+or replace the application's privacy and content gates.
+
+GitHub runs these checks alongside tests, type checking, production builds,
+documentation and release contracts. See the
+[release validation procedure](../../installation/release-validation.md).
 
 ![Security page with no open findings](../../assets/spaces/personal/security-empty.png)
 
