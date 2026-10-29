@@ -14,6 +14,7 @@ const configPath = resolve(documentationDir, 'mermaid-fallback-config.json')
 const manifestPath = resolve(assetsDir, 'manifest.json')
 const mmdcPath = resolve(rootDir, 'apps/documentation/node_modules/@mermaid-js/mermaid-cli/src/cli.js')
 const checkOnly = process.argv.includes('--check')
+const rendererVersion = JSON.parse(await readFile(resolve(rootDir, 'apps/documentation/package.json'), 'utf8')).devDependencies['@mermaid-js/mermaid-cli']
 const mermaidBlock = /^```mermaid\r?\n([\s\S]*?)^```\s*$/gm
 const fallbackImage = /^!\[Diagram fallback: [^\]]+\]\([^)]+\)\r?\n\r?\n/gm
 
@@ -82,7 +83,7 @@ async function collectDiagrams(config) {
 function manifestFor(diagrams) {
   return {
     schemaVersion: 1,
-    generator: '@mermaid-js/mermaid-cli@11.16.0',
+    generator: `@mermaid-js/mermaid-cli@${rendererVersion}`,
     diagrams: diagrams.map(({ fileName, relativeSource, sourceHash }) => ({ fileName, relativeSource, sourceHash })),
   }
 }
