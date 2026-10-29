@@ -8,7 +8,8 @@ nav_order: 18
 # Release validation
 
 GitHub runs **Validate release** for pull requests into `dev` or `master`, pushes
-to those branches and `codex/*` branches, and manual workflow runs. It uses public
+to those two branches, and manual workflow runs. Pull-request updates validate
+feature commits without running a second identical branch-push workflow. It uses public
 Ubuntu runners with read-only repository access. It needs no provider keys, user
 credentials, production data or connection to an installed memory stack.
 
