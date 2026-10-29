@@ -134,14 +134,18 @@ Releases are checked automatically after installation, with no update token or
 setup step. Installing an update remains an explicit action. Install Personal Memories
 first, select an embedding model that fits the machine, and test the extraction
 provider with your own credentials. Review the selected Windows Claude/Codex
-tools and registration level before choosing **Generate & Install**. Shared
-Memories is optional and can be connected later from the local dashboard.
+tools and registration level before choosing **Generate & Install**. Community
+uses one personal knowledge space.
 
 The Environment pre-check screen blocks Next until minimum base RAM, disk,
 CPU, and Docker requirements pass. Ollama is optional here. The Embeddings step
 suggests a model, offers OpenAI/Voyage API choices and tests, and can install or
-start Ollama after you review a local model's requirements. Node and Docker
-prerequisite cards provide manual setup instructions.
+start Ollama after you review a local model's requirements. With WinGet available,
+the prerequisite cards offer fixed-package installation actions for supported
+Node 24, Git for Windows, and Docker Desktop, plus starting Docker Desktop.
+Windows may request approval or a restart. Without WinGet, use the displayed
+official setup instructions. Node and npm must already work before the wizard
+can launch; after a Node upgrade, restart it in a new terminal.
 
 During the Ollama download, a progress bar reports bytes and percentage when
 the total size is known. Verification, installation, startup, and readiness

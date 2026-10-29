@@ -19,7 +19,7 @@ test('start.sh remains valid Bash with LF endings', () => {
 test('starting a cloud embedding stack makes no Ollama HTTP or process calls', () => {
   // Execute only the host readiness block with inert commands, never Compose.
   const begin = source.indexOf('if [ "$EMBED_PROVIDER" = "ollama" ]; then')
-  const end = source.indexOf('"${COMPOSE[@]}" up -d', begin)
+  const end = source.indexOf('node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs"', begin)
   assert.ok(begin > 0 && end > begin)
   const block = source.slice(begin, end)
   for (const provider of ['openai', 'voyage']) {
@@ -33,4 +33,17 @@ ${block}`], { env: { ...hostEnvironment({ bash }), EMBED_PROVIDER: provider, EMB
     assert.equal(result.stderr, '')
     assert.match(result.stdout, /host Ollama is not required/)
   }
+})
+
+test('legacy graph preflight failure prevents whole-stack recreation',()=>{
+  const begin=source.indexOf('node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs"'),end=source.indexOf('"${COMPOSE[@]}" up -d',begin)+'"${COMPOSE[@]}" up -d'.length
+  assert.ok(begin>0&&end>begin)
+  const result=spawnSync(bash,['--noprofile','--norc','-c',`set -e
+node(){ return 97; }
+unexpected_compose(){ echo UNEXPECTED_RECREATE >&2; return 98; }
+COMPOSE=(unexpected_compose)
+REPO_ROOT=/fixture
+ENV_FILE=/fixture/.env.persistent-memory
+${source.slice(begin,end)}`],{env:hostEnvironment({bash}),encoding:'utf8',windowsHide:true})
+  assert.equal(result.status,97,result.stderr);assert.equal(result.stderr,'')
 })

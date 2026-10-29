@@ -55,6 +55,8 @@ export function makeIngestProcessor(deps: WorkerDeps) {
 
     return withWorkerTenant(data, async () => {
       try {
+        const source = await runInTenant((tx: Tx) => tx.source.findFirst({ where: { id: data.sourceId, ownershipState: 'personal' }, select: { id: true } }))
+        if (!source) throw new Error('Source ownership is unresolved; no blob, embedding or graph work is permitted.')
         // ── 1. fetch original from MinIO (BOUNDED read — Phase 12, #8) ────
         // getBufferCapped aborts past deps.maxFileBytes so an over-cap blob can't OOM
         // the worker. Too-large is TERMINAL (no retry — re-running won't shrink it):
@@ -198,10 +200,10 @@ export function makeIngestProcessor(deps: WorkerDeps) {
           : (prior?.versionNumber ?? 1)
         const documentEpisodeKey = `document:${data.documentId}:v${documentGeneration}:${contentHash}`
         const graphGroupId = deriveProjectGraphGroup({
-          secret: config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret',
+          secret: `personal-knowledge-v2:${config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret'}`,
           teamId: data.teamId,
           project: data.project,
-          surface: config.MEMORY_SURFACE ?? (config.DEPLOYMENT_MODE === 'local' ? 'personal' : 'shared'),
+          surface: 'personal',
         })
         if (!deps.graphitiUrl) {
           // Graph disabled / not configured — episode intentionally not attempted.
@@ -221,7 +223,7 @@ export function makeIngestProcessor(deps: WorkerDeps) {
             // Persist a durable retry command. The lifecycle worker reads the
             // current document content and appends the recovered episode.
             await runInTenant((tx: Tx) => tx.graphLifecycleOperation.createMany({
-              data: [{ teamId: data.teamId, project: data.project, subjectKind: 'document', subjectId: data.documentId, operation: 'replace', graphGroupId, graphEpisodeId: documentEpisodeKey }],
+              data: [{ teamId: data.teamId, project: data.project, subjectKind: 'document', subjectId: data.documentId, operation: 'replace', ownershipValidated: true, graphGroupId, graphEpisodeId: documentEpisodeKey }],
               skipDuplicates: true,
             }))
             await setGraphStatus(data.ingestJobId, 'failed').catch(() => {})

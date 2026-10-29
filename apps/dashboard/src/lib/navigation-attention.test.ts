@@ -78,7 +78,8 @@ describe('navigation attention indicators', () => {
     const nav = source('../components/Nav.tsx')
     const resolveForm = source('../app/(dashboard)/security/ResolveAlertForm.tsx')
 
-    expect(nav).toContain('/api/navigation-health?space=${selectedSpace}')
+    expect(nav).toContain('/api/navigation-health?runtime=${watchesRuntime')
+    expect(nav).not.toContain('space=${selectedSpace}')
     expect(nav).toContain("window.addEventListener('pm:navigation-attention-changed'")
     expect(nav).toContain('window.setInterval')
     expect(nav).toContain('securityAlertIndicator(navigationHealth.securityOpen)')

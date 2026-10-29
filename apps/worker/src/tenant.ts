@@ -16,7 +16,7 @@
  * The worker never authors Memory rows in the ingest path, so the ownership floor
  * (created_by_id) is irrelevant here.
  */
-import { tenantStore, type TenantCtx } from '@pm/db'
+import { tenantStore, ownerPrisma, type TenantCtx } from '@pm/db'
 import type { IngestJobData } from '@pm/shared'
 
 export function buildWorkerCtx(job: IngestJobData): TenantCtx {
@@ -48,7 +48,7 @@ export function withWorkerTenant<T>(job: IngestJobData, fn: () => Promise<T>): P
  * team's data via the GUC the policy reads — NOT an ownerPrisma role bypass, so RLS
  * stays the backstop). userId='worker' is a system actor, never a real user.
  */
-export function buildSystemCtx(): TenantCtx {
+export function buildSystemCtx(personalTeamId: string | null = null): TenantCtx {
   return {
     // EMPTY, not 'worker': app.user_id is cast to uuid by pm_current_user_id()
     // (NULLIF(...,'')::uuid) inside the memory owner_floor policy, which Postgres
@@ -57,7 +57,7 @@ export function buildSystemCtx(): TenantCtx {
     // falls through to the is_global_admin() branch. (The ingest ctx keeps 'worker'
     // because it only writes chunks — no owner_floor, no uuid cast.)
     userId: '',
-    teamId: null,
+    teamId: personalTeamId,
     adminLevel: 'superuser',
     isTeamMember: false,
     isTeamAdmin: false,
@@ -67,6 +67,8 @@ export function buildSystemCtx(): TenantCtx {
   }
 }
 
-export function withSystemTenant<T>(fn: () => Promise<T>): Promise<T> {
-  return tenantStore.run(buildSystemCtx(), fn)
+export async function withSystemTenant<T>(fn: () => Promise<T>): Promise<T> {
+  const owner = await ownerPrisma.localIdentity.findUnique({ where: { id: 'singleton' }, select: { teamId: true } })
+  if (!owner) throw new Error('Personal owner mapping is required before maintenance jobs run.')
+  return tenantStore.run(buildSystemCtx(owner.teamId), fn)
 }

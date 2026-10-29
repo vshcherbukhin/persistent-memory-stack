@@ -1,9 +1,8 @@
 'use client'
 
 /**
- * The interactive Memories UI. Reads are universal; edit/delete is gated per role
- * (member → own-created; admin → their team; super-admin → any team). Every
- * team member gets scoped bulk deletion; export/import/rebuild remain admin-only.
+ * The interactive personal Memories UI. The API validates owner scope for every
+ * read and mutation; historical internal roles cannot widen that boundary.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -25,9 +24,13 @@ import { handleMemoryUpdateResult } from '@/lib/memoryUpdateResult'
 import { DashboardTools } from './DashboardTools'
 import { MemoryGraphShell } from './graph/MemoryGraphShell'
 import { NewMemoryModal } from './NewMemoryModal'
+import { KnowledgeFields } from './KnowledgeFields'
+import { ClassificationCatalog } from './ClassificationCatalog'
+import { classificationDraft, classificationFromDraft, operationKey, type ClassifiedUpdate, type UpdateIntent, type KnowledgeResolution } from '@/lib/knowledge'
 import {
   listMemoriesAction,
   createMemoryAction,
+  getMemoryAction,
   searchMemoriesAction,
   updateMemoryAction,
   deleteMemoryAction,
@@ -57,6 +60,7 @@ const CATEGORY_OPTS = [
 type MemoryView = 'list' | 'graph' | 'tools'
 
 const MEMORY_TIME_WIDTH = 112
+const MEMORY_CONTENT_MIN_WIDTH = 300
 const fixedMemoryColumn = (width: number) => `minmax(${width}px, ${width}px)`
 
 const estimateMemoryColumnWidth = (values: string[], min: number, extra = 28, charWidth = 6.8) => {
@@ -208,8 +212,8 @@ export function MemoriesClient({
         return Math.max(84, 28 + count * 26 + Math.max(0, count - 1) * 8)
       }),
     )
-    const contentTrack = 'minmax(0, 1fr)'
-    return showTeamColumn
+    const contentTrack = `minmax(${MEMORY_CONTENT_MIN_WIDTH}px, 1fr)`
+    const columns = showTeamColumn
       ? [
           contentTrack,
           fixedMemoryColumn(projectWidth),
@@ -219,7 +223,7 @@ export function MemoriesClient({
           fixedMemoryColumn(teamWidth),
           fixedMemoryColumn(authorWidth),
           fixedMemoryColumn(actionsWidth),
-        ].join(' ')
+        ]
       : [
           contentTrack,
           fixedMemoryColumn(projectWidth),
@@ -228,7 +232,11 @@ export function MemoriesClient({
           fixedMemoryColumn(MEMORY_TIME_WIDTH),
           fixedMemoryColumn(authorWidth),
           fixedMemoryColumn(actionsWidth),
-        ].join(' ')
+        ]
+    return {
+      template: columns.join(' '),
+      minWidth: MEMORY_CONTENT_MIN_WIDTH + projectWidth + categoryWidth + MEMORY_TIME_WIDTH * 2 + teamWidth + authorWidth + actionsWidth,
+    }
   }, [isAdmin, rows, showTeamColumn, teams, users, who.userId])
 
   const selectMemoryTab = (view: MemoryView) => {
@@ -421,7 +429,7 @@ export function MemoriesClient({
           </>
         ) : null}
       </div>
-        <span className="memory-toolbar-note">Universal read · edit and delete gated by role</span>
+        <span className="memory-toolbar-note">Your personal knowledge space</span>
       </div>
       {activeView === 'list' ? (
         <div className="memory-list-pane">
@@ -505,8 +513,9 @@ export function MemoriesClient({
       </form>
 
       {/* The list */}
-      <div className="gt table-scroll">
-        <div className="gt-head" style={{ gridTemplateColumns: tableColumns }}>
+      <div className="gt table-scroll memory-table">
+        <div className="memory-table-surface" style={{ minWidth: tableColumns.minWidth }}>
+        <div className="gt-head" style={{ gridTemplateColumns: tableColumns.template }}>
           <div>Content</div>
           <div>Project</div>
           <div>Category</div>
@@ -531,7 +540,7 @@ export function MemoriesClient({
                   setViewing(m)
                 }
               }}
-              style={{ gridTemplateColumns: tableColumns }}
+              style={{ gridTemplateColumns: tableColumns.template }}
             >
               <div>
                 <Tooltip label="Open memory details">
@@ -662,8 +671,9 @@ export function MemoriesClient({
             )
           ) : null}
         </div>
+        </div>
       </div>
-      {/* Prototype d-memories: one footnote carries the loaded count and the role gate. */}
+      {/* Keep the loaded count and the personal mutation boundary together. */}
       <p className="note memory-footnote" role="status">
         {rows.length > 0 ? (
           <>
@@ -672,9 +682,7 @@ export function MemoriesClient({
             {!query.trim() && nextCursor ? ' · scroll to load more' : null}.{' '}
           </>
         ) : null}
-        {isPersonalSurface
-          ? 'Edit and delete are gated by role: members → own-authored, team-admin → own team.'
-          : <>Edit and delete are gated by role: members → own-authored, team-admin → own team, super-admin → any team. Cross-team rows show <b>Read-Only</b>.</>}
+        Edits and deletions apply only to your personal memories.
       </p>
         </div>
       ) : activeView === 'graph' ? (
@@ -693,8 +701,8 @@ export function MemoriesClient({
           busy={busy}
           pending={pending}
           onExport={(teamId, project) => exportMemoriesAction({ teamId, project, surface })}
-          onImport={async (memories, teamId, project) => {
-            const response = await importMemoriesAction(memories, teamId, project, surface)
+          onImport={async (archive) => {
+            const response = await importMemoriesAction(archive, surface)
             if (!response.ok) throw new MemoryImportRequestError(response.error, response.rejected ?? false)
             return response.result
           }}
@@ -747,7 +755,10 @@ export function MemoriesClient({
 
       {editing ? (
         <EditModal
+          key={`${editing.id}:${editing.revision ?? 0}`}
           memory={editing}
+          busy={busy}
+          onReload={() => void wrap(async () => setEditing(await getMemoryAction(editing.id, surface)))}
           isAdmin={isAdmin}
           teamLabel={showTeamColumn ? memoryTeamName(editing) : null}
           authorLabel={authorName(editing.createdById)}
@@ -792,7 +803,7 @@ export function MemoriesClient({
               toast.error(result.error)
               return
             }
-            toast.success(result.embeddingStatus === 'pending' ? 'Memory saved. Embedding is queued.' : 'Memory saved and embedded.')
+            toast.success(`Memory saved. Embedding: ${result.embeddingStatus ?? 'pending'}; graph: ${result.graphStatus ?? 'pending'}.`)
             setCreating(false)
             await refresh()
           })}
@@ -1057,9 +1068,29 @@ function MemoryDetailsModal({
         <div className="memory-full-text">{memory.content}</div>
       </section>
       <MemoryDetailBadges memory={memory} teamLabel={teamLabel} authorLabel={authorLabel} />
+      <KnowledgeDetails memory={memory} />
       <MemoryEgoGraph memory={memory} />
     </Modal>
   )
+}
+
+function KnowledgeDetails({ memory }: { memory: Memory }) {
+  const value = memory.classification
+  return <section className="memory-record-section">
+    <div className="section-label">Classification and processing</div>
+    <div className="memory-detail-badges">
+      <DetailBadge label="revision" value={String(memory.revision ?? 'unavailable')} />
+      <DetailBadge label="classification" value={memory.classificationStatus ?? 'legacy_unclassified'} />
+      <DetailBadge label="embedding" value={memory.embeddingStatus ?? 'unknown'} />
+      <DetailBadge label="graph" value={memory.graphStatus ?? 'unknown'} />
+      {memory.processing ? <DetailBadge label="processing" value={memory.processing} /> : null}
+      {value ? <><DetailBadge label="type" value={value.memoryType} /><DetailBadge label="assertion" value={value.assertionStatus} /><DetailBadge label="topic" value={value.primaryTopic} /><DetailBadge label="origin" value={`${value.origin.kind}${value.origin.name ? `: ${value.origin.name}` : ''}`} /><DetailBadge label="applicability" value={value.applicability.state} />{[...value.applicability.projects ?? [], ...value.applicability.systems ?? []].map(name => <span className="chip" key={name}>{name}</span>)}</> : null}
+    </div>
+    {value?.applicability.reason ? <p className="note">{value.applicability.reason}</p> : null}
+    {value?.relationships?.map((relationship, index) => <p className="note" key={`relationship:${index}`}>{relationship.type} → {relationship.target.kind}: {relationship.target.name} · {relationship.status} · sources: {relationship.sourceReferences.join(', ')}</p>)}
+    {value?.sources.map((source, index) => <div key={index} className="memory-record-section"><strong>{source.kind} source: {source.reference}</strong><p>{source.evidence}</p></div>)}
+    <p className="note">Source-reported assertions are not independently verified. Saved content may still await embedding or graph processing.</p>
+  </section>
 }
 
 function MemoryEgoGraph({ memory }: { memory: Memory }) {
@@ -1092,73 +1123,60 @@ function MemoryEgoGraph({ memory }: { memory: Memory }) {
   )
 }
 
-function EditModal({
-  memory,
-  isAdmin,
-  teamLabel,
-  authorLabel,
-  onClose,
-  onSave,
-}: {
-  memory: Memory
-  isAdmin: boolean
-  teamLabel: string | null
-  authorLabel: string
-  onClose: () => void
-  onSave: (patch: { content?: string; project?: string; category?: string }) => void
+function EditModal({ memory, teamLabel, authorLabel, busy, onClose, onReload, onSave }: {
+  memory: Memory; isAdmin: boolean; teamLabel: string | null; authorLabel: string
+  busy: boolean; onClose: () => void; onReload: () => void; onSave: (patch: ClassifiedUpdate) => void
 }) {
   const [content, setContent] = useState(memory.content)
-  const [project, setProject] = useState(memory.project)
-  const [category, setCategory] = useState(memory.category)
-  return (
-    <Modal
-      title="Edit memory"
-      onClose={onClose}
-      width={720}
-      footer={
-        <>
-          <button className="btn secondary" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={() => onSave({ content, project, ...(isAdmin ? { category } : {}) })}>Save &amp; re-embed</button>
-        </>
+  const [draft, setDraft] = useState(() => classificationDraft(memory.classification))
+  const [intent, setIntent] = useState<UpdateIntent | ''>('')
+  const [reason, setReason] = useState('')
+  const [evidence, setEvidence] = useState('')
+  const [reference, setReference] = useState('')
+  const [resolutions, setResolutions] = useState<KnowledgeResolution[]>([])
+  const [error, setError] = useState('')
+  const operation = useRef<{ fingerprint: string; key: string } | null>(null)
+  const submit = () => {
+    try {
+      if (!memory.revision) throw new Error('Current revision is unavailable. Reload the current record before editing.')
+      if (!intent || reason.trim().length < 8 || evidence.trim().length < 8 || reference.trim().length < 3) throw new Error('Choose an update intent and provide a reason, evidence and source reference.')
+      if (content.trim().length < 40) throw new Error('Use at least 40 characters of self-contained content.')
+      const payload = {
+        contractVersion: 2 as const, expectedRevision: memory.revision, intent,
+        changes: { content: content.trim(), classification: classificationFromDraft(draft) },
+        reason: reason.trim(), evidence: [{ kind: 'user' as const, reference: reference.trim(), evidence: evidence.trim() }],
+        ...(resolutions.length ? { resolutions } : {}),
       }
-    >
-      <MemoryMetaRow memory={memory} />
-      <label>
-        <span className="label">Content</span>
-        <textarea rows={6} value={content} onChange={(e) => setContent(e.target.value)} style={{ width: '100%' }} />
-      </label>
-      <div style={{ display: 'grid', gridTemplateColumns: isAdmin ? '1fr 1fr' : '1fr', gap: 14 }}>
-        <label>
-          <span className="label">Project</span>
-          <Input value={project} onChange={(e) => setProject(e.target.value)} />
-        </label>
-        {isAdmin ? (
-          <label>
-            <span className="label">Category</span>
-            <Select
-              ariaLabel="Category"
-              value={category}
-              onChange={setCategory}
-              options={(CATEGORY_OPTS.includes(category) ? CATEGORY_OPTS : [...CATEGORY_OPTS, category]).map((c) => ({ value: c, label: c }))}
-            />
-          </label>
-        ) : null}
-      </div>
-      <MemoryDetailBadges
-        memory={memory}
-        teamLabel={teamLabel}
-        authorLabel={authorLabel}
-        includeCategory={false}
-        includeProject={false}
-      />
-    </Modal>
-  )
+      operation.current = operationKey(operation.current, payload, () => crypto.randomUUID())
+      setError('')
+      onSave({ ...payload, idempotencyKey: operation.current.key })
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Check the update fields.') }
+  }
+  return <Modal title="Edit memory" onClose={onClose} width={820} footer={<>
+    <button type="button" className="btn secondary" onClick={onClose}>Cancel</button>
+    <button type="button" className="btn secondary" disabled={busy} onClick={onReload}>Reload current record</button>
+    <button type="button" className="btn primary" disabled={busy || !memory.revision} onClick={submit}>Save revision</button>
+  </>}>
+    <MemoryMetaRow memory={memory} />
+    {!memory.classification ? <p className="notice warn">Legacy record: supply its classification explicitly. Historical certainty and applicability have not been invented.</p> : null}
+    <p className="note">A conflicting revision keeps your draft open. Reloading replaces the draft; copy your changes first, then reconcile with the current record.</p>
+    {error ? <p className="notice danger" role="alert">{error}</p> : null}
+    <label className="new-memory-field"><span className="label">Content</span><textarea rows={6} value={content} onChange={event => setContent(event.target.value)} style={{ width: '100%' }} /></label>
+    <KnowledgeFields draft={draft} onChange={setDraft} />
+    <label className="new-memory-field"><span className="label">Update intent</span><Select ariaLabel="Update intent" value={intent || null} onChange={value => setIntent(value as UpdateIntent)} options={['correction', 'supersession', 'additional_evidence', 'reclassification'].map(value => ({ value, label: value.replaceAll('_', ' ') }))} /></label>
+    <label className="new-memory-field"><span className="label">Reason for this update</span><Input value={reason} onChange={event => setReason(event.target.value)} /></label>
+    <label className="new-memory-field"><span className="label">Update source reference</span><Input value={reference} onChange={event => setReference(event.target.value)} /></label>
+    <label className="new-memory-field"><span className="label">Evidence for this update</span><textarea rows={3} value={evidence} onChange={event => setEvidence(event.target.value)} style={{ width: '100%' }} /></label>
+    <ClassificationCatalog resolutions={resolutions} onChange={setResolutions} />
+    <MemoryDetailBadges memory={memory} teamLabel={teamLabel} authorLabel={authorLabel} />
+  </Modal>
 }
 
 function MemoryMetaRow({ memory }: { memory: Memory }) {
   return (
     <div className="meta-row">
       <span>id {memory.id.slice(0, 8)}…</span>
+      <span>revision {memory.revision ?? 'unavailable'}</span>
       <span>created {new Date(memory.createdAt).toLocaleString()}</span>
       <span>updated {new Date(memory.recordUpdatedAt).toLocaleString()}</span>
       {memory.sessionId ? <span>session {memory.sessionId.slice(0, 8)}…</span> : null}

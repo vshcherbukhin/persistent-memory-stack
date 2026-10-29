@@ -14,6 +14,8 @@
  */
 import { config } from '../config.ts'
 import { modelDependencyHealth, type ModelDependencyProvider } from './model-dependency-health.ts'
+import { MODEL_REGISTRY } from '@pm/shared'
+import { ollamaReadiness } from './ollama-readiness.ts'
 
 export interface ServiceInfo {
   service: string
@@ -149,7 +151,7 @@ export async function terminateMcpService(service: string): Promise<{ ok: boolea
   return (await call('POST', `/services/${encodeURIComponent(service)}/terminate`)) as { ok: boolean }
 }
 
-type OllamaProbeTarget = { model?: string; provider?: ModelDependencyProvider }
+type OllamaProbeTarget = { model?: string; provider?: ModelDependencyProvider; dim?: number }
 
 function sameOllamaModel(left: string, right: string): boolean {
   return left.replace(/:latest$/, '') === right.replace(/:latest$/, '')
@@ -202,6 +204,12 @@ export async function ollamaInfo(target: OllamaProbeTarget = {}): Promise<Servic
     controllable: false,
     logsAvailable: false,
     ...(configuredModel ? { configuredModel } : { configuredModelState: 'not_configured' }),
+  }
+  if (configuredModel) {
+    const ready = await ollamaReadiness.inspect({ model: configuredModel, dim: target.dim ?? MODEL_REGISTRY[configuredModel]?.nativeDim ?? 0 })
+    return { ...base, state: ready.state === 'ready' ? 'reachable' : ready.state === 'starting' ? 'starting' : ready.state === 'unavailable' ? 'unreachable' : 'reachable',
+      status: ready.message, health: ready.state === 'ready' ? 'healthy' : ready.state === 'starting' ? 'starting' : 'unhealthy',
+      configuredModelState: ready.state === 'model_missing' ? 'missing' : ready.state === 'unavailable' ? undefined : 'present' }
   }
   try {
     const r = await fetch(`${config.OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) })

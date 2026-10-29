@@ -6,7 +6,9 @@ parking notes, or historical debugging logs here.
 
 ## Start Here
 
-- Before non-trivial work, call `recall_context(query, project="persistent-memory-stack")`.
+- Before non-trivial work, call `recall_context(query)` across the authorized personal space.
+  Use `persistent-memory-stack` for this repository's write classification; a project
+  filter is strict and must be explicitly intended.
   If the persistent-memory MCP is unavailable, say so and continue from repo evidence.
 - The full persistent-memory protocol comes from the global installed rule
   `~/.claude/rules/persistent-memory.md` for Global Level installs. This repo's
@@ -20,21 +22,31 @@ parking notes, or historical debugging logs here.
   install/update flow, docs, or package versions.
 - Use `rg`/`rg --files` first for repo search.
 
+## Repository Development Workflow
+
+- Read `.agents/development-workflow.md` from the repository root. Use its bounded
+  implementation, verification, review and resume flow, shared with Codex.
+- Global skills, named custom reviewers and local ledgers are optional aids;
+  a missing skill is not a reason to stop authorized implementation.
+- Current product descriptions are not a veto on an explicitly owner-approved
+  product change. Update the affected rules with the implementation while
+  preserving data-safety and merge/release authorization.
+
 ## Product Model
 
-- Client installs are personal-first: always install a local Personal Memories stack,
-  local dashboard, and stream MCP first, with local or API embeddings chosen for the host.
-- Shared Memories are optional and connected later from the local dashboard with a
-  server-issued connector token. The local dashboard is the single user surface for
-  Personal and Shared memory management.
-- Shared server dashboards are SSO/password operator consoles for super-admins only.
-  Regular users and team admins use their local dashboard; their Shared permissions
-  are exactly what the connector token grants.
+- Community installs one local Personal Memories stack, dashboard and stream MCP.
+  Shared Memories connections, surface switching and mounted-team reads are retired.
+  Historical sharing records/configuration remain preserved outside personal recall.
+- Ownership comes from the validated local identity, never project/folder metadata.
+  Default recall spans the owner's projects and general conversations; explicit
+  filters stay strict. Keep origin, applicability and relevance hints distinct.
+- Use the versioned canonical classified write contract and expected revisions for
+  updates. Preserve source evidence, stable IDs, meaningful history and safety gates.
 - Stream MCP is the only runtime. Legacy Node/stdio values are migration aliases only.
 - Use `server-managed embeddings` and `client-managed embeddings`; keep old
   `server` / `client-bridge` values only as wire/config aliases.
 - Runnable app shells live under `apps/`; local/server deployment spaces live under
-  `spaces/local-personal`, `spaces/local-shared-client`, and `spaces/shared-server`;
+  `spaces/local-personal`; retired deployment-space descriptors are historical;
   capability code lives under `layers/`. Use dashboard wording for the product/app;
   reserve `admin` and `super-admin` for roles or compatibility route names.
 
@@ -60,7 +72,8 @@ parking notes, or historical debugging logs here.
   list in an app, script, or config. `npm run docs:generate` derives `mkdocs.yml`
   from Markdown frontmatter, and the dashboard reader discovers
   `documentation/spaces/` from that same metadata.
-- For documentation changes, run `npm run docs:build` and `npm run docs:check-navigation`.
+- For product documentation changes under `documentation/`, run
+  `npm run docs:build` and `npm run docs:check-navigation`.
   Keep `mkdocs.template.yml` configuration-only: never hand-edit generated `mkdocs.yml`.
 - Development plans, investigation notes, temporary specs, status logs, and working
   documents must go under `.local/documents/`; they are local-only and never committed.
@@ -71,8 +84,12 @@ parking notes, or historical debugging logs here.
 
 ## Verification
 
-- Run the narrowest meaningful tests first, then root checks for commit candidates:
-  `npm run typecheck` and `npm test`.
-- For dashboard-only changes, also run tests from `apps/dashboard/`; for installer changes, run
-  tests from `apps/onboard/`.
+- Follow the evidence-reuse policy in `.agents/development-workflow.md`: focused
+  tests during edits; applicable integration/root checks for the completed code
+  candidate, not every micro-commit. Root code checks are `npm run typecheck`
+  and `npm test`; run affected dashboard/installer suites without duplicating
+  suites already covered by the root run.
+- Instruction-only edits require link/parity/diff checks, not unrelated builds,
+  stack redeploys, browser matrices or product releases. Product-doc changes
+  still require their documented documentation checks.
 - Report exactly what was verified and what was not.

@@ -14,8 +14,9 @@ i=1
 while [ "$i" -le "$attempts" ]; do
   if npm ci "$@"; then
     exit 0
+  else
+    status="$?"
   fi
-  status="$?"
   if [ "$i" -eq "$attempts" ]; then
     echo "npm ci failed after ${attempts} attempts." >&2
     exit "$status"

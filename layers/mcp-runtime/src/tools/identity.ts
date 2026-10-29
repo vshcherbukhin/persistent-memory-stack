@@ -50,7 +50,7 @@ function teamLabel(r: WhoamiResponse): string {
 
 function memoryScopeLabel(r: WhoamiResponse): string {
   if (r.deploymentMode === 'local') return 'Memory search = personal memories in this local stack.'
-  return `Memory search = your team (primary) ∪ ${r.mountedTeams.length} mounted team(s) (additional).`
+  return `Memory search = the validated personal owner space across all projects and general memories.`
 }
 
 export const registerIdentityTools: RegisterFn = (server, { api }) => {
@@ -60,11 +60,9 @@ export const registerIdentityTools: RegisterFn = (server, { api }) => {
     {
       title: 'Show my identity & capability',
       description:
-        'Return your server-DERIVED identity: user, team (null if you are a team-less global ' +
-        'super-admin), adminLevel, and mountedTeams. MEMORY search = your team (primary) ∪ mounted ' +
-        'teams (additional); documents/graph are universally shared. Writes are current-team + ' +
-        'ownership bounded (call this to learn your write capability). A team-less caller cannot ' +
-        'use the MCP at all.',
+        'Return the validated personal owner identity and local capability. Community recall spans ' +
+        'the owner projects and general memories; ownership is independent of folder or project. ' +
+        'Historical mounted credentials confer no access. Identity comes from the server, never tool arguments.',
       inputSchema: {},
       outputSchema: {
         userId: z.string(),
@@ -104,38 +102,6 @@ export const registerIdentityTools: RegisterFn = (server, { api }) => {
             mountedTeams: r.mountedTeams,
             deploymentMode: r.deploymentMode,
           },
-        )
-      } catch (e) {
-        if (e instanceof ApiError) return fromApiError(e)
-        throw e
-      }
-    },
-  )
-
-  // ── list_readable_teams ──────────────────────────────────────────────────────
-  server.registerTool(
-    'list_readable_teams',
-    {
-      title: 'What memory can I read?',
-      description:
-        'MEMORY reads = your own team (primary) ∪ the teams it has MOUNTED (additional). Returns your ' +
-        'own team (the write target) + the mounted team ids. (Documents/graph are universally shared, ' +
-        'separately.) Mounts are managed by an admin in the dashboard.',
-      inputSchema: {},
-      outputSchema: {
-        ownTeam: z.string().nullable(),
-        mountedTeams: z.array(z.string()),
-      },
-      annotations: RO_ANNOTATIONS,
-    },
-    async () => {
-      try {
-        const r = await api.get<WhoamiResponse>('/whoami')
-        return ok(
-          r.deploymentMode === 'local'
-            ? 'Memory: personal memories in this local stack. No Shared Memories team is implied.'
-            : `Memory: your team = ${teamLabel(r)} (primary) + ${r.mountedTeams.length} mounted team(s) (additional).`,
-          { ownTeam: r.teamId, mountedTeams: r.mountedTeams },
         )
       } catch (e) {
         if (e instanceof ApiError) return fromApiError(e)

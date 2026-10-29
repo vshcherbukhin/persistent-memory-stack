@@ -44,7 +44,9 @@ export async function dashboardAuthRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'sso_login_enabled' })
       }
       const email = req.body.email.trim()
-      const user = await ownerPrisma.appUser.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } })
+      const owner = await ownerPrisma.localIdentity.findUnique({ where: { id: 'singleton' }, select: { userId: true, teamId: true } })
+      if (!owner) return reply.code(401).send({ error: 'invalid_credentials' })
+      const user = await ownerPrisma.appUser.findFirst({ where: { id: owner.userId, teamId: owner.teamId, email: { equals: email, mode: 'insensitive' } } })
       if (!user?.passwordHash) return reply.code(401).send({ error: 'invalid_credentials' })
       const ok = await verifyPassword(user.passwordHash, req.body.password)
       if (!ok) return reply.code(401).send({ error: 'invalid_credentials' })

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # persistent-memory-dlp — PII (Presidio) + secret (gitleaks) detection sidecar
 #
@@ -17,7 +17,7 @@
 # ----------------------------------------------------------------------------
 # Stage 1 — builder
 # ----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl ca-certificates \
@@ -28,17 +28,17 @@ RUN python -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-
-# Presidio's default NLP model (en_core_web_lg = what Microsoft's analyzer image
-# ships; matched to the installed spaCy). Lands in the venv → copied to runtime.
-RUN python -m spacy download en_core_web_lg
+COPY requirements.lock build-requirements.lock ./
+# The lock includes the exact spaCy model URL and checksum. Never run the
+# dynamic model downloader during an installation.
+RUN pip install --no-cache-dir --require-hashes -r build-requirements.lock \
+    && pip install --no-cache-dir --no-build-isolation --require-hashes -r requirements.lock \
+    && pip check
 
 # Official gitleaks static binary, pinned + sha256-verified against the release
 # checksums. CGO_ENABLED=0 static Go → runs on the slim runtime with no extra libs.
 ARG GITLEAKS_VERSION=8.30.1
+COPY gitleaks-checksums.txt /app/gitleaks-checksums.txt
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
@@ -52,8 +52,7 @@ RUN set -eux; \
     # save under the REAL asset name so `sha256sum -c` (which reads the name from the
     # checksums line) finds the file it is verifying.
     curl -fsSL -o "$asset" "${base}/${asset}"; \
-    curl -fsSL -o checksums.txt "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"; \
-    grep "$asset" checksums.txt | sha256sum -c -; \
+    grep "$asset" /app/gitleaks-checksums.txt | sha256sum -c -; \
     tar -xzf "$asset" -C /usr/local/bin gitleaks; \
     chmod +x /usr/local/bin/gitleaks; \
     /usr/local/bin/gitleaks version
@@ -61,17 +60,12 @@ RUN set -eux; \
 # ----------------------------------------------------------------------------
 # Stage 2 — runtime
 # ----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:$PATH" \
-    # Presidio's email recognizer uses tldextract, which caches the public-suffix
-    # list. Point it at a writable dir so the non-root user doesn't fail to cache +
-    # retry over HTTP every startup (this sidecar is internet-less; tldextract falls
-    # back to its bundled snapshot, but the writable cache silences the warning).
-    TLDEXTRACT_CACHE=/tmp/tldextract
+    PATH="/opt/venv/bin:$PATH"
 
 RUN groupadd --system app && useradd --system --gid app --no-create-home app
 

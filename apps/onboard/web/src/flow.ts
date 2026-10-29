@@ -1,8 +1,10 @@
 /**
  * Wizard flow graph — pure (no React) so it's unit-testable in a node env.
- * The public full flow installs Personal Memories only. Legacy flow ids retain
- * their existing optional server-connection step for operator compatibility.
+ * All supported flow ids install the local personal stack. Historical flow ids
+ * remain accepted without enabling a connector.
  */
+import { REQUIRED_ENVIRONMENT_CHECKS } from '../../shared/environment'
+
 export type Flow = 'full' | 'engine' | 'mcp'
 
 export type Phase =
@@ -23,8 +25,8 @@ export type Phase =
 
 export const FLOW_PHASES: Record<Flow, Phase[]> = {
   full: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'install', 'done'],
-  engine: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
-  mcp: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'shared', 'install', 'done'],
+  engine: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'install', 'done'],
+  mcp: ['flow', 'prereqs', 'account', 'embedding', 'extraction', 'ecosystem', 'registration', 'rule', 'review', 'install', 'done'],
 }
 
 export interface FlowOptions {
@@ -59,22 +61,20 @@ interface MemorySettings {
 /** Normalize both env review and install submissions, so stale connector state
  * cannot activate a server connection in the public personal-only wizard. */
 export function memorySettingsForFlow(flow: Flow, answers: MemorySettings, serverModel?: string) {
-  const personalOnly = flow === 'full'
-  const shared = !personalOnly && answers.memoryInstallMode === 'personal-and-shared'
   return {
-    personalMemoryEnabled: personalOnly ? true : answers.personalMemoryEnabled,
-    memoryInstallMode: personalOnly ? 'personal-only' as const : answers.memoryInstallMode,
-    defaultMemorySurface: personalOnly ? 'personal' as const : answers.defaultMemorySurface,
-    remoteApiUrl: personalOnly ? '' : answers.remoteApiUrl,
-    remoteOllamaUrl: personalOnly ? '' : answers.remoteOllamaUrl,
-    remoteToken: personalOnly ? '' : answers.remoteToken,
-    sharedApiUrl: shared ? answers.remoteApiUrl : undefined,
-    sharedUserToken: shared ? answers.remoteToken : undefined,
-    pullModel: shared ? serverModel : undefined,
+    personalMemoryEnabled: true,
+    memoryInstallMode: 'personal-only' as const,
+    defaultMemorySurface: 'personal' as const,
+    remoteApiUrl: '',
+    remoteOllamaUrl: '',
+    remoteToken: '',
+    sharedApiUrl: undefined,
+    sharedUserToken: undefined,
+    pullModel: undefined,
   }
 }
 
-export interface PrereqGateState {
+export interface PrereqGateState extends Partial<Record<typeof REQUIRED_ENVIRONMENT_CHECKS[number], { ok: boolean }>> {
   node: { ok: boolean }
   docker: { ok: boolean }
   compose: { ok: boolean }
@@ -85,7 +85,7 @@ export function prereqsBlocked(flow: Flow, p: PrereqGateState | null, options: F
   if (!p) return true
   // Ollama is optional: a machine that can run the stack with remote APIs must
   // reach the embedding-provider selection even without a local model runtime.
-  return !p.node.ok || !p.docker.ok || !p.compose.ok
+  return REQUIRED_ENVIRONMENT_CHECKS.some((key) => p[key]?.ok !== true)
 }
 
 export type ModelPresence = 'installed' | 'will-be-installed'

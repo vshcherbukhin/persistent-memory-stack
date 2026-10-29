@@ -1,6 +1,6 @@
 import { requireSession } from '@/lib/session'
 import { isLocalMode } from '@/lib/deploymentMode'
-import { api, configuredMemorySurfaces } from '@/lib/api'
+import { api } from '@/lib/api'
 import { Nav } from '@/components/Nav'
 import { AppHeader } from '@/components/AppHeader'
 import { ToastProvider } from '@/components/ui/Toast'
@@ -46,8 +46,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Show the logout/lock control in server mode always; in local mode only when a
   // password is set (otherwise there is no session to end).
   const localPwSet = isLocalMode ? (await api.localAuthStatus().catch(() => ({ passwordSet: false }))).passwordSet : false
-  const memorySurfaces = await configuredMemorySurfaces()
-  const sharedConnection = isLocalMode ? await api.getSharedConnection().catch(() => null) : null
 
   return (
     <ToastProvider>
@@ -59,8 +57,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
           roleClass={role.cls}
           profile={profile}
           localMode={isLocalMode}
-          memorySurfaces={memorySurfaces}
-          sharedConnection={sharedConnection}
         />
         <div className="app-main">
           <AppHeader

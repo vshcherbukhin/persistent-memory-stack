@@ -1,7 +1,7 @@
 import { ownerPrisma } from '@pm/db'
 
 export type ModelDependencyCapability = 'fact_extraction' | 'embeddings' | 'ollama_host'
-export type ModelDependencyHealthState = 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+export type ModelDependencyHealthState = 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | 'starting'
 export type ModelDependencyProvider = 'anthropic' | 'openai' | 'ollama' | 'voyage'
 export type ModelDependencyFailureCode =
   | 'fact_extraction_quota_exhausted'
@@ -74,7 +74,7 @@ const MODELS_BY_PROVIDER: Record<ModelDependencyProvider, readonly string[]> = {
 export interface ModelDependencyHealthRecord {
   capability: ModelDependencyCapability
   observerScope: string
-  state: Exclude<ModelDependencyHealthState, 'unknown'>
+  state: Exclude<ModelDependencyHealthState, 'unknown' | 'starting'>
   provider: ModelDependencyProvider | null
   model: string | null
   lastSuccessAt: Date | null
@@ -88,8 +88,9 @@ export interface ModelDependencyHealthRecord {
   updatedAt: Date
 }
 
-export interface SafeModelDependencyHealthDto extends Omit<ModelDependencyHealthRecord, 'state' | 'observedAt' | 'updatedAt'> {
+export interface SafeModelDependencyHealthDto extends Omit<ModelDependencyHealthRecord, 'state' | 'observedAt' | 'updatedAt' | 'failureCode'> {
   state: ModelDependencyHealthState
+  failureCode: ModelDependencyFailureCode | 'embeddings_starting' | null
   observedAt: Date | null
   updatedAt: Date | null
 }

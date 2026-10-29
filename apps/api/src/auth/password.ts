@@ -29,7 +29,7 @@ const GENERATED_WORDS = [
 ]
 
 /** argon2id params — read at call time so env overrides apply (match token-service/seed). */
-function argonOptions(): argon2.Options {
+function argonOptions(): argon2.HashOptions {
   return {
     type: argon2.argon2id,
     memoryCost: config.ARGON2_MEMORY_KIB,

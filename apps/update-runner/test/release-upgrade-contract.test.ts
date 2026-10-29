@@ -19,10 +19,10 @@ describe('release upgrade contract', () => {
       schemaVersion: 1,
       release: rootPackage.version,
       minimumSupportedSource: '1.0.0',
-      compatibleMajorLine: 1,
-      directFrom: `>=1.0.0 <${rootPackage.version}`,
-      bridges: [],
-      requiredStops: [],
+      compatibleMajorLine: 2,
+      directFrom: `>=1.3.2 <${rootPackage.version}`,
+      bridges: [{ from: '>=1.3.2 <2.0.0', to: '2.0.0', requires: '>=1.3.2' }],
+      requiredStops: [{ when: '>=1.0.0 <1.3.2', release: '1.3.2' }],
       coordinator: { minimumVersion: 1, bootstrap: true },
     })
   })

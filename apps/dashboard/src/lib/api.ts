@@ -2,6 +2,9 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { SESSION_COOKIE } from './session'
 import { readApiErrorPayload } from './apiErrorPayload'
+import type { ClassifiedWrite, ClassifiedUpdate, KnowledgeCatalog } from './knowledge'
+import type { MemoryArchiveImport } from './memoryArchive'
+import type { MemoryActivitySnapshot } from './memoryActivity'
 import type {
   WhoAmI,
   Team,
@@ -18,8 +21,6 @@ import type {
   WorkerLiveness,
   WorkerLog,
   WorkerAction,
-  Grant,
-  GrantsMatrix,
   Settings,
   SettingsUpdateResult,
   Profile,
@@ -39,8 +40,6 @@ import type {
   PasswordLoginResult,
   DashboardLoginMode,
   PasswordResetResult,
-  SharedConnectionStatus,
-  SharedConnectionTestResult,
   BrowserPushNotificationType,
   BrowserPushPreferencesResult,
   BrowserPushSendResult,
@@ -67,18 +66,22 @@ import type {
  */
 
 const BASE = process.env.API_URL ?? 'http://persistent-memory-api:8090'
-const SHARED_MEMORY_BASE = process.env.PM_SHARED_API_URL?.replace(/\/$/, '') ?? ''
-const SHARED_MEMORY_TOKEN = process.env.PM_SHARED_USER_TOKEN ?? ''
-const MEMORY_INSTALL_MODE = process.env.PM_MEMORY_INSTALL_MODE ?? 'shared-only'
-
+function assertPersonalEndpoint(base: string): void {
+  const endpoint = new URL(base)
+  const prefix = process.env.PM_CONTAINER_PREFIX ?? 'persistent-memory'
+  if (!['localhost', '127.0.0.1', '[::1]', 'host.docker.internal', `${prefix}-api`].includes(endpoint.hostname) || endpoint.username || endpoint.password) {
+    throw new ApiError(410, 'remote_memories_retired', 'Community requires its local personal API. A retired remote/shared endpoint will not be contacted.')
+  }
+}
 export function normalizeMemorySurface(value: unknown): MemorySurface {
-  return value === 'shared' ? 'shared' : 'personal'
+  if (value != null && value !== '' && value !== 'personal') {
+    throw new ApiError(410, 'sharing_retired', 'Community supports Personal Memories only. Remove the obsolete surface/space selection.')
+  }
+  return 'personal'
 }
 
 export async function configuredMemorySurfaces(): Promise<MemorySurface[]> {
-  if (MEMORY_INSTALL_MODE === 'personal-and-shared') return ['personal', 'shared']
-  if (MEMORY_INSTALL_MODE === 'shared-only') return ['shared']
-  return ['personal', 'shared']
+  return ['personal']
 }
 
 export class UnauthorizedError extends Error {
@@ -112,6 +115,7 @@ function normalizeDp(r: Memory & { sourceTeam: string }): Memory {
 
 async function callAt<T>(base: string, path: string, init?: RequestInit, tokenOverride?: string | null): Promise<T> {
   const token = tokenOverride === undefined ? (await cookies()).get(SESSION_COOKIE)?.value : tokenOverride
+  assertPersonalEndpoint(base)
   const headers = new Headers(init?.headers)
   if (init?.body != null && !headers.has('content-type')) headers.set('content-type', 'application/json')
   if (token) headers.set('authorization', `Bearer ${token}`)
@@ -144,31 +148,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return callAt<T>(BASE, path, init)
 }
 
-async function sharedConnectionCredentials(): Promise<{ apiUrl: string; token: string } | null> {
-  if (MEMORY_INSTALL_MODE === 'shared-only') return null
-  const status = await call<SharedConnectionStatus>('/dashboard/shared-connection?includeToken=true').catch(() => null)
-  if (status?.configured && status.apiUrl && status.token) {
-    return { apiUrl: status.apiUrl.replace(/\/$/, ''), token: status.token }
-  }
-  if (SHARED_MEMORY_BASE && SHARED_MEMORY_TOKEN) {
-    return { apiUrl: SHARED_MEMORY_BASE, token: SHARED_MEMORY_TOKEN }
-  }
-  return null
-}
-
 async function callMemory<T>(surface: MemorySurface, path: string, init?: RequestInit): Promise<T> {
-  if (surface !== 'shared') return call<T>(path, init)
-  if (MEMORY_INSTALL_MODE === 'shared-only') return call<T>(path, init)
-  const connection = await sharedConnectionCredentials()
-  if (!connection) {
-    throw new ApiError(503, 'shared_surface_unconfigured', 'Shared memory surface is not configured.')
-  }
-  return callAt<T>(connection.apiUrl, path, init, connection.token)
+  normalizeMemorySurface(surface)
+  return call<T>(path, init)
 }
 
 /** Validate a raw token against /whoami WITHOUT touching the session cookie.
  * Used by the login action before a cookie exists. Returns null on 401. */
 export async function whoamiWithToken(token: string): Promise<WhoAmI | null> {
+  assertPersonalEndpoint(BASE)
   const res = await fetch(`${BASE}/whoami`, {
     headers: { authorization: `Bearer ${token}` },
     cache: 'no-store',
@@ -260,20 +248,13 @@ export const api = {
   },
   searchMemories: (b: { query: string; teamId?: string; project?: string; category?: string; scoreMin?: number; scoreMax?: number; limit?: number }, surface: MemorySurface = 'personal') =>
     callMemory<{ results: Memory[]; total: number }>(surface, '/dashboard/memories/search', { method: 'POST', body: JSON.stringify(b) }),
-  /** POST /memories — the Shape-gated write path agents use, reused for hand-written memories. */
-  createMemory: (
-    b: { content: string; project: string; metadata: { category: string; entities: string[]; source: string } },
-    surface: MemorySurface = 'personal',
-  ) =>
-    callMemory<{ id: string; shape: string; category: string; project: string; embeddingStatus: 'pending' | 'embedded' }>(
-      surface,
-      '/memories',
-      { method: 'POST', body: JSON.stringify(b) },
-    ),
+  getMemoryCatalog: (cursor?: string) => call<KnowledgeCatalog>(`/memory-catalog?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
+  createMemory: (body: ClassifiedWrite, surface: MemorySurface = 'personal') =>
+    callMemory<Memory>(surface, '/memories', { method: 'POST', body: JSON.stringify(body) }),
   getMemory: (id: string, surface: MemorySurface = 'personal') => callMemory<Memory>(surface, `/dashboard/memories/${id}`),
   updateMemory: (
     id: string,
-    b: { content?: string; project?: string; category?: string; entities?: string[] },
+    b: ClassifiedUpdate,
     surface: MemorySurface = 'personal',
   ) => callMemory<Memory>(surface, `/dashboard/memories/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   previewMemoryDelete: (id: string, surface: MemorySurface = 'personal') =>
@@ -292,12 +273,12 @@ export const api = {
     const qs = params.toString()
     return callMemory<MemoryExportEnvelope>(surface, `/dashboard/memories/export${qs ? `?${qs}` : ''}`)
   },
-  importMemories: (memories: unknown[], teamId?: string, project?: string, surface: MemorySurface = 'personal') =>
+  importMemories: (archive: MemoryArchiveImport, surface: MemorySurface = 'personal') =>
     callMemory<MemoryImportResult>(surface, '/dashboard/memories/import', {
       method: 'POST',
       // Return a useful timeout result before either Node proxy's headers timeout.
       signal: AbortSignal.timeout(120_000),
-      body: JSON.stringify({ memories, notify: false, ...(teamId ? { teamId } : {}), ...(project ? { project } : {}) }),
+      body: JSON.stringify({ ...archive, notify: false }),
     }),
 
   // ── Memory Graph (metadata-safe, tenant-derived read model) ───────────────
@@ -335,20 +316,8 @@ export const api = {
     return callMemory<MemoryGraphActivityResult>(surface, `/graph/activity?${params.toString()}`)
   },
 
-  // ── Mounts (directional cross-team MEMORY read links; gate the MCP) ───────────
-  getGrants: () => call<GrantsMatrix>('/dashboard/grants'),
-  setGrant: (grantorTeamId: string, granteeTeamId: string) =>
-    call<Grant>('/dashboard/grants', {
-      method: 'POST',
-      body: JSON.stringify({ grantorTeamId, granteeTeamId }),
-    }),
-  unsetGrant: (grantorTeamId: string, granteeTeamId: string) =>
-    call<void>('/dashboard/grants', {
-      method: 'DELETE',
-      body: JSON.stringify({ grantorTeamId, granteeTeamId }),
-    }),
-
   // ── Local service monitor (Docker socket; mutate ops are superuser-only) ──────
+  memoryActivity: (signal?: AbortSignal) => call<MemoryActivitySnapshot>('/dashboard/memory-activity', { signal }),
   listServices: () => call<{ services: ServiceStatus[]; mcpClients: McpClientStatus[]; capabilityHealth: DashboardCapabilityHealth }>('/dashboard/services'),
   serviceAction: (service: string, action: 'start' | 'stop' | 'restart' | 'terminate') =>
     call<{ ok: boolean }>(`/dashboard/services/${encodeURIComponent(service)}/${action}`, { method: 'POST' }),
@@ -400,7 +369,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...b, universal: true }),
     }).then((r) => ({ results: r.results.map(normalizeDp) })),
-  dpUpdateMemory: (id: string, b: { content?: string; project?: string }, surface: MemorySurface = 'personal') =>
+  dpGetMemory: (id: string, surface: MemorySurface = 'personal') => callMemory<Memory>(surface, `/memories/${id}`),
+  dpUpdateMemory: (id: string, b: ClassifiedUpdate, surface: MemorySurface = 'personal') =>
     callMemory<Memory & { sourceTeam: string }>(surface, `/memories/${id}`, { method: 'PATCH', body: JSON.stringify(b) }).then(normalizeDp),
   dpDeleteMemory: (id: string, surface: MemorySurface = 'personal') => callMemory<void>(surface, `/memories/${id}`, { method: 'DELETE' }),
   dpPreviewBulkDeleteMemories: (project?: string, surface: MemorySurface = 'personal') =>
@@ -431,13 +401,6 @@ export const api = {
     call<Settings>('/dashboard/settings/mcp-session-timeout', { method: 'PUT', body: JSON.stringify(b) }),
   putDashboardLoginMode: (mode: DashboardLoginMode) =>
     call<Settings>('/dashboard/settings/dashboard-login', { method: 'PUT', body: JSON.stringify({ mode }) }),
-  getSharedConnection: () => call<SharedConnectionStatus>('/dashboard/shared-connection'),
-  testSharedConnection: (b: { apiUrl: string; token: string }) =>
-    call<SharedConnectionTestResult>('/dashboard/shared-connection/test', { method: 'POST', body: JSON.stringify(b) }),
-  saveSharedConnection: (b: { apiUrl: string; token: string }) =>
-    call<SharedConnectionStatus>('/dashboard/shared-connection', { method: 'PUT', body: JSON.stringify(b) }),
-  disconnectSharedConnection: () =>
-    call<SharedConnectionStatus>('/dashboard/shared-connection', { method: 'DELETE' }),
 
   // ── Usage metrics ──────────────────────────────────────────────────────────
   getUsage: (window: UsageWindow, surface: MemorySurface = 'personal') =>

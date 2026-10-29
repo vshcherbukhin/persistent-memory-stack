@@ -1,21 +1,28 @@
 ---
-title: Hosted Server Dashboard Documentation
-description: Current availability of the hosted server control-plane dashboard.
+title: Retired Shared Memories server
+description: Historical compatibility note for removed sharing functionality.
 icon: admin_panel_settings
 dashboard_space: shared-server
-nav_title: In development
+nav_title: Retired sharing
 nav_group: spaces
 nav_group_title: Spaces
 nav_group_order: 20
 nav_section: hosted-server
-nav_section_title: Hosted Server Dashboard Documentation
+nav_section_title: Historical sharing
 nav_section_order: 30
 nav_order: 10
 ---
-# Hosted Server Dashboard Documentation
 
-**Status: In development.**
+# Retired Shared Memories server
 
-This is a separate hosted control-plane dashboard for superusers only. Its user
-guide is in development. It is not a third local space and does not replace the
-local Personal or Shared Space dashboards.
+Shared Memories functionality is retired in Community. The dashboard has no
+personal/shared switch, connector or grant controls. Historical connector values,
+ownership evidence and schema tables can remain for recovery; they do not activate
+remote requests or confer access to the personal space.
+
+Previously shared, foreign or unresolved-ownership records are preserved outside
+active personal recall. A project/folder label does not prove ownership. Do not
+combine historical partitions or delete their evidence to complete an upgrade.
+
+Use the [Personal Memories guide](../personal/index.md). Historical release notes
+remain available as records of earlier behavior, not current setup instructions.

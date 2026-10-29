@@ -26,6 +26,7 @@ import { planRegistration } from '../server/register.ts'
 import { testExtractionConnection } from '../server/extraction-test.ts'
 import { hostCommand } from '../server/host.ts'
 import { parseEnvFile } from '../server/install.ts'
+import { REQUIRED_ENVIRONMENT_CHECKS } from '../shared/environment.ts'
 
 function execFileSync(command: string, args: string[], options: Omit<ExecFileSyncOptions, 'encoding'> & { encoding?: 'utf8' } = {}): string {
   const resolved = hostCommand(command, command === 'bash' ? args.map((arg) => /^[a-z]:[\\/]/i.test(arg) ? arg.replaceAll('\\', '/') : arg) : args, { env: options.env ?? process.env })
@@ -72,11 +73,14 @@ describe('genSecrets', () => {
 describe('local dashboard URL', () => {
   it('uses the passwordless localhost dashboard URL and does not prompt for sudo before the wizard opens', () => {
     const script = readFileSync(new URL('../../../deploy/scripts/onboard.sh', import.meta.url), 'utf8')
+    const launcher = readFileSync(new URL('../../../scripts/host-lifecycle.mjs', import.meta.url), 'utf8')
     const server = readFileSync(new URL('../server/index.ts', import.meta.url), 'utf8')
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
 
-    expect(script).toContain('DASHBOARD_URL="${DASHBOARD_URL:-${ADMIN_URL:-http://localhost:${DASHBOARD_PORT}}}"')
-    expect(script).toContain('DASHBOARD_URL="$DASHBOARD_URL" ADMIN_URL="$DASHBOARD_URL"')
+    expect(script).toContain('exec node scripts/host-lifecycle.mjs install "$@"')
+    expect(script).not.toContain('npm install')
+    expect(launcher).toContain('env.DASHBOARD_URL ?? env.ADMIN_URL ?? `http://localhost:${env.PM_DASHBOARD_PORT ?? 3200}`')
+    expect(launcher).toContain('DASHBOARD_URL: dashboardUrl, ADMIN_URL: dashboardUrl')
     expect(script).not.toContain('ensure_dashboard_host')
     expect(script).not.toContain('sudo tee -a /etc/hosts')
     expect(server).toContain("const DEFAULT_DASHBOARD_URL = 'http://localhost:3200'")
@@ -198,7 +202,7 @@ describe('renderEnv', () => {
     expect(isolatedEnv).toContain('PM_SHARED_API_URL=')
     expect(isolatedEnv).toContain('LOCAL_USER_PASSWORD_CONFIGURED_AT=2026-02-03T04:05:06.000Z')
   })
-  it('renders personal + shared routing settings for remote installs with isolated personal memory', () => {
+  it('cannot activate sharing from old installer answers', () => {
     const routedEnv = renderEnv({
       ...answers,
       personalMemoryEnabled: true,
@@ -209,13 +213,13 @@ describe('renderEnv', () => {
     }, testSecrets)
 
     expect(routedEnv).toContain('PM_PERSONAL_MEMORY_ENABLED=true')
-    expect(routedEnv).toContain('PM_MEMORY_INSTALL_MODE=personal-and-shared')
+    expect(routedEnv).toContain('PM_MEMORY_INSTALL_MODE=personal-only')
     expect(routedEnv).toContain('PM_DEFAULT_MEMORY_SURFACE=personal')
     expect(routedEnv).toContain('PM_PERSONAL_API_URL=http://localhost:8090')
-    expect(routedEnv).toContain('PM_SHARED_API_URL=https://memory.example.test')
-    expect(routedEnv).toContain('PM_SHARED_USER_TOKEN=tid.secret')
+    expect(routedEnv).not.toContain('https://memory.example.test')
+    expect(routedEnv).not.toContain('tid.secret')
   })
-  it('rewrites loopback shared API URLs for the Docker stream MCP service', () => {
+  it('does not write newly supplied connector settings', () => {
     const routedEnv = renderEnv({
       ...answers,
       mcpRuntime: 'stream',
@@ -226,8 +230,8 @@ describe('renderEnv', () => {
       sharedUserToken: 'tid.secret',
     }, testSecrets)
 
-    expect(routedEnv).toContain('PM_SHARED_API_URL=http://host.docker.internal:12090')
-    expect(routedEnv).toContain('PM_SHARED_USER_TOKEN=tid.secret')
+    expect(routedEnv).not.toContain('12090')
+    expect(routedEnv).not.toContain('tid.secret')
   })
   it('includes every required key the stack reads', () => {
     for (const key of ['QDRANT_URL', 'REDIS_URL', 'MINIO_ENDPOINT', 'GRAPHITI_URL', 'API_PORT', 'SEMAPHORE_LIMIT']) {
@@ -338,7 +342,8 @@ describe('prereq parsers', () => {
   })
   it('installer aliases allow API configuration without Ollama; the embeddings step enforces local readiness', () => {
     const p = {
-      node: { ok: true, detail: 'Node v25.6.1.' },
+      ...Object.fromEntries(REQUIRED_ENVIRONMENT_CHECKS.map(key => [key, { ok: true, detail: 'Verified.' }])),
+      node: { ok: true, detail: 'Node v24.14.1.' },
       docker: { ok: true, detail: 'Docker daemon is running.' },
       compose: { ok: true, detail: 'Docker Compose v2.32.1.' },
       ollama: { ok: false, detail: 'Ollama not reachable.' },
@@ -746,7 +751,7 @@ describe('install steps', () => {
     expect(steps.map((s) => s.id)).not.toContain('build-mcp-node')
     expect(steps.find((s) => s.id === 'compose-up')?.envOverride?.COMPOSE_PROFILES).toBe('mcp-stream')
   })
-  it('shared connection step happens after local personal stack verification', () => {
+  it('legacy connector answers never schedule a remote connection or model pull', () => {
     const steps = buildSteps({
       flow: 'engine',
       mcpRuntime: 'stream',
@@ -774,13 +779,11 @@ describe('install steps', () => {
       'restart-app',
       'wait-mcp',
       'verify',
-      'pull-shared-model',
-      'shared-connect',
       'register',
       'write-rule',
     ])
-    expect(steps.findIndex((s) => s.id === 'verify')).toBeLessThan(steps.findIndex((s) => s.id === 'shared-connect'))
-    expect(steps.find((s) => s.id === 'shared-connect')?.kind).toBe('fn')
+    expect(steps.map(step => step.id)).not.toContain('shared-connect')
+    expect(steps.map(step => step.id)).not.toContain('pull-shared-model')
   })
   it('extractToken matches the seed banner, "already present", or neither', () => {
     expect(extractToken('  Token: abc123.secretvalue\n')).toEqual({ token: 'abc123.secretvalue' })

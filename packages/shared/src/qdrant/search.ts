@@ -28,6 +28,7 @@ export interface SearchArgs {
   /** Team-scoped fallback (own first). Ignored when allTeams is true. */
   readableTeamIds?: string[]
   project?: string
+  projects?: string[]
   sourceKind?: VectorSourceKind
   limit?: number
 }
@@ -50,7 +51,11 @@ export async function searchVectors(
     ? []
     : args.readableTeamIds!.map((tid) => ({ key: 'team_id', match: { value: tid } }))
   const must: Array<Record<string, unknown>> = []
-  if (args.project) must.push({ key: 'project', match: { value: args.project } })
+  const projects = args.projects ?? (args.project ? [args.project] : [])
+  if (projects.length) must.push({ should: projects.flatMap(project => [
+    { key: 'project', match: { value: project } },
+    { key: 'project_associations', match: { value: project } },
+  ]) })
   if (args.sourceKind) must.push({ key: 'source_kind', match: { value: args.sourceKind } })
 
   const res = await client.query(COLLECTION, {
@@ -65,6 +70,7 @@ export async function searchVectors(
     const pl = (p.payload ?? {}) as Record<string, unknown>
     return {
       pointId: String(p.id),
+      ...(typeof pl.revision === 'number' ? { revision: pl.revision } : {}),
       rowId: String(pl.row_id ?? ''),
       teamId: String(pl.team_id ?? ''),
       project: String(pl.project ?? ''),

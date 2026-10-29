@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
+import { Prisma } from '@pm/db'
 import {
   buildMemoryGraphBackfillWhere,
   replayMemoryGraphBackfillRows,
@@ -19,6 +20,7 @@ describe('buildMemoryGraphBackfillWhere', () => {
   it('targets only retryable memory graph rows', () => {
     expect(buildMemoryGraphBackfillWhere()).toEqual({
       graphStatus: { in: ['pending', 'failed'] },
+      ownershipState: 'personal', deletedAt: null, knowledge: { not: Prisma.DbNull },
     })
   })
 })
@@ -43,6 +45,7 @@ describe('replayMemoryGraphBackfillRows', () => {
       name: 'mem:m1',
       episodeBody: 'current content for m1',
       referenceTime: row('m1').graphVersion,
+      idempotencyKey: `memory:m1:revision:${row('m1').graphVersion.toISOString()}`,
     })
   })
 

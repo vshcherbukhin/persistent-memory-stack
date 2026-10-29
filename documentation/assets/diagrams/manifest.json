@@ -40,7 +40,7 @@
     {
       "fileName": "components-onboard--01.svg",
       "relativeSource": "components/onboard.md",
-      "sourceHash": "4e07ed4080be296b838924d45dc47e6b4ab7e0351285efb0f1ab446710084010"
+      "sourceHash": "881fae971a35550e656962cae81033861a1538bce3357c71da197b41dc7a5392"
     },
     {
       "fileName": "components-shared--01.svg",
@@ -56,16 +56,6 @@
       "fileName": "readme--01.svg",
       "relativeSource": "readme.md",
       "sourceHash": "242fce5db17d6b0faac3f5067568434329e46c998d1a6819b99539d633bee6a7"
-    },
-    {
-      "fileName": "stack-architecture-access-model--01.svg",
-      "relativeSource": "stack-architecture/access-model.md",
-      "sourceHash": "d5d06eb0a550304e662cf9d5a667c598e4450173019ba77b5774d58e17878eb1"
-    },
-    {
-      "fileName": "stack-architecture-architecture--01.svg",
-      "relativeSource": "stack-architecture/architecture.md",
-      "sourceHash": "5d910487b4026ea2b5c1528f35eef35ba30d6b09f7de424340cd259518d59e77"
     },
     {
       "fileName": "stack-architecture-embedding--01.svg",

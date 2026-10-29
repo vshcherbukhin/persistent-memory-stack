@@ -1,57 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { registerMemoryTools } from '../src/tools/memories.ts'
 import type { Runtime } from '../src/runtime.ts'
 
-describe('project memory-surface binding', () => {
-  it('elicits and persists the first named-project choice before writing', async () => {
-    const personalApi = {
-      get: vi.fn(async () => ({ project: 'alpha', surface: null })),
-      post: vi.fn(async (path: string) => {
-        if (path === '/project-memory-bindings') return { project: 'alpha', surface: 'shared' }
-        throw new Error(`unexpected personal POST ${path}`)
-      }),
-    }
-    const sharedApi = {
-      post: vi.fn(async (path: string) => {
-        if (path === '/memories') {
-          return {
-            id: 'memory-1', shape: 'atomic', category: 'fix', project: 'alpha',
-            restructured: false, content: 'stored', embeddingStatus: 'embedded',
-            memoryTier: 'semantic', sourceProvenance: 'user_direct', confidence: 1,
-          }
-        }
-        throw new Error(`unexpected shared POST ${path}`)
-      }),
-    }
-    const base: Runtime = {
-      mode: 'server', deploymentMode: 'local', pin: { modelId: 'test', dim: 1 }, bridge: null,
-    }
-    const runtime: Runtime = {
-      ...base,
-      memorySurfaces: {
-        defaultSurface: 'personal',
-        personal: { api: personalApi as never, runtime: base },
-        shared: { api: sharedApi as never, runtime: base },
-      },
-    }
-    const tools = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>()
-    const elicitInput = vi.fn(async () => ({ action: 'accept', content: { surface: 'shared' } }))
-    const server = {
-      server: { elicitInput },
-      registerTool(name: string, _options: unknown, handler: (input: Record<string, unknown>) => Promise<unknown>) {
-        tools.set(name, handler)
-      },
-    }
+describe('retired project memory-surface bindings', () => {
+  it('stores classified knowledge with the validated personal API without eliciting or reading an old project binding', async () => {
+    const personalApi = { get: vi.fn(), post: vi.fn(async () => ({ id: 'memory-1', revision: 1 })) }
+    const sharedApi = { post: vi.fn() }
+    const base: Runtime = { mode: 'server', deploymentMode: 'local', pin: { modelId: 'test', dim: 1 }, bridge: null }
+    const runtime: Runtime = { ...base, memorySurfaces: { defaultSurface: 'personal', personal: { api: personalApi as never, runtime: base }, shared: { api: sharedApi as never, runtime: base } } }
+    const tools = new Map<string, { schema: z.ZodRawShape; handler: (input: unknown) => Promise<unknown> }>()
+    const elicitInput = vi.fn()
+    const server = { server: { elicitInput }, registerTool(name: string, options: { inputSchema: z.ZodRawShape }, handler: (input: unknown) => Promise<unknown>) { tools.set(name, { schema: options.inputSchema, handler }) } }
     registerMemoryTools(server as never, { api: personalApi, runtime } as never)
-
-    await tools.get('add_memory')!({
-      content: '[component_alpha] The project binding was selected by the user. Fix: store it before the first memory write.',
-      project: 'alpha',
-      metadata: { category: 'fix', entities: ['component_alpha'], source: 'user-correction' },
-    })
-
-    expect(elicitInput).toHaveBeenCalledOnce()
-    expect(personalApi.post).toHaveBeenCalledWith('/project-memory-bindings', { project: 'alpha', surface: 'shared' })
-    expect(sharedApi.post).toHaveBeenCalledWith('/memories', expect.objectContaining({ project: 'alpha' }))
+    const write = { contractVersion: 2, content: 'The synthetic owner proposed a focused retrieval evaluation before adoption.', classification: {
+      memoryType: 'decision', assertionStatus: 'proposal', primaryTopic: 'memory-retrieval', topicTags: ['memory-retrieval'],
+      origin: { kind: 'project', name: 'alpha' }, applicability: { state: 'associated', projects: ['alpha', 'beta'] },
+      sources: [{ kind: 'user', reference: 'conversation:fixture', evidence: 'The owner explicitly proposed evaluation; adoption was not decided.' }],
+    }, idempotencyKey: 'fixture-operation-1' }
+    const add = tools.get('add_memory')!
+    await add.handler(z.object(add.schema).parse(write))
+    expect(personalApi.post).toHaveBeenCalledWith('/memories', write)
+    expect(personalApi.get).not.toHaveBeenCalled()
+    expect(sharedApi.post).not.toHaveBeenCalled()
+    expect(elicitInput).not.toHaveBeenCalled()
   })
 })

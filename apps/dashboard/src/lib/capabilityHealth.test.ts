@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { capabilityHealthPresentation } from './capabilityHealth'
 
+it('shows starting with retry guidance even if a previous probe succeeded', () => {
+  expect(capabilityHealthPresentation({
+    capability: 'embeddings', observerScope: 'server', state: 'starting', provider: 'ollama', model: 'qwen3-embedding:4b',
+    lastSuccessAt: '2026-10-27T00:00:00Z', firstFailureAt: null, lastFailureAt: null, failureCode: 'embeddings_starting',
+    safeMessage: 'Embeddings service is still launching.', retryable: true, consecutiveFailures: 0,
+    observedAt: '2026-10-28T00:00:00Z', updatedAt: '2026-10-28T00:00:00Z',
+  })).toMatchObject({ badge: 'starting', tone: 'warn', recovery: 'Wait for the embedding model to become ready, then retry.' })
+})
+
 describe('capabilityHealthPresentation', () => {
   it('makes quota exhaustion a red, actionable, safe status', () => {
     expect(capabilityHealthPresentation({

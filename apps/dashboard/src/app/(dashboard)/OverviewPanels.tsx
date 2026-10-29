@@ -49,7 +49,7 @@ export function CorpusShapePanel({
           <Icon name="donut_small" size={22} />
           <span>
             {unavailable
-              ? 'Category distribution is unavailable while the graph service is unreachable.'
+              ? 'Category distribution is temporarily unavailable. The summary could not be read.'
               : 'Categories appear once your agents have written a few memories.'}
           </span>
         </div>

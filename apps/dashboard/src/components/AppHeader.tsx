@@ -32,6 +32,7 @@ import type { UpdateStatus } from '@/lib/types'
 import { Icon } from './ui/Icon'
 import { Modal } from './ui/Modal'
 import { Tooltip } from './ui/Tooltip'
+import { MemoryActivityIndicators } from './MemoryActivityIndicators'
 
 /**
  * Dashboard top bar. Page title + subtitle derive from the active route. The top
@@ -41,7 +42,6 @@ import { Tooltip } from './ui/Tooltip'
  */
 const TITLES: Record<string, [string, string]> = {
   overview: ['Overview', 'Control-plane summary — access entities only'],
-  connection: ['Connection', 'Shared Memories Server connector'],
   memories: ['Memories', 'Read, search and edit memories across teams'],
   services: ['Services', 'Local stack monitor via the docker-control sidecar'],
   workers: ['Workers', 'Scheduled job monitor'],
@@ -49,7 +49,6 @@ const TITLES: Record<string, [string, string]> = {
   teams: ['Teams', 'Tenant boundaries — every memory is owned by a team'],
   users: ['Users', 'Members, admins, and their tokens'],
   tokens: ['Tokens', 'Issue, rotate and revoke MCP/API recovery tokens'],
-  grants: ['Mounts', 'Directional, read-only cross-team memory links'],
   'team-settings': ['Team', 'Your team and the local user'],
   notifications: ['Notifications', 'Where security alerts are delivered'],
   security: ['Security', 'DLP / PII findings'],
@@ -59,7 +58,6 @@ const TITLES: Record<string, [string, string]> = {
 
 const LOCAL_TITLES: Record<string, [string, string]> = {
   overview: ['Overview', 'Personal memory stack summary'],
-  connection: ['Connection', 'Shared Memories Server connector'],
   memories: ['Memories', 'Read, search and edit your personal memories'],
   services: ['Services', 'Local personal stack monitor'],
   workers: ['Workers', 'Personal stack scheduled jobs'],
@@ -67,16 +65,6 @@ const LOCAL_TITLES: Record<string, [string, string]> = {
   security: ['Security', 'DLP / PII findings'],
   notifications: ['Notifications', 'Local dashboard notification settings'],
   settings: ['System Settings', 'Personal memory stack configuration'],
-  documentation: ['Documentation', 'Dashboard help for pages and tools'],
-}
-
-const LOCAL_SHARED_TITLES: Record<string, [string, string]> = {
-  overview: ['Overview', 'Shared Memories server summary'],
-  connection: ['Connection', 'Shared Memories Server connector'],
-  memories: ['Memories', 'Read, search and edit shared memories'],
-  usage: ['Token usage', 'Shared server model, service, and request totals'],
-  security: ['Security', 'Shared server DLP / PII findings'],
-  notifications: ['Notifications', 'Shared server notification routing'],
   documentation: ['Documentation', 'Dashboard help for pages and tools'],
 }
 
@@ -100,8 +88,7 @@ export function AppHeader({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const seg = pathname.replace(/^\//, '').split('/')[0] || 'overview'
-  const sharedSpace = localMode && (pathname.startsWith('/connection') || searchParams.get('space') === 'shared' || searchParams.get('surface') === 'shared')
-  const documentationHref = `/documentation?space=${sharedSpace || searchParams.get('space') === 'shared' ? 'shared' : 'personal'}`
+  const documentationHref = '/documentation'
   // The prototype's status pill. Sourced from the same navigation-health summary
   // the sidebar already polls, so it never invents a health claim.
   const [runtimeDegraded, setRuntimeDegraded] = useState(false)
@@ -121,11 +108,7 @@ export function AppHeader({
     const id = window.setInterval(() => void read(), 15_000)
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
-  const [title, sub] = sharedSpace && LOCAL_SHARED_TITLES[seg]
-    ? LOCAL_SHARED_TITLES[seg]
-    : localMode && LOCAL_TITLES[seg]
-      ? LOCAL_TITLES[seg]
-      : TITLES[seg] ?? TITLES.overview
+  const [title, sub] = LOCAL_TITLES[seg] ?? TITLES[seg] ?? LOCAL_TITLES.overview
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseText, setReleaseText] = useState<string | null>(null)
   const [releaseError, setReleaseError] = useState<string | null>(null)
@@ -312,10 +295,9 @@ export function AppHeader({
       <header className="app-header">
         <div className="head-titles">
           {/* Prototype: the space names the context above the page title. */}
-          <div className="head-crumb">{sharedSpace ? 'Shared memories' : 'Personal memories'}</div>
+          <div className="head-crumb">Personal memories</div>
           <Tooltip as="div" className="head-title" label={sub}>{title}</Tooltip>
         </div>
-        <div className="head-tabs" />
         <div className="head-actions">
           {/* Prototype d-workers: run every enabled job from the top bar (superuser control). */}
           {seg === 'workers' && roleClass === 'super' ? (
@@ -339,6 +321,7 @@ export function AppHeader({
               stream mcp · {runtimeDegraded ? 'degraded' : 'live'}
             </span>
           </Tooltip>
+          <MemoryActivityIndicators />
           {teamName && !localMode ? <span className="head-badge head-team">{teamName}</span> : null}
           {!localMode ? <span className={`role-badge ${roleClass} head-role`}>{roleLabel}</span> : null}
           {showLogout ? (
@@ -530,9 +513,9 @@ function ReleaseHistoryCards({ releases, fallback }: { releases: ReleaseHistoryI
             <div>
               <div className="release-card-title">{release.version}</div>
               <div className="release-card-date">{release.date}</div>
-              <a href={githubReleaseUrl(release.version)} target="_blank" rel="noopener noreferrer">View on GitHub Releases</a>
+              <a href={githubReleaseUrl(release.version)} target="_blank" rel="noopener noreferrer">GitHub release page</a>
             </div>
-            {release.latest ? <span className="release-latest-badge">Latest release</span> : null}
+            {release.latest ? <span className="release-latest-badge">Version notes</span> : null}
           </div>
           {release.services.length > 0 ? (
             <div className="release-services">

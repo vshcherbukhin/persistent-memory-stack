@@ -59,6 +59,9 @@ export function pointIdForRow(rowId: string): string {
 }
 
 export interface UpsertVectorInput {
+  projectAssociations?: string[]
+  /** Canonical record revision; versioned points cannot overwrite newer jobs. */
+  revision?: number
   rowId: string // Postgres Chunk/Memory id
   sourceKind: VectorSourceKind
   project: string
@@ -89,7 +92,7 @@ export async function upsertVectors(
           `expected active dim ${args.pin.dim} (model ${args.pin.modelId}). Re-embed with the pinned model.`,
       )
     }
-    const pointId = pointIdForRow(it.rowId) // DETERMINISTIC: re-embed overwrites, no orphan
+    const pointId = pointIdForRow(it.revision === undefined ? it.rowId : `${it.rowId}:r${it.revision}`)
     idByRow.set(it.rowId, pointId)
     return {
       id: pointId,
@@ -97,8 +100,10 @@ export async function upsertVectors(
       payload: {
         team_id: args.teamId, // server-stamped tenant boundary
         project: it.project,
+        ...(it.projectAssociations ? { project_associations: it.projectAssociations } : {}),
         source_kind: it.sourceKind,
         row_id: it.rowId,
+        ...(it.revision === undefined ? {} : { revision: it.revision }),
         embedding_model_id: args.pin.modelId,
         dim: args.pin.dim,
         ...(it.documentId ? { document_id: it.documentId } : {}),
@@ -108,6 +113,15 @@ export async function upsertVectors(
 
   if (points.length > 0) {
     await client.upsert(COLLECTION, { wait: true, points })
+    // Never delete a newer revision: an older in-flight producer may finish
+    // after it. Cleanup must succeed before callers mark this revision ready.
+    for (const item of args.items) {
+      if (item.sourceKind !== 'memory' || item.revision === undefined) continue
+      await client.delete(COLLECTION, { wait: true, filter: {
+        must: [{ key: 'team_id', match: { value: args.teamId } }, { key: 'row_id', match: { value: item.rowId } }],
+        should: [{ key: 'revision', range: { lt: item.revision } }, { is_empty: { key: 'revision' } }],
+      } })
+    }
   }
   return idByRow
 }

@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Preserve the upstream legal text, including its existing whitespace.
+upstream/CREDITS -whitespace

@@ -23,7 +23,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod/v4'
-import { upsertVectors, assertActivePin, type SearchHit } from '@pm/shared'
+import { upsertVectors, assertActivePin, KnowledgeFilters, type SearchHit } from '@pm/shared'
 import { runInTenant, getCtx, Prisma, type Tx, type MemoryShape, type TenantCtx } from '@pm/db'
 import { requireTeamMember, decideDataPlane, allowUniversalRead } from '../authz/guards.ts'
 import { validateAndRoute, type WriteMetadata } from '../protocol/validation.ts'
@@ -40,6 +40,7 @@ import { sendBrowserPushNotification } from '../services/browser-push.ts'
 import { graphProjectGroup } from '../services/graph-project-group.ts'
 import { assertProjectMovePreservesGraphBoundary, enqueueGraphRemoval, graphDeletionPlanForSubject } from '../services/graph-lifecycle.ts'
 import { classifyMemoryUpdate } from '../services/memory-update-routing.ts'
+import { knowledgeWhere } from '../services/knowledge.ts'
 
 const ErrorBody = z.object({ error: z.string(), message: z.string().optional() })
 
@@ -80,6 +81,8 @@ const Metadata = z
   .strict()
 
 const ResultRow = z.object({
+  revision: z.number().int().positive(), classification: z.unknown(), classificationStatus: z.string(),
+  embeddingStatus: z.string(), graphStatus: z.string(), relationshipExplanations: z.array(z.string()).optional(),
   id: z.string(),
   content: z.string(),
   category: z.string(),
@@ -106,197 +109,11 @@ const SHAPE_VALUES = ['gotcha_fix', 'user_correction', 'tool_gap', 'prd', 'atomi
 export async function memoryRoutes(app: FastifyInstance): Promise<void> {
   const z4 = app.withTypeProvider<ZodTypeProvider>()
 
-  // ── POST /memories — add_memory ──────────────────────────────────────────
-  const AddBody = z
-    .object({
-      content: z.string().min(40),
-      project: z.string().min(1).default('general'),
-      sessionId: z.string().optional(),
-      metadata: Metadata,
-      // client-managed embeddings only (precomputed memory vector from the bridge):
-      queryVector: z.array(z.number()).optional(),
-      embeddingModelId: z.string().optional(),
-      embeddingDim: z.number().int().positive().optional(),
-    })
-    .strict()
-
-  z4.post(
-    '/memories',
-    {
-      preHandler: [requireTeamMember],
-      schema: {
-        body: AddBody,
-        response: {
-          201: z.object({
-            id: z.string(),
-            shape: z.string(),
-            category: z.string(),
-            project: z.string(),
-            restructured: z.boolean(),
-            content: z.string(),
-            embeddingStatus: z.enum(['pending', 'embedded']),
-            // Phase 9: the agent sees the server-assigned provenance/confidence so it
-            // can decide whether to gather more evidence (low confidence = provisional).
-            memoryTier: z.string(),
-            sourceProvenance: z.string(),
-            confidence: z.number(),
-          }),
-          400: ErrorBody,
-          422: z.any(),
-          409: ErrorBody,
-          500: ErrorBody,
-        },
-      },
-    },
-    async (req, reply) => {
-      const id = req.identity!
-      const teamId = id.teamId! // guaranteed by requireTeamMember
-      const body = req.body
-      // `general` is a Personal-only regular-chat partition. Validate before
-      // creating any vector or database row on a Shared stack.
-      graphProjectGroup(teamId, body.project)
-      const meta = body.metadata as WriteMetadata
-
-      // 1. Shape gate. On reject the 422 ValidationError propagates to the handler.
-      const verdict = await validateAndRoute(body.content, meta)
-      const finalContent = verdict.content
-      const shape: MemoryShape = verdict.shape
-      const restructured = verdict.outcome === 'restructure'
-
-      // 2. Topology-aware embedding (vector present? → embedded; else → pending).
-      let vector: number[] | null = null
-      let embeddingStatus: 'pending' | 'embedded' = 'pending'
-      if (embedder) {
-        const serverEmbedder = embedder
-        // server-managed embeddings: the server embeds the (final) content.
-        const out = await withEmbeddingHealth(
-          { observerScope: 'server', provider: serverEmbedder.provider, model: serverEmbedder.model },
-          () => serverEmbedder.embed([finalContent], 'document'),
-        )
-        vector = out.vectors[0] ?? null
-        embeddingStatus = vector ? 'embedded' : 'pending'
-      } else if (body.queryVector && body.embeddingModelId && body.embeddingDim) {
-        // client-managed embeddings: bridge-supplied precomputed vector — must match the active pin.
-        assertActivePin(
-          { modelId: body.embeddingModelId, dim: body.embeddingDim, vector: body.queryVector },
-          activePin,
-        )
-        vector = body.queryVector
-        embeddingStatus = 'embedded'
-      }
-      // else client-managed embeddings with no vector → embeddingStatus stays 'pending' (backfilled).
-
-      // 3. Write the Memory row, team STAMPED from identity (never the body).
-      const memoryId = randomUUID()
-      const auditMeta = restructured
-        ? { ...stripUndefined(meta), original_content: verdict.original }
-        : stripUndefined(meta)
-
-      // Phase 9 provenance: provenance is DERIVED from the (enum-validated) source
-      // server-side — NOT agent-asserted (memory-injection safety). confidence comes
-      // from the LLM verdict, else the provenance baseline. tier may be agent-set.
-      const provenance = deriveProvenance(meta.source)
-      const confidence = verdict.confidence ?? defaultConfidence(provenance)
-      const memoryTier =
-        (meta as { tier?: MemoryTierValue }).tier ??
-        deriveTier({ category: meta.category, hasSession: !!body.sessionId })
-
-      await runInTenant((tx: Tx) =>
-        tx.memory.create({
-          data: {
-            id: memoryId,
-            teamId, // ← SERVER-STAMPED from identity, never from body
-            createdById: id.userId, // ← author stamped from the token
-            project: body.project,
-            content: finalContent,
-            category: meta.category!, // free-form String column
-            shape, // closed enum A–E
-            entities: meta.entities ?? [],
-            sessionId: body.sessionId ?? null,
-            embeddingModelId: activePin.modelId,
-            embeddingDim: activePin.dim,
-            embeddingStatus,
-            metadata: auditMeta as Prisma.InputJsonValue,
-            // Phase 9 — server-stamped provenance/tier/confidence.
-            memoryTier,
-            sourceProvenance: provenance,
-            confidence,
-            ...graphSyncPendingPatch(),
-          },
-        }),
-      )
-
-      // 4. Qdrant upsert AFTER the row exists (only when a vector is present).
-      if (vector) {
-        try {
-          const idByRow = await upsertVectors(qdrant, {
-            teamId,
-            pin: activePin,
-            items: [{ rowId: memoryId, sourceKind: 'memory', project: body.project, vector }],
-          })
-          const pointId = idByRow.get(memoryId)
-          if (pointId) {
-            await runInTenant((tx: Tx) =>
-              tx.memory.update({ where: { id: memoryId }, data: { qdrantPointId: pointId } }),
-            )
-          }
-        } catch (err) {
-          // A failed vector upsert leaves the row at embeddingStatus we set; flag
-          // it pending so the backfill picks it up rather than losing the row.
-          req.log.warn({ err, memoryId }, 'qdrant upsert failed; marking pending')
-          await runInTenant((tx: Tx) =>
-            tx.memory.update({ where: { id: memoryId }, data: { embeddingStatus: 'pending' } }),
-          ).catch(() => {})
-          embeddingStatus = 'pending'
-        }
-      }
-
-      // 5. Best-effort Graphiti episode in this exact surface/team/project partition.
-      // Vector bookkeeping advances updatedAt but deliberately leaves the graph
-      // content version untouched, so the inline graph stamp cannot race itself.
-      const graphVersion = await runInTenant<{ graphVersion: Date } | null>(
-        (tx: Tx) => tx.memory.findUnique({ where: { id: memoryId }, select: { graphVersion: true } }) as PromiseLike<{ graphVersion: Date } | null>,
-      )
-      if (graphVersion) {
-        const graphOperationId = randomUUID()
-        void postMemoryGraphEpisodeAndStamp(graphiti, {
-          id: memoryId,
-          teamId,
-          project: body.project,
-          graphGroupId: graphProjectGroup(teamId, body.project),
-          content: finalContent,
-          graphVersion: graphVersion.graphVersion,
-        }, undefined, { operationId: graphOperationId })
-          .catch((err) => req.log.warn({ err, memoryId }, 'graphiti episode failed (non-fatal)'))
-        reply.header('x-pm-graph-operation-id', graphOperationId)
-      }
-      void sendBrowserPushNotification({
-        type: 'memoryAdded',
-        teamId,
-        userId: id.userId,
-        title: 'Memory added',
-        body: 'A personal memory was added.',
-        url: '/memories',
-      }).catch((err) => req.log.warn({ err, memoryId }, 'browser push memory-added notification failed'))
-
-      return reply.code(201).send({
-        id: memoryId,
-        shape,
-        category: meta.category!,
-        project: body.project,
-        restructured,
-        content: finalContent,
-        embeddingStatus,
-        memoryTier,
-        sourceProvenance: provenance,
-        confidence,
-      })
-    },
-  )
-
   // ── POST /memories/search — search_memories (the cross-team merge) ─────────
   const SearchBody = z
     .object({
+      ...KnowledgeFilters.shape,
+      contextHints: z.object({ projects: z.array(z.string()).max(20).optional(), topics: z.array(z.string()).max(20).optional() }).strict().optional(),
       query: z.string().min(1).optional(),
       queryVector: z.array(z.number()).optional(), // client-managed embeddings
       project: z.string().min(1).optional(),
@@ -323,6 +140,7 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
           200: z.object({
             results: z.array(ResultRow),
             counts: z.object({ own: z.number(), other: z.number() }),
+            diagnostics: z.object({ semantic: z.string(), lexical: z.string(), graphExpansion: z.string() }),
           }),
           400: ErrorBody,
           422: ErrorBody,
@@ -334,58 +152,24 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
       const body = req.body
       const id = req.identity!
 
-      // Embed the query (topology-aware). server-managed embeddings: server embeds. client-managed embeddings: bridge vector.
-      let queryVector: number[]
-      if (embedder) {
-        const serverEmbedder = embedder
-        const query = body.query
-        if (!query) {
-          return reply
-            .code(400)
-            .send({ error: 'query_required', message: 'query is required in server-managed embeddings (server embedder).' })
-        }
-        const out = await withEmbeddingHealth(
-          { observerScope: 'server', provider: serverEmbedder.provider, model: serverEmbedder.model },
-          () => serverEmbedder.embed([query], 'query'),
-        )
-        const v = out.vectors[0]
-        if (!v) {
-          return reply
-            .code(500)
-            .send({ error: 'embed_failed', message: 'query embedding produced no vector.' })
-        }
-        queryVector = v
-      } else {
-        if (!body.queryVector) {
-          return reply.code(400).send({
-            error: 'query_vector_required',
-            message: 'client-managed embeddings (client-bridge): a precomputed queryVector is required (the server has no embedder).',
-          })
-        }
-        if (body.queryVector.length !== activePin.dim) {
-          return reply.code(422).send({
-            error: 'vector_dim_mismatch',
-            message: `queryVector dim ${body.queryVector.length} != active dim ${activePin.dim}.`,
-          })
-        }
-        queryVector = body.queryVector
+      let queryVector = body.queryVector
+      if (embedder && body.query) {
+        try {
+          const serverEmbedder = embedder
+          const out = await withEmbeddingHealth({ observerScope: 'server', provider: serverEmbedder.provider, model: serverEmbedder.model }, () => serverEmbedder.embed([body.query!], 'query'))
+          queryVector = out.vectors[0]
+        } catch (error) { req.log.warn({ err: error }, 'semantic query unavailable; lexical retrieval remains available') }
       }
-
-      // Universal (all-teams) reads on the data plane are admin-only. A plain
-      // member's `universal:true` is IGNORED → own ∪ mounted (mounts are how a
-      // member is granted cross-team reads). The dashboard's all-teams view for
-      // members goes through /dashboard/memories (decideDashboard), not this route.
-      const universal = allowUniversalRead(id.adminLevel, body.universal)
-
+      if (queryVector && queryVector.length !== activePin.dim) return reply.code(422).send({ error: 'vector_dim_mismatch', message: 'Use the current embedding pin.' })
       const merged = await searchMemoriesMerged(qdrant, {
-        queryVector,
+        ...body, queryVector,
         pin: activePin,
         ...(body.project ? { project: body.project } : {}),
         ...(body.category ? { category: body.category } : {}),
         ...(body.scoreMin !== undefined ? { scoreMin: body.scoreMin } : {}),
         ...(body.scoreMax !== undefined ? { scoreMax: body.scoreMax } : {}),
         limit: body.limit,
-        ...(universal ? { universal: true } : {}),
+
       })
       return reply.code(200).send(merged)
     },
@@ -419,11 +203,12 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
         (tx: Tx) =>
           tx.memory.findMany({
             where: {
+              ...knowledgeWhere(body),
               entities:
                 body.mode === 'all'
                   ? { hasEvery: body.entities }
                   : { hasSome: body.entities },
-              ...(body.project ? { project: body.project } : {}),
+
             },
             take: body.limit,
             orderBy: { createdAt: 'desc' },
@@ -436,6 +221,7 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
 
   // ── GET /memories — get_memories (list, keyset paginated, RLS) ─────────────
   const ListQuery = z.object({
+    ...KnowledgeFilters.shape,
     project: z.string().optional(),
     category: z.string().optional(),
     sessionId: z.string().optional(),
@@ -474,7 +260,7 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
       // every team's memories through the RLS pm_read_all_memory() path.
       const universal = allowUniversalRead(id.adminLevel, q.universal)
       const facetWhere: Prisma.MemoryWhereInput = {
-        ...(q.project ? { project: q.project } : {}),
+        ...knowledgeWhere(q),
         ...(q.sessionId ? { sessionId: q.sessionId } : {}),
         ...(q.shape ? { shape: q.shape as MemoryShape } : {}),
         ...(q.scoreMin !== undefined || q.scoreMax !== undefined
@@ -535,259 +321,6 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
       )
       if (!row) return reply.code(404).send({ error: 'not_found' })
       return reply.code(200).send(toResultRow(row))
-    },
-  )
-
-  // ── PATCH /memories/:id — update_memory (re-validate; own-team RLS) ─────────
-  const PatchBody = z
-    .object({
-      content: z.string().min(40).optional(),
-      project: z.string().min(1).optional(),
-      sessionId: z.string().optional(),
-      metadata: Metadata.optional(),
-    })
-    .strict()
-
-  z4.patch(
-    '/memories/:id',
-    {
-      preHandler: [requireTeamMember],
-      schema: {
-        params: IdParam,
-        body: PatchBody,
-        response: {
-          200: ResultRow.extend({ restructured: z.boolean() }),
-          404: z.object({ error: z.string() }),
-          422: z.any(),
-          409: ErrorBody,
-        },
-      },
-    },
-    async (req, reply) => {
-      const id = req.identity!
-      const body = req.body
-
-      // findUnique first (universal read) → 404 if absent.
-      const existing = await runInTenant<MemRow | null>(
-        (tx: Tx) =>
-          tx.memory.findUnique({
-            where: { id: req.params.id },
-            select: MEM_SELECT,
-          }) as PromiseLike<MemRow | null>,
-      )
-      if (!existing) return reply.code(404).send({ error: 'not_found' })
-
-      // Per-row authorization (current-team + ownership). Backstopped by RLS.
-      const decision = decideDataPlane({
-        identity: id,
-        action: 'update',
-        target: { teamId: existing.teamId, createdById: existing.createdById },
-      })
-      if (!decision.ok) throw decision.error
-      const teamId = existing.teamId // == id.teamId (decision enforced)
-
-      const route = classifyMemoryUpdate(existing, {
-        content: body.content,
-        project: body.project,
-        sessionId: body.sessionId,
-        category: body.metadata?.category,
-        entities: body.metadata?.entities,
-      })
-      if (!route.hasChanges) return reply.code(200).send({ ...toResultRow(existing), restructured: false })
-
-      if (route.projectChanged) graphProjectGroup(teamId, body.project!)
-
-      if (route.projectChanged) {
-        const hasGraphHistory = await runInTenant<number>(
-          (tx: Tx) => tx.graphEpisodeProvenance.count({ where: { subjectKind: 'memory', subjectId: existing.id } }) as PromiseLike<number>,
-        )
-        try {
-          assertProjectMovePreservesGraphBoundary({
-            currentProject: existing.project,
-            nextProject: body.project!,
-            hasGraphHistory: hasGraphHistory > 0,
-          })
-        } catch (err) {
-          return reply.code(409).send({ error: 'project_graph_history_immutable', message: err instanceof Error ? err.message : String(err) })
-        }
-      }
-
-      // Re-validate when content or metadata changes.
-      let restructured = false
-      let nextContent = existing.content
-      let nextShape: MemoryShape = existing.shape as MemoryShape
-      let nextCategory = existing.category
-      let nextEntities = existing.entities
-      let auditExtra: Record<string, unknown> = {}
-
-      if (route.validationRequired) {
-        const content = body.content ?? existing.content
-        const meta: WriteMetadata = body.metadata
-          ? (body.metadata as WriteMetadata)
-          : { category: existing.category, entities: existing.entities, source: 'gotcha-discovered' }
-        const verdict = await validateAndRoute(content, meta)
-        nextContent = verdict.content
-        nextShape = verdict.shape
-        restructured = verdict.outcome === 'restructure'
-        if (route.metadataChanged && body.metadata) {
-          nextCategory = body.metadata.category
-          nextEntities = body.metadata.entities
-        }
-        if (verdict.outcome === 'restructure') auditExtra = { original_content: verdict.original }
-      }
-
-      // server-managed embeddings: re-embed inline. client-managed embeddings: can't embed here — we must NOT leave the
-      // old vector searchable for the edited content, so we drop it + mark pending
-      // (the P6 backfill re-embeds later, recreating the SAME deterministic point).
-      let vector: number[] | null = null
-      let embeddingStatus: 'pending' | 'embedded' = 'pending'
-      const contentChanged = nextContent !== existing.content
-      const graphChanged = contentChanged
-      const graphOperationId = graphChanged ? randomUUID() : null
-      // client-managed embeddings with a content change → purge the stale point, status pending.
-      const dropStaleVectorClientManaged = contentChanged && !embedder
-      if (contentChanged && embedder) {
-        const serverEmbedder = embedder
-        const out = await withEmbeddingHealth(
-          { observerScope: 'server', provider: serverEmbedder.provider, model: serverEmbedder.model },
-          () => serverEmbedder.embed([nextContent], 'document'),
-        )
-        vector = out.vectors[0] ?? null
-        embeddingStatus = vector ? 'embedded' : 'pending'
-      }
-
-      // A project-only move changes Qdrant routing metadata, not vector content.
-      // Move the payload first: until Postgres commits, the project hydrate filter
-      // rejects the point in both scopes, so the transition can hide briefly but
-      // cannot leak across projects. Restore best-effort if the DB write fails.
-      let qdrantProjectMoved = false
-      if (route.projectChanged && existing.qdrantPointId) {
-        await qdrant.setPayload('memory_vectors', {
-          wait: true,
-          points: [existing.qdrantPointId],
-          payload: { project: body.project! },
-        })
-        qdrantProjectMoved = true
-      }
-
-      const nextGraphVersion = contentChanged || route.projectChanged ? new Date() : null
-
-      // Update under RLS (own-team only; WITH CHECK backstops cross-team).
-      let updated: MemRow
-      try {
-        updated = await runInTenant<MemRow>(
-          (tx: Tx) =>
-            tx.memory.update({
-              where: { id: req.params.id },
-              data: {
-                ...(contentChanged ? { content: nextContent } : {}),
-                ...(route.validationRequired ? { shape: nextShape } : {}),
-                ...(route.metadataChanged ? { category: nextCategory, entities: nextEntities } : {}),
-                ...(route.projectChanged ? { project: body.project! } : {}),
-                ...(route.sessionChanged ? { sessionId: body.sessionId } : {}),
-                // Only user-visible mutations advance the table's Updated value.
-                recordUpdatedAt: new Date(),
-                // server-managed embeddings: embedded/pending per the embed result. client-managed embeddings: force pending
-                // so search never serves a stale embedding for the edited content.
-                ...(contentChanged && embedder ? { embeddingStatus } : {}),
-                ...(dropStaleVectorClientManaged ? { embeddingStatus: 'pending' as const } : {}),
-                ...(graphChanged ? graphSyncPendingPatch(nextGraphVersion!) : {}),
-                ...(!graphChanged && route.projectChanged ? { graphVersion: nextGraphVersion! } : {}),
-                ...(Object.keys(auditExtra).length
-                  ? { metadata: auditExtra as Prisma.InputJsonValue }
-                  : {}),
-              },
-              select: MEM_SELECT,
-            }) as PromiseLike<MemRow>,
-        )
-      } catch (error) {
-        if (qdrantProjectMoved && existing.qdrantPointId) {
-          await qdrant.setPayload('memory_vectors', {
-            wait: true,
-            points: [existing.qdrantPointId],
-            payload: { project: existing.project },
-          }).catch((restoreError) => req.log.error({ err: restoreError, id: existing.id }, 'qdrant project payload rollback failed'))
-        }
-        throw error
-      }
-
-      // server-managed embeddings: re-upsert onto the SAME deterministic point id (overwrites in place,
-      // no orphan — the point id is now derived from the rowId). A failure (embed
-      // produced no vector, or upsert threw) leaves the row at 'pending' — and the
-      // OLD point still live, hence stale — so we treat that exactly like client-managed embeddings
-      // below and drop the existing point.
-      let dropStaleVectorServerManagedFail = false
-      if (contentChanged && embedder) {
-        if (vector) {
-          try {
-            const idByRow = await upsertVectors(qdrant, {
-              teamId,
-              pin: activePin,
-              items: [
-                { rowId: updated.id, sourceKind: 'memory', project: updated.project, vector },
-              ],
-            })
-            const pointId = idByRow.get(updated.id)
-            if (pointId) {
-              await runInTenant((tx: Tx) =>
-                tx.memory.update({ where: { id: updated.id }, data: { qdrantPointId: pointId } }),
-              )
-            }
-          } catch (err) {
-            req.log.warn({ err, id: updated.id }, 'qdrant re-upsert failed; marking pending')
-            await runInTenant((tx: Tx) =>
-              tx.memory.update({ where: { id: updated.id }, data: { embeddingStatus: 'pending' } }),
-            ).catch(() => {})
-            dropStaleVectorServerManagedFail = true // upsert threw → old point is now stale
-          }
-        } else {
-          // embed() returned no vector → row stayed 'pending'; the old point is stale.
-          dropStaleVectorServerManagedFail = true
-        }
-      }
-
-      // Drop the existing point so the edited content can't be served via its
-      // now-stale vector. Fires for client-managed embeddings (no embedder) OR a server-managed embed/upsert
-      // failure — both end at 'pending'. The P6 consumer re-embeds the 'pending'
-      // row later, recreating the SAME deterministic point id from updated.id.
-      if ((dropStaleVectorClientManaged || dropStaleVectorServerManagedFail) && existing.qdrantPointId) {
-        await qdrant
-          .delete('memory_vectors', { points: [existing.qdrantPointId] })
-          .catch((err) =>
-            req.log.warn({ err, id: updated.id }, 'qdrant stale-point delete failed (pending edit)'),
-          )
-      }
-
-      // Best-effort Graphiti re-episode. graphiti-core 0.29.2 does not support
-      // create-with-uuid/upsert semantics; sending a new uuid makes the graph
-      // write fail with NodeNotFoundError.
-      if (graphChanged) {
-        const graphVersion = await runInTenant<{ graphVersion: Date } | null>(
-          (tx: Tx) => tx.memory.findUnique({ where: { id: updated.id }, select: { graphVersion: true } }) as PromiseLike<{ graphVersion: Date } | null>,
-        )
-        if (graphVersion) {
-          void postMemoryGraphEpisodeAndStamp(graphiti, {
-            id: updated.id,
-            teamId,
-            project: updated.project,
-            graphGroupId: graphProjectGroup(teamId, updated.project),
-            content: updated.content,
-            graphVersion: graphVersion.graphVersion,
-          }, undefined, { operationId: graphOperationId! })
-            .catch((err) => req.log.warn({ err, id: updated.id }, 'graphiti re-episode failed'))
-        }
-      }
-      if (graphOperationId) reply.header('x-pm-graph-operation-id', graphOperationId)
-      void sendBrowserPushNotification({
-        type: 'memoryUpdated',
-        teamId,
-        userId: id.userId,
-        title: 'Memory updated',
-        body: 'A personal memory was updated.',
-        url: '/memories',
-      }).catch((err) => req.log.warn({ err, id: updated.id }, 'browser push memory-updated notification failed'))
-
-      return reply.code(200).send({ ...toResultRow(updated), restructured })
     },
   )
 
@@ -1269,6 +802,7 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
 /** The Memory columns selected for list/read responses (incl. teamId + author).
  *  qdrantPointId is carried so PATCH can purge a stale client-managed point on edit. */
 const MEM_SELECT = {
+  revision: true, knowledge: true, graphStatus: true,
   id: true,
   teamId: true,
   content: true,
@@ -1289,6 +823,7 @@ const MEM_SELECT = {
 } as const
 
 type MemRow = {
+  revision: number; knowledge: unknown; graphStatus: string;
   id: string
   teamId: string
   content: string
@@ -1311,6 +846,7 @@ type MemRow = {
 /** Project one Memory row → the wire ResultRow shape, tagging own-vs-other team. */
 function toResultRow(r: MemRow): z.infer<typeof ResultRow> {
   return {
+    revision: r.revision, classification: r.knowledge, classificationStatus: r.knowledge ? 'classified' : 'legacy_unclassified', embeddingStatus: r.embeddingStatus, graphStatus: r.knowledge ? r.graphStatus : 'legacy_preserved',
     id: r.id,
     content: r.content,
     category: r.category,

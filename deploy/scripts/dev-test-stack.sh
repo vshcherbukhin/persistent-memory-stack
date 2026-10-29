@@ -43,6 +43,7 @@ write_env() {
     printf '%s\n' 'PM_TEST_STACK=true'
     printf '%s\n' "PM_RUNTIME_ENV_FILE=$ENV_FILE"
     printf '%s\n' 'PM_CONTAINER_PREFIX=persistent-memory-devtest'
+    printf '%s\n' 'COMPOSE_PROJECT_NAME=persistent-memory-devtest'
     printf '%s\n' 'PM_IMAGE_PREFIX=persistent-memory-devtest'
     printf '%s\n' 'PM_VOLUME_PREFIX=persistent_memory_devtest'
     printf '%s\n' 'PM_NETWORK_NAME=persistent_memory_devtest_network'
@@ -184,6 +185,7 @@ case "$COMMAND" in
     write_env
     assert_test_env
     load_env
+    node scripts/prepare-falkordb-storage.mjs --env-file "$ENV_FILE" --require-ready
     compose up -d --build postgres qdrant redis minio graphiti dlp
     wait_for_postgres
     seed_stack

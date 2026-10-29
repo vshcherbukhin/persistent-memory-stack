@@ -419,6 +419,7 @@ redeploy_worker() {
 
 redeploy_stack() {
   need_env
+  node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs" --env-file "$ENV_RUNTIME" --require-ready
   backup_db
   "${COMPOSE[@]}" up -d --build
   verify

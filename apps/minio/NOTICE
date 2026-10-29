@@ -1,0 +1,11 @@
+This image compiles the unmodified MinIO server from the exact official release
+identified in source.json. MinIO is licensed under GNU AGPL version 3 or later;
+the original LICENSE and CREDITS are preserved in upstream/ and in the image.
+The exact corresponding upstream source archive is included in the image at
+/usr/share/minio/source.tar.gz, together with source.json and the upstream Go
+module locks. The image is a Persistent Memory build, not an upstream binary.
+
+The separate pm-minio-health program is repository code under the MIT license
+in health/LICENSE. The Go compiler/standard-library license is also included
+in the image. No MinIO subscription, credentials, or license acceptance is part
+of building this image.

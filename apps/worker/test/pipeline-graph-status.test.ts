@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { IngestJobData, IngestJobResult, Job } from '@pm/shared'
 import type { WorkerDeps } from '../src/deps.ts'
+const {sourceFindFirst}=vi.hoisted(()=>({sourceFindFirst:vi.fn(async()=>({id:'src-1'} as {id:string}|null))}))
 
 // ── Mocks: the @pm/shared IO surface used by steps 1–3 ──────────────────────
 vi.mock('@pm/shared', async (importOriginal) => {
@@ -54,6 +55,7 @@ vi.mock('@pm/db', async (importOriginal) => {
   return {
     ...actual,
     runInTenant: vi.fn(async (work: (tx: unknown) => unknown) => work({
+      source: {findFirst:sourceFindFirst},
       graphLifecycleOperation: { createMany: vi.fn(async () => ({ count: 1 })) },
     })),
   }
@@ -120,6 +122,7 @@ function deps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
 describe('pipeline step 6 — IngestJob.graphStatus', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sourceFindFirst.mockResolvedValue({id:'src-1'})
   })
 
   it("stamps graphStatus='ok' when add_episode succeeds", async () => {
@@ -170,5 +173,11 @@ describe('pipeline step 6 — IngestJob.graphStatus', () => {
 
     expect(setGraphStatus).toHaveBeenCalledWith('job-1', 'skipped')
     expect(postEpisode).not.toHaveBeenCalled()
+  })
+  it('rejects unresolved source ownership before fetching a blob or invoking extraction',async()=>{
+    sourceFindFirst.mockResolvedValueOnce(null)
+    const {getBufferCapped,extractText}=await import('@pm/shared')
+    await expect(makeIngestProcessor(deps())(fakeJob())).rejects.toThrow('Source ownership is unresolved')
+    expect(getBufferCapped).not.toHaveBeenCalled();expect(extractText).not.toHaveBeenCalled();expect(postEpisode).not.toHaveBeenCalled()
   })
 })

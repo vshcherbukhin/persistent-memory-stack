@@ -38,6 +38,7 @@ export const VALID_SOURCES = [
   'gotcha-discovered',
   'user-correction',
   'postmortem',
+  'document',
   'confluence',
   'test-failure',
   'heal-cycle',
@@ -112,7 +113,7 @@ export const SHAPE_TEMPLATES = {
   A: '[<entity>] <symptom>. Root cause: <why>. Fix: <what>. Prevention: <how>.',
   B: '[<task-context>] Tried <wrong approach>, because <reason>. User said <correction>. Correct approach: <what works>. Key insight: <broader learning>.',
   C: '[tool_<tool_name>] <what was queried> returns/fails <result> but does NOT include <missing>. Workaround: <what worked>. Useful for: <when this gap matters>.',
-  D: 'Free-form content; requires metadata.source="confluence" plus non-empty metadata.pageId and metadata.confluenceUrl. Used for PRD chunks.',
+  D: 'Free-form personal requirement or document excerpt with category="prd". Content, source and entity checks still apply; no external account or page fields are required.',
   E: '[<entity>] <fact in one line>. Why it matters: <what a fresh session would do wrong without this>.',
 } as const
 

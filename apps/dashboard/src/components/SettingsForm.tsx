@@ -178,6 +178,9 @@ export function SettingsForm({
 
       {!editing ? (
         <div className="btn-row">
+          <button type="button" className="btn secondary" disabled={testBusy || switchRunning} onClick={() => void testEmbedding()}>
+            {testBusy ? 'Testing…' : 'Test embeddings'}
+          </button>
           <button type="button" className="btn secondary" disabled={switchRunning} onClick={() => setEditing(true)}>
             <Icon name="tune" size={15} /> Change embedding pin…
           </button>
@@ -230,7 +233,7 @@ export function SettingsForm({
 
           <div className="btn-row">
             <button type="button" className="btn secondary" disabled={testBusy || switchRunning} onClick={() => void testEmbedding()}>
-              {testBusy ? 'Testing…' : 'Test embedding'}
+              {testBusy ? 'Testing…' : 'Test embeddings'}
             </button>
             <button type="submit" className="btn primary" disabled={!canSave}>
               {pending ? 'Saving…' : pinChanged ? 'Switch model' : 'Save pin'}
@@ -249,9 +252,9 @@ export function SettingsForm({
               Cancel
             </button>
           </div>
-          <ResultNotice result={testResult} />
         </div>
       )}
+      <ResultNotice result={testResult} />
 
       {state.error ? (
         <div className="notice danger" style={{ marginTop: 14 }}>

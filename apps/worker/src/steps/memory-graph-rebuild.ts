@@ -17,6 +17,7 @@ import { config } from '../config.ts'
 const BATCH = 100
 
 export interface MemoryGraphReplayRow {
+  revision?: number
   id: string
   teamId: string
   project: string
@@ -98,10 +99,10 @@ export async function memoryGraphRebuild(
     const client: MemoryGraphReplayClient = {
       postEpisode: (input) => postEpisode(deps.graphitiUrl, deps.graphitiTimeoutMs, input),
       groupIdFor: (row) => deriveProjectGraphGroup({
-        secret: config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret',
+        secret: `personal-knowledge-v2:${config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret'}`,
         teamId: row.teamId,
         project: row.project,
-        surface: config.MEMORY_SURFACE ?? (config.DEPLOYMENT_MODE === 'local' ? 'personal' : 'shared'),
+        surface: 'personal',
       }),
     }
 
@@ -115,7 +116,7 @@ export async function memoryGraphRebuild(
             },
             orderBy: { id: 'asc' },
             take: BATCH,
-            select: { id: true, teamId: true, project: true, content: true, graphVersion: true },
+            select: { id: true, teamId: true, project: true, content: true, graphVersion: true, revision: true },
           }) as PromiseLike<MemoryGraphReplayRow[]>,
         { globalAdmin: true, readOnly: true, readAllMemory: true },
       )
@@ -127,7 +128,7 @@ export async function memoryGraphRebuild(
           const row = rows.find((candidate) => candidate.id === graph.id)
           if (!row) continue
           const updated = await tx.memory.updateMany({
-            where: { id: row.id, graphVersion: row.graphVersion },
+            where: { id: row.id, graphVersion: row.graphVersion, revision: row.revision, ownershipState: 'personal', deletedAt: null },
             data: { graphStatus: 'ok', graphSyncedAt: new Date(), graphError: null, graphGroupId: graph.groupId, graphEpisodeId: graph.episodeId },
           })
           if (updated.count !== 1) {
@@ -140,7 +141,7 @@ export async function memoryGraphRebuild(
                 project: row.project,
                 subjectKind: 'memory',
                 subjectId: row.id,
-                operation: 'remove',
+                operation: 'remove', ownershipValidated: true,
                 graphGroupId: graph.groupId,
                 graphEpisodeId: graph.episodeId,
               }],

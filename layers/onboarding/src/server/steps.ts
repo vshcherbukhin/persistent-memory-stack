@@ -10,7 +10,7 @@
  */
 
 /** In-process steps the orchestrator runs itself (no child process). */
-export type FnId = 'register' | 'write-rule' | 'shared-connect'
+export type FnId = 'register' | 'write-rule'
 
 export interface InstallStep {
   id: string
@@ -61,10 +61,6 @@ const REGISTER_STEP: InstallStep = {
 const RULE_STEP: InstallStep = {
   id: 'write-rule', name: 'Write the memory-usage rule + top memory block', cmd: [], cwd: '', kind: 'fn', fnId: 'write-rule',
 }
-const SHARED_CONNECT_STEP: InstallStep = {
-  id: 'shared-connect', name: 'Save the Shared Memories connection', cmd: [], cwd: '', kind: 'fn', fnId: 'shared-connect',
-}
-
 /** The full local-server install: the proven 8 host-side commands. */
 function fullStackSteps(env: Record<string, string>): InstallStep[] {
   const dbEnv: Record<string, string> = { DATABASE_MIGRATE_URL: hostRewriteUrl(env.DATABASE_MIGRATE_URL ?? '') }
@@ -119,18 +115,6 @@ function fullStackSteps(env: Record<string, string>): InstallStep[] {
  */
 export function buildSteps(input: BuildStepsInput): InstallStep[] {
   const steps = fullStackSteps(input.env ?? {})
-  if (input.memoryInstallMode === 'personal-and-shared') {
-    if (input.pullModel) {
-      steps.push({
-        id: 'pull-shared-model',
-        name: `Ensure shared server embedding model is installed (${input.pullModel})`,
-        cmd: ['ollama', 'pull', input.pullModel],
-        cwd: '',
-        kind: 'ollama-model',
-      })
-    }
-    steps.push(SHARED_CONNECT_STEP)
-  }
   return [...steps, REGISTER_STEP, RULE_STEP]
 }
 

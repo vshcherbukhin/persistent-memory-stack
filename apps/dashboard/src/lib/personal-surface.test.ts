@@ -22,9 +22,9 @@ describe('personal memory surface contract', () => {
     const tools = src('../app/(dashboard)/memories/DashboardTools.tsx')
 
     expect(tools).toContain("const isPersonalSurface = surface === 'personal'")
-    expect(tools).toContain("const teamFields = requireTeam ? ['teamId'] : []")
+    expect(tools).toContain("ownerConfirmation: true")
     expect(tools).toContain("isPersonalSurface ? 'personal memories'")
-    expect(tools).toContain('isPersonalSurface ? null : <div><span>Target team</span>')
+    expect(tools).toContain('I confirm these records belong to my personal knowledge space.')
     expect(tools).toContain("exportFileName(exportOptions, ext, isPersonalSurface ? 'personal' : 'shared')")
   })
 
@@ -35,9 +35,9 @@ describe('personal memory surface contract', () => {
     const settings = src('../app/(dashboard)/settings/page.tsx')
 
     expect(nav).not.toContain("label: 'Team', localOnly: true")
-    expect(nav).toContain("l.superuserOnly && selectedSpace === 'shared'")
-    expect(header).toContain('const sharedSpace = localMode')
-    expect(header).toContain('LOCAL_SHARED_TITLES[seg]')
+    expect(nav).not.toContain("label: 'Mounts'")
+    expect(header).not.toContain('LOCAL_SHARED_TITLES')
+    expect(header).toContain('Personal memories')
     expect(header).toContain('{teamName && !localMode ?')
     expect(header).toContain('{!localMode ? <span className={`role-badge ${roleClass} head-role`}>{roleLabel}</span> : null}')
     expect(profile).toContain('!localMode ? <span className={`role-badge ${roleClass}`}>{roleLabel}</span> : null')
@@ -48,34 +48,23 @@ describe('personal memory surface contract', () => {
     expect(settings).not.toContain('SharedConnectionForm')
   })
 
-  it('treats Personal and Shared Memories as first-class dashboard spaces', () => {
+  it('exposes one personal space and the Community label', () => {
     const nav = src('../components/Nav.tsx')
     const layout = src('../app/(dashboard)/layout.tsx')
-
-    expect(nav).toContain("import { Select } from './ui/Select'")
-    expect(nav).toContain('className="space-switch"')
-    expect(nav).toContain('Personal memories')
-    expect(nav).toContain('Shared memories')
-    expect(nav).toContain('const SERVER_LINKS')
-    expect(nav).toContain('? SERVER_LINKS')
-    expect(nav).toContain("label: 'Connection'")
-    expect(nav).toContain("label: 'Memories'")
-    expect(nav).not.toContain('Personal Memories')
-    expect(layout).toContain('const sharedConnection = isLocalMode')
-    expect(layout).toContain('sharedConnection={sharedConnection}')
+    expect(nav).toContain('Community edition')
+    expect(nav).not.toContain('space-switch')
+    expect(nav).not.toContain('Shared memories')
+    expect(nav).not.toContain('SHARED_LINKS')
+    expect(nav).not.toContain("label: 'Connection'")
+    expect(layout).not.toContain('sharedConnection')
   })
 
-  it('keeps the Shared Memories connection on a dedicated page', () => {
-    const page = src('../app/(dashboard)/connection/page.tsx')
-    const form = src('../components/SharedConnectionForm.tsx')
-
-    expect(page).toContain('<SharedConnectionForm')
-    expect(page).toContain('Shared Memories Server connection')
-    expect(form).toContain("import { Input } from '@/components/ui/Input'")
-    expect(form).toContain('Shared Memories Server API URL')
-    expect(form).toContain('Connector token')
-    expect(form).toContain('Connected time')
-    expect(form).toContain('Reconnect now')
+  it('retires sharing and multi-owner administration pages in local production builds', () => {
+    for (const page of ['connection', 'grants', 'teams', 'users']) {
+      const source = src(`../app/(dashboard)/${page}/page.tsx`)
+      expect(source).toContain('notFound()')
+      expect(source).toContain("export const dynamic = 'force-dynamic'")
+    }
   })
 
   it('keeps personal notifications target-free and Slack-free', () => {
@@ -171,25 +160,29 @@ describe('personal memory surface contract', () => {
 
   it('omits team flags from personal exports and uninstall exports', () => {
     const actions = src('../app/(dashboard)/memories/actions.ts')
-    const apiRoute = root('apps/api/src/routes/dashboard/memories.ts')
+    const apiRoute = root('apps/api/src/routes/knowledge-archive.ts')
+    const exportRoute = apiRoute.slice(apiRoute.indexOf("routes.get('/memories/export'"), apiRoute.indexOf("routes.post('/memories/import'"))
     const uninstall = root('deploy/scripts/uninstall.sh')
 
     expect(actions).toContain('stripTeamFieldsFromPersonalExport')
     expect(actions).toContain("surface === 'personal' ? stripTeamFieldsFromPersonalExport(envelope) : envelope")
-    expect(apiRoute).toContain("const personalExport = config.DEPLOYMENT_MODE === 'local'")
-    expect(apiRoute).toContain('stripTeamFromExportRow')
-    expect(apiRoute).toContain('teamId: z.string().uuid().optional()')
+    expect(exportRoute).toContain("schema:'pm.memory-export/2'")
+    expect(exportRoute).toContain('knowledgeWhere(req.query)')
+    expect(exportRoute).not.toMatch(/\bteamId\s*:/)
+    expect(exportRoute).toContain('revisionHistory')
     expect(uninstall).not.toContain("'teamId', m.team_id::text")
     expect(uninstall).not.toContain("'teamName'")
     expect(uninstall).not.toContain("'teamId', NULL")
   })
 
-  it('uses the local API for shared-only server dashboards and connector proxy only for local personal dashboards', () => {
+  it('never reads old credentials or proxies to a shared memory server', () => {
     const api = src('api.ts')
-
-    expect(api).toContain("if (MEMORY_INSTALL_MODE === 'shared-only') return call<T>(path, init)")
-    expect(api).toContain("if (MEMORY_INSTALL_MODE === 'shared-only') return null")
-    expect(api).toContain('/dashboard/shared-connection?includeToken=true')
+    expect(api).toContain("'sharing_retired'")
+    expect(api).toContain('normalizeMemorySurface(surface)')
+    expect(api).not.toContain('PM_SHARED_API_URL')
+    expect(api).not.toContain('PM_SHARED_USER_TOKEN')
+    expect(api).not.toContain('/dashboard/shared-connection')
+    expect(api).not.toContain('connection.apiUrl')
   })
 
   it('does not send an empty JSON content type on no-body API calls', () => {

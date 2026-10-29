@@ -76,8 +76,10 @@ describe('platform prerequisites and app paths', () => {
     expect(buildPrereqInstallPlan('ollama', { ...host, hasOllama: true })[0]).toMatchObject({ id: 'start-ollama', cmd: expect.arrayContaining(['-Action', 'Start']) })
   })
   it('advertises installation support per prerequisite and preserves macOS actions', () => {
-    expect(prereqInstallCapabilities('win32')).toEqual({ homebrew: false, node: false, docker: false, compose: false, ollama: true })
-    expect(prereqInstallCapabilities('darwin')).toEqual({ homebrew: false, node: true, docker: true, compose: true, ollama: true })
+    expect(prereqInstallCapabilities('win32')).toEqual({ homebrew: false, node: false, npm: false, git: false, bash: false, docker: false, compose: false, buildx: false, ollama: true })
+    expect(prereqInstallCapabilities('darwin')).toEqual({ homebrew: false, node: true, npm: true, git: true, bash: true, docker: true, compose: true, buildx: true, ollama: true })
+    expect(prereqInstallCapabilities('win32', { winget: true }).git).toBe(true)
+    expect(prereqInstallCapabilities('win32', { dockerDesktop: true }).docker).toBe(true)
     expect(Object.values(prereqInstallCapabilities('linux')).some(Boolean)).toBe(false)
   })
   it('uses roaming/local Windows application data independently of the test host', () => {

@@ -27,17 +27,40 @@ The search field fills the available row width while the project, badge, confide
 
 ### New memory
 
-**New memory** is the page's primary action. It sits in the top bar while the list tab is selected and is hidden on Memory Graph and Memory Tools. The dialog writes through the same Shape gate your agents use, then embeds the record and adds it to the graph.
+**New memory** appears in the top bar while List is selected. It uses the same
+version 2 classified save contract as agents and the API. Content must be
+self-contained and at least 40 characters. Choose a controlled memory type and
+assertion status, name a normalized primary topic and tags, and describe origin
+separately from applicability.
 
-| Field | What it needs |
-| --- | --- |
-| Content | At least 40 characters: what happened, why it matters, and what to do next time. |
-| Project | The repo or product name, or `general` when there is no project context. It starts from the first project already in the list. |
-| Category | `gotcha`, `fix`, `user-correction`, `tool-gap`, `migration-pattern`, `data-constraint`, `permission`, or `flag-state`. `prd` is not offered here because it requires Confluence provenance. |
-| Source | What triggered the note: `user-correction`, `gotcha-discovered`, `postmortem`, `test-failure`, or `heal-cycle`. |
-| Entities | At least one lowercase `type_name` entity, separated by commas or spaces. Each one must also appear word-for-word in the content. |
+Origin can be a general conversation, a named project or a named system.
+Applicability can name one or more projects/systems, explicitly general knowledge,
+or an unresolved state with a reason. Unresolved applicability cannot be a
+validated fact. Provide one or more sources, each with its kind, reference and
+supporting evidence. Optional entities and tags do not establish ownership.
 
-**Save memory** stays disabled until every rule above passes, so the gate's format is visible while you write instead of arriving as a rejection.
+The catalog shows registered classification names and aliases with pagination.
+Register unknown topics/projects/systems explicitly with a reason, up to eight
+per save. Ambiguous or conflicting classifications produce actionable errors.
+The form does not choose the first project or fabricate certainty/evidence.
+
+Saving keeps a stable idempotency key for an unchanged retry. A saved record may
+still await embedding or graph processing; follow its reported status. A source's
+assertion is source-reported, not a claim of independent verification.
+
+### Inspect and correct a record
+
+The record dialog shows its revision, classification, assertion status, origin,
+applicability, sources and embedding/graph processing state. Older owned records
+remain readable as legacy/unclassified, without invented historical metadata.
+
+Editing requires the expected current revision, an intent (correction,
+supersession, additional evidence or reclassification), explicit changes and a
+reason with source evidence. A concurrent revision conflict keeps the draft open.
+Copy changes before choosing **Reload current record**, then reconcile with the
+current version. Editing a legacy record requires a complete explicit
+classification. Server-owned identity, revision numbers and timestamps cannot
+be overridden in the write payload.
 
 ### Memory Graph
 
@@ -137,3 +160,20 @@ Keep secure-export passphrases outside the export file. A standard JSON export c
 | A graph rebuild has no immediate visual result | It queues a worker job. Follow the job and its logs on Workers. |
 | The graph stays flat after clearing a selection | WebGL could not initialize or its context was lost. The fallback keeps the same nodes, filters, and selection for the rest of the session. |
 | New activity does not pulse | Keep Memory Graph selected and the browser document visible. Hidden or inactive graph tabs do not poll. |
+
+
+### Archive compatibility and ownership
+
+JSON and encrypted `.pm` archives preserve version 2 classification, revision and
+revision history. The encrypted wrapper remains `pm.secure-memory-export/1`;
+its decrypted payload declares `pm.memory-export/2`. Supported older version 1
+exports and legacy row arrays use a separate bounded conversion path, retain
+original IDs and timestamps, and remain legacy/unclassified when metadata is
+missing. Unknown envelope formats are rejected.
+
+Load and verify the file, inspect its format and count, then explicitly confirm
+that its records belong to your personal knowledge space. Original project labels
+are preserved; the import cannot relabel projects or overwrite existing IDs with
+different content. Keep ambiguous or foreign archives outside active recall.
+A lost response retains confirmed row progress and never retries an unknown
+outcome automatically. Secure archives require their original passphrase.

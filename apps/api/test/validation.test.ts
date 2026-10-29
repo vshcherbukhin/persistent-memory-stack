@@ -106,16 +106,15 @@ describe('preGate — deterministic Stage 1 (no LLM)', () => {
     expect(missing).not.toContain('graph_entity_in_content')
   })
 
-  it('prd category requires pageId + confluenceUrl', () => {
+  it('personal requirements do not require a company account or external page fields', () => {
     const content =
       '[prd_audit_export] Audit exports must exclude revoked credentials while a workspace is under legal hold.'
     const missing = preGate(content, {
       category: 'prd',
-      source: 'confluence',
+      source: 'document',
       entities: ['prd_audit_export'],
     })
-    expect(missing).toContain('metadata.pageId')
-    expect(missing).toContain('metadata.confluenceUrl')
+    expect(missing).toEqual([])
   })
 })
 
@@ -334,16 +333,14 @@ describe('validateAndRoute — Shape A–E mapping (accept path, every category)
     expect(res.shape).toBe('tool_gap')
   })
 
-  it('Shape D — category "prd" → prd (with pageId + confluenceUrl)', async () => {
+  it('Shape D accepts personal document requirements without external page fields', async () => {
     const content =
       '[prd_audit_export] Audit exports must retain immutable history while a workspace is under legal hold.'
     accept(content)
     const res = await validateAndRoute(content, {
       category: 'prd',
       entities: ['prd_audit_export'],
-      source: 'confluence',
-      pageId: '123456',
-      confluenceUrl: 'https://example.atlassian.net/wiki/spaces/X/pages/123456',
+      source: 'document',
     })
     expect(res.shape).toBe('prd')
   })

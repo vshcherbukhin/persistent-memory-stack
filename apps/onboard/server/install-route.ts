@@ -6,6 +6,7 @@ import { runInstall, type InstallEvent, type WizardPayload } from './install.js'
 import { createNdjsonStream } from './ndjson.js'
 import { resourceGate } from './resource-gate.js'
 import type { ResourceSnapshot } from '../shared/resource-policy.js'
+import { environmentIssues, type EnvironmentSnapshot } from '../shared/environment.js'
 
 export interface InstallRouteOptions<Body extends { resourceAcknowledged?: boolean }> {
   root: string
@@ -13,6 +14,7 @@ export interface InstallRouteOptions<Body extends { resourceAcknowledged?: boole
   /** Synchronously reserve installation activity, or return null if busy. */
   beginInstallation: () => (() => void) | null
   readResources: () => Promise<ResourceSnapshot>
+  checkEnvironment: (env: Record<string, string>) => Promise<EnvironmentSnapshot>
   buildWizard: (body: Body) => WizardPayload
   onToken?: (token: string) => void
   run?: typeof runInstall
@@ -27,7 +29,8 @@ export function registerInstallRoute<Body extends { resourceAcknowledged?: boole
     try {
       const body = (req.body ?? {}) as Body
       if (!existsSync(options.envPath)) return reply.code(400).send({ error: 'no_env', message: 'Generate the .env first (POST /api/env).' })
-      const env = parseEnv(readFileSync(options.envPath, 'utf8')) as Record<string, string>
+      const envText = readFileSync(options.envPath, 'utf8')
+      const env = parseEnv(envText) as Record<string, string>
       const issues = validateEnvForDeploy(env)
       if (issues.length) return reply.code(400).send({
         error: 'invalid_env', message: `Missing required env value(s): ${issues.map(issue => issue.key).join(', ')}`, issues,
@@ -35,6 +38,12 @@ export function registerInstallRoute<Body extends { resourceAcknowledged?: boole
       const snapshot = await options.readResources()
       const blocked = resourceGate(snapshot, { provider: env.EMBED_PROVIDER ?? '', model: env.EMBED_MODEL ?? '' }, body.resourceAcknowledged === true)
       if (blocked) return reply.code(422).send({ error: 'resource_requirements', message: blocked })
+      const environment = await options.checkEnvironment(env)
+      const requirements = environmentIssues(environment)
+      if (requirements.length) return reply.code(422).send({ error: 'environment_requirements', message: requirements.map((issue) => issue.message).join(' '), issues: requirements })
+      if (!existsSync(options.envPath) || readFileSync(options.envPath, 'utf8') !== envText) {
+        return reply.code(409).send({ error: 'configuration_changed', message: 'The saved configuration changed during environment checks. Review it and start installation again.' })
+      }
       const wizard = options.buildWizard(body)
       const stream = createNdjsonStream(reply)
       const emit = (event: InstallEvent): void => {
@@ -42,7 +51,7 @@ export function registerInstallRoute<Body extends { resourceAcknowledged?: boole
         stream.emit(event)
       }
       try {
-        await (options.run ?? runInstall)({ root: options.root, env, wizard }, emit)
+        await (options.run ?? runInstall)({ root: options.root, env, wizard, expectedEnvText: envText }, emit)
       } catch (error) {
         stream.emit({ type: 'error', message: error instanceof Error ? error.message : String(error) })
         stream.emit({ type: 'done', ok: false })

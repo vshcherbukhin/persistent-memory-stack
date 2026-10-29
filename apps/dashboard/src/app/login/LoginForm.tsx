@@ -37,7 +37,7 @@ export function LoginForm({
             <ProductMark />
           </span>
           <div className="login-crest-name">Persistent Memory</div>
-          <div className="eyebrow login-crest-sub">{local ? 'Local dashboard' : 'Shared server console'}</div>
+          <div className="eyebrow login-crest-sub">Community edition</div>
           <MemoryLattice width={300} height={92} opacity={0.8} className="login-crest-lattice" />
         </div>
 

@@ -45,7 +45,7 @@ test('setup preserves the ordered commands and custom coordinator location', asy
   const npm = async args => { commands.push(['npm', args]) }
   await runSetup({ nodeVersion: '22.12.0', env: { PM_COORDINATOR_INSTALL_ROOT: '/custom coordinator' }, runCommand: run, runNpmCommand: npm, log: () => {} })
   assert.deepEqual(commands.map(([cmd, args]) => cmd === 'npm' ? args : args[0]), [
-    'scripts/pre-update-snapshot.mjs', ['install'], ['run', 'prisma:generate'], ['run', 'build:update-coordinator'],
+    'scripts/pre-update-snapshot.mjs', ['ci', '--no-audit', '--no-fund'], ['run', 'prisma:generate'], ['run', 'build:update-coordinator'],
     'scripts/install-update-coordinator.mjs', ['ci', '--prefix', 'apps/onboard'], ['run', 'build:server', '--prefix', 'apps/onboard'],
     'apps/onboard/dist/apps/onboard/server/agent-update.js',
   ])

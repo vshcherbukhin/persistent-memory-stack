@@ -1,0 +1,15 @@
+{
+  "tag": "RELEASE.2025-10-15T17-29-55Z",
+  "commit": "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a",
+  "archive": {
+    "url": "https://codeload.github.com/minio/minio/tar.gz/9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a",
+    "sha256": "45521908307306e925c98d629e1c17d78c8b72b6ee242b1bfb1409f7d8ee5841",
+    "bytes": 24232282
+  },
+  "source": "https://github.com/minio/minio",
+  "release": "https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z",
+  "goImage": "golang:1.26.10-alpine3.24@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308",
+  "license": "AGPL-3.0-or-later",
+  "goModSha256": "673f06144e90bc045f0a20050d2874c52e551be5bfbd70dff6e76b66da0db702",
+  "goSumSha256": "86e062349c7abdce0465561bb409d410a95b00b0969ba05d5fb5f2e3550a5cd4"
+}

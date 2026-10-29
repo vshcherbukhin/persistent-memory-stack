@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { ruleRepairWarning, writeRuleTargets, type RuleTarget } from '../server/rule.ts'
+import { ruleRepairWarning, writeRuleTargets, mergeManagedRule, type RuleTarget } from '../server/rule.ts'
 
 const faults = vi.hoisted(() => ({ backupPrefix: '' }))
 vi.mock('node:fs', async importOriginal => {
@@ -63,7 +63,7 @@ describe('safe recovery of existing memory instruction files', () => {
     const preserved = bytes.toString('utf8').slice(1).replaceAll(BEGIN, '<!-- persistent-memory:recovered-begin -->').replaceAll(END, '<!-- persistent-memory:recovered-end -->')
     expect(installed.startsWith(`\uFEFF${BEGIN}\r\n`)).toBe(true)
     expect(installed.endsWith(preserved)).toBe(true)
-    expect(readFileSync(first.ruleFile, 'utf8')).toBe('# New detailed protocol\n')
+    expect(readFileSync(first.ruleFile, 'utf8')).toBe(mergeManagedRule('', '# New detailed protocol\n'))
     expect(ruleRepairWarning(repair)).toContain('WARN:')
     expect(ruleRepairWarning(repair)).toContain(first.memoryFile)
     expect(ruleRepairWarning(repair)).toContain(repair.backupFile)
@@ -92,12 +92,12 @@ describe('safe recovery of existing memory instruction files', () => {
   it('leaves every instruction and detailed rule unchanged when a later backup fails', () => {
     const { targets, first, second } = fixture()
     const original = `${BEGIN}\nKeep the original.\n`
-    for (const target of targets) { write(target.memoryFile, original); write(target.ruleFile, '# Existing rule\n') }
+    for (const target of targets) { write(target.memoryFile, original); write(target.ruleFile, mergeManagedRule('', '# Existing rule\n')) }
     faults.backupPrefix = `${second.memoryFile}.persistent-memory-backup-`
     expect(() => writeRuleTargets(targets, '# Replacement rule')).toThrow('instruction and rule files were not changed')
     for (const target of targets) {
       expect(readFileSync(target.memoryFile, 'utf8')).toBe(original)
-      expect(readFileSync(target.ruleFile, 'utf8')).toBe('# Existing rule\n')
+      expect(readFileSync(target.ruleFile, 'utf8')).toBe(mergeManagedRule('', '# Existing rule\n'))
     }
     expect(backupNames(first)).toHaveLength(1)
     expect(readFileSync(join(dirname(first.memoryFile), backupNames(first)[0]!), 'utf8')).toBe(original)
@@ -118,11 +118,11 @@ describe('safe recovery of existing memory instruction files', () => {
 
   it.each([BEGIN, END, `${BEGIN}\n${END}`, `${END}\nEscaped region\n${BEGIN}`, '```markdown\nUnclosed fence'])('rejects invalid custom blocks before any backup or write: %s', custom => {
     const { targets } = fixture()
-    for (const target of targets) { write(target.memoryFile, `${BEGIN}\nOriginal.\n`); write(target.ruleFile, '# Existing rule\n') }
+    for (const target of targets) { write(target.memoryFile, `${BEGIN}\nOriginal.\n`); write(target.ruleFile, mergeManagedRule('', '# Existing rule\n')) }
     expect(() => writeRuleTargets(targets, '# Replacement rule', custom)).toThrow(/markers/)
     for (const target of targets) {
       expect(readFileSync(target.memoryFile, 'utf8')).toBe(`${BEGIN}\nOriginal.\n`)
-      expect(readFileSync(target.ruleFile, 'utf8')).toBe('# Existing rule\n')
+      expect(readFileSync(target.ruleFile, 'utf8')).toBe(mergeManagedRule('', '# Existing rule\n'))
       expect(backupNames(target)).toEqual([])
     }
   })

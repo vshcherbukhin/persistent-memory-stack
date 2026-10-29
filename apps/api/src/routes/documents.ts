@@ -122,7 +122,7 @@ export async function documentRoutes(app: FastifyInstance): Promise<void> {
       const hits = await searchVectors(qdrant, {
         queryVector,
         pin: activePin,
-        allTeams: true,
+        readableTeamIds: [own!],
         ...(body.project ? { project: body.project } : {}),
         sourceKind: 'chunk',
         limit: body.limit,

@@ -98,6 +98,7 @@ export async function investigationRoutes(app: FastifyInstance): Promise<void> {
           tx.investigation.create({
             data: {
               teamId: id.teamId!, // ← SERVER-STAMPED; RLS WITH CHECK backstops
+              ownerId: id.userId, ownershipState: 'personal',
               project: body.project,
               title: body.title,
               description: body.description ?? null,

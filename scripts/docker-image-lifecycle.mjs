@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { prepareFalkorStorage } from './prepare-falkordb-storage.mjs'
 
 const OWNER = 'io.persistent-memory.install.owner'
 const ATTEMPT = 'io.persistent-memory.install.attempt'
@@ -55,12 +56,26 @@ export function dockerCommand(args, { cwd, env, timeout = 120_000, stream = fals
   })
 }
 
+/** Antivirus/indexers can briefly hold an existing file on Windows. Retry the
+ * atomic replace only; never delete/truncate the previous accepted ledger. */
+export function atomicReplace(source, destination, {
+  platform = process.platform, rename = renameSync,
+  wait = milliseconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+} = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try { rename(source, destination); return } catch (error) {
+      if (platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error
+      wait(Math.min(10 * 2 ** attempt, 250))
+    }
+  }
+}
+
 export function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
   const temporary = `${path}.${randomUUID()}.tmp`
   try {
     writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
-    renameSync(temporary, path)
+    atomicReplace(temporary, path)
   } finally { if (existsSync(temporary)) unlinkSync(temporary) }
 }
 
@@ -428,7 +443,10 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...options] = process.argv.slice(2)
   if (options.some(option => !['--all-profiles', '--include-helpers'].includes(option))) throw new Error('Unsupported image lifecycle argument.')
-  imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles'), includeHelpers: options.includes('--include-helpers') }).catch(error => {
+  const storageReady=['up','up-storage','start-apps'].includes(mode)
+    ? prepareFalkorStorage({envPath:join(process.cwd(),'.env.persistent-memory'),requireReady:true})
+    : Promise.resolve()
+  storageReady.then(()=>imageLifecycle({ root: process.cwd(), mode, allProfiles: options.includes('--all-profiles'), includeHelpers: options.includes('--include-helpers') })).catch(error => {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

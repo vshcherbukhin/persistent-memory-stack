@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { z } from 'zod'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv'
 import { registerAllTools } from '../src/server.ts'
 import type { Runtime } from '../src/runtime.ts'
 
@@ -23,7 +27,7 @@ function collectAllTools(api: unknown, runtime: Runtime): Map<string, Tool> {
   const tools = new Map<string, Tool>()
   const server = {
     registerTool(name: string, options: ToolOptions, handler: Tool['handler']) {
-      tools.set(name, { options, handler })
+      tools.set(name, { options, handler: async input => handler(z.object(options.inputSchema ?? {}).parse(input)) })
     },
   }
   registerAllTools(server as never, { api, runtime } as never)
@@ -52,7 +56,8 @@ const memoryRow = {
   isOwnTeam: true,
   createdAt: '2026-07-01T10:00:00.000Z',
   recordUpdatedAt: '2026-07-01T10:00:00.000Z',
-  memoryTier: 'semantic',
+  revision: 1, classification: null, classificationStatus: 'legacy_unclassified', embeddingStatus: 'embedded', graphStatus: 'ok',
+    memoryTier: 'semantic',
   sourceProvenance: 'user-correction',
   confidence: 0.97,
 }
@@ -72,12 +77,14 @@ const betaMemoryRow = {
   isOwnTeam: true,
   createdAt: '2026-07-01T10:05:00.000Z',
   recordUpdatedAt: '2026-07-01T10:05:00.000Z',
-  memoryTier: 'semantic',
+  revision: 1, classification: null, classificationStatus: 'legacy_unclassified', embeddingStatus: 'embedded', graphStatus: 'ok',
+    memoryTier: 'semantic',
   sourceProvenance: 'user-correction',
   confidence: 0.96,
 }
 
 const alphaDependsOnBeta = {
+  episodes: ['episode-alphaDependsOnBeta'], sourceMemoryIds: ['mem-alpha-auth'], assertionStatus: 'observation', verification: 'derived_source_reported',
   uuid: 'fact-alpha-beta',
   name: 'DEPENDS_ON',
   fact: 'component_alpha_auth DEPENDS_ON component_beta_token_guard for request validation.',
@@ -89,11 +96,12 @@ const alphaDependsOnBeta = {
   valid_at: '2026-06-20T00:00:00.000Z',
   invalid_at: null,
   project: 'persistent-memory',
-  surface: 'shared',
+  surface: 'personal',
   relation: 'own',
 }
 
 const betaReplacedLegacy = {
+  episodes: ['episode-betaReplacedLegacy'], sourceMemoryIds: ['mem-alpha-auth'], assertionStatus: 'observation', verification: 'derived_source_reported',
   uuid: 'fact-beta-legacy',
   name: 'REPLACED',
   fact: 'component_beta_token_guard REPLACED protocol_legacy_guard after stale-token incidents.',
@@ -105,11 +113,12 @@ const betaReplacedLegacy = {
   valid_at: '2026-06-20T00:00:00.000Z',
   invalid_at: null,
   project: 'persistent-memory',
-  surface: 'shared',
+  surface: 'personal',
   relation: 'own',
 }
 
 const oldLegacyFact = {
+  episodes: ['episode-oldLegacyFact'], sourceMemoryIds: ['mem-alpha-auth'], assertionStatus: 'observation', verification: 'derived_source_reported',
   uuid: 'fact-legacy-old',
   name: 'HANDLED_AUTH',
   fact: 'protocol_legacy_guard handled AlphaAuth token validation.',
@@ -121,17 +130,89 @@ const oldLegacyFact = {
   valid_at: '2026-05-01T00:00:00.000Z',
   invalid_at: '2026-06-20T00:00:00.000Z',
   project: 'persistent-memory',
-  surface: 'shared',
+  surface: 'personal',
   relation: 'own',
 }
 
 describe('recall_context', () => {
+  it.each(['timeline-only', 'graph-and-timeline'])('keeps %s facts within the advertised raw JSON contract', async (placement) => {
+    const api = {
+      post: vi.fn(async (path: string) => {
+        if (path === '/memories/search') return { results: [], counts: { own: 0, other: 0 } }
+        if (path === '/graph/search') return {
+          facts: placement === 'timeline-only'
+            ? [alphaDependsOnBeta]
+            : [alphaDependsOnBeta, betaReplacedLegacy, oldLegacyFact],
+        }
+        throw new Error(`unexpected POST ${path}`)
+      }),
+      get: vi.fn(async (path: string) => {
+        if (path.startsWith('/graph/entity/')) return { name: 'component_alpha_auth', facts: [] }
+        if (path === '/graph/timeline') return {
+          entityUuid: 'node-alpha',
+          entries: [
+            { ...oldLegacyFact, status: 'invalid' },
+            { ...betaReplacedLegacy, status: 'valid' },
+          ],
+        }
+        if (path === '/graph/contradictions') return { contradictions: [] }
+        throw new Error(`unexpected GET ${path}`)
+      }),
+    }
+    const server = new McpServer({ name: 'recall-contract-test', version: '1.0.0' })
+    registerAllTools(server, { api, runtime } as never)
+    const client = new Client({ name: 'recall-contract-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    try {
+      await server.connect(serverTransport)
+      await client.connect(clientTransport)
+      const advertised = (await client.listTools()).tools.find((tool) => tool.name === 'recall_context')!
+      expect(advertised.outputSchema).toBeDefined()
+      const validate = new AjvJsonSchemaValidator().getValidator(advertised.outputSchema!)
+      // Validate the untouched handler reply; Zod parsing strips nested unknown fields.
+      const reply = await collectAllTools(api, runtime).get('recall_context')!.handler({
+        query: 'How does AlphaAuth validate tokens now?',
+        project: 'persistent-memory',
+        scope: 'own',
+      })
+      expect(reply.isError).not.toBe(true)
+      const validation = validate(reply.structuredContent)
+      expect(validation.valid, validation.errorMessage).toBe(true)
+      const facts = reply.structuredContent!.facts as Record<string, unknown>
+      expect(facts).toEqual({
+        [alphaDependsOnBeta.uuid]: alphaDependsOnBeta,
+        [betaReplacedLegacy.uuid]: betaReplacedLegacy,
+        [oldLegacyFact.uuid]: oldLegacyFact,
+      })
+      for (const fact of Object.values(facts)) expect(fact).not.toHaveProperty('status')
+      expect(reply.structuredContent!.timeline).toMatchObject({ entries: [
+        { factRef: oldLegacyFact.uuid, status: 'invalid' },
+        { factRef: betaReplacedLegacy.uuid, status: 'valid' },
+      ] })
+      // Ensure this validator rejects the original defect without sanitizing the input.
+      const invalid = structuredClone(reply.structuredContent!)
+      ;(invalid.facts as Record<string, Record<string, unknown>>)[oldLegacyFact.uuid]!.status = 'invalid'
+      expect(validate(invalid).valid).toBe(false)
+      expect(invalid.facts).toHaveProperty(`${oldLegacyFact.uuid}.status`, 'invalid')
+      // Recall currently returns summary text only; validate JSON text too if duplicated later.
+      for (const content of reply.content) {
+        if (!content.text.trimStart().startsWith('{')) continue
+        const textPayload = JSON.parse(content.text)
+        expect(textPayload).toEqual(reply.structuredContent)
+        expect(validate(textPayload).valid).toBe(true)
+      }
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
+
   it('is the always-loaded graph-first memory entrypoint', () => {
     const tools = collectAllTools({ get: vi.fn(), post: vi.fn() }, runtime)
     const recall = tools.get('recall_context')
 
     expect(recall).toBeDefined()
-    expect(recall!.options.description).toMatch(/MANDATORY first/i)
+    expect(recall!.options.description).toMatch(/Start meaningful work here/i)
     expect(recall!.options.description).toMatch(/graph/i)
     expect(recall!.options._meta).toMatchObject({
       'anthropic/alwaysLoad': true,
@@ -143,7 +224,7 @@ describe('recall_context', () => {
     })
 
     for (const [name, tool] of tools) {
-      if (name === 'recall_context') continue
+      if (name === 'recall_context' || name === 'memory_catalog') continue
       expect(tool.options._meta?.['anthropic/alwaysLoad']).toBeUndefined()
       expect(tool.options._meta?.['openai/alwaysLoad']).toBeUndefined()
     }
@@ -207,11 +288,11 @@ describe('recall_context', () => {
     expect(api.post).toHaveBeenCalledWith('/graph/search', expect.objectContaining({
       query: 'How does AlphaAuth validate tokens now?',
       limit: 10,
-      scope: 'own',
+      project: 'persistent-memory',
       validOnly: false,
     }))
-    expect(api.get).toHaveBeenCalledWith('/graph/entity/component_alpha_auth', expect.objectContaining({ limit: 5, scope: 'own' }))
-    expect(api.get).toHaveBeenCalledWith('/graph/entity/component_beta_token_guard', expect.objectContaining({ limit: 5, scope: 'own' }))
+    expect(api.get).toHaveBeenCalledWith('/graph/entity/component_alpha_auth', expect.objectContaining({ limit: 5, project: 'persistent-memory' }))
+    expect(api.get).toHaveBeenCalledWith('/graph/entity/component_beta_token_guard', expect.objectContaining({ limit: 5, project: 'persistent-memory' }))
 
     const context = result.structuredContent!
     expect(context).toMatchObject({
@@ -310,47 +391,12 @@ describe('recall_context', () => {
     expect(result.content[0]?.text).toContain('graph_response_contract_invalid')
   })
 
-  it('uses one selected memory surface for both semantic and graph recall', async () => {
-    const personalApi = {
-      post: vi.fn(async (path: string) => {
-        if (path === '/memories/search') return { results: [], counts: { own: 0, other: 0 } }
-        if (path === '/graph/search') return { facts: [] }
-        throw new Error(`unexpected personal POST ${path}`)
-      }),
-      get: vi.fn(async (path: string) => {
-        if (path.startsWith('/project-memory-bindings/')) return { project: 'persistent-memory', surface: 'shared' }
-        return { entityUuid: null, entries: [] }
-      }),
-    }
-    const sharedApi = {
-      post: vi.fn(async (path: string) => {
-        if (path === '/memories/search') return { results: [], counts: { own: 0, other: 0 } }
-        if (path === '/graph/search') return { facts: [] }
-        throw new Error(`unexpected shared POST ${path}`)
-      }),
-      get: vi.fn(async () => ({ entityUuid: null, entries: [] })),
-    }
-    const routedRuntime: Runtime = {
-      ...runtime,
-      memorySurfaces: {
-        defaultSurface: 'personal',
-        personal: { api: personalApi, runtime },
-        shared: { api: sharedApi, runtime },
-      },
-    }
-    const tools = collectAllTools(sharedApi, routedRuntime)
-
-    await tools.get('recall_context')!.handler({
-      surface: 'shared',
-      query: 'shared graph picture',
-      project: 'persistent-memory',
-      memoryLimit: 2,
-      graphLimit: 2,
-      timelineLimit: 2,
-    })
-
-    expect(sharedApi.post).toHaveBeenCalledWith('/memories/search', expect.any(Object))
-    expect(sharedApi.post).toHaveBeenCalledWith('/graph/search', expect.any(Object))
-    expect(personalApi.post).not.toHaveBeenCalled()
+  it('rejects retired Shared routing before any semantic or graph API request', async () => {
+    const api = { post: vi.fn(), get: vi.fn() }
+    const tools = collectAllTools(api, runtime)
+    const recall = tools.get('recall_context')!
+    await expect(recall.handler({ surface: 'shared', query: 'retired route' })).rejects.toThrow()
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.get).not.toHaveBeenCalled()
   })
 })

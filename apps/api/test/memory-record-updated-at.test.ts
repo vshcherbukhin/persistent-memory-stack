@@ -11,6 +11,7 @@ const migration = source('../../../layers/core/schema/migrations/0030_memory_rec
 const dataRoute = source('../src/routes/memories.ts')
 const dashboardRoute = source('../src/routes/dashboard/memories.ts')
 const mergeService = source('../src/services/merge.ts')
+const canonical = source('../src/services/knowledge.ts')
 
 describe('user-visible memory timestamps', () => {
   it('adds, backfills, constrains, and indexes record_updated_at', () => {
@@ -30,8 +31,9 @@ describe('user-visible memory timestamps', () => {
   })
 
   it('advances the record timestamp only in explicit user edit routes', () => {
-    expect(dataRoute).toMatch(/classifyMemoryUpdate[\s\S]*recordUpdatedAt: new Date\(\)/)
-    expect(dashboardRoute).toMatch(/classifyMemoryUpdate[\s\S]*recordUpdatedAt: new Date\(\)/)
+    expect(canonical).toMatch(/updateKnowledge[\s\S]*recordUpdatedAt: new Date\(\)/)
+    expect(dataRoute).not.toContain('recordUpdatedAt: new Date()')
+    expect(dashboardRoute).not.toContain('recordUpdatedAt: new Date()')
     expect(mergeService).not.toContain('recordUpdatedAt: new Date()')
   })
 })

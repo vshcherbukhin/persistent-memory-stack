@@ -34,7 +34,7 @@ describe('dashboard overview Ollama health', () => {
 
     const result = await serviceOverview({ activeEmbedModel: 'qwen3-embedding:4b', embeddingMode: 'server' })
 
-    expect(docker.ollamaInfo).toHaveBeenCalledWith({ model: 'qwen3-embedding:4b', provider: 'ollama' })
+    expect(docker.ollamaInfo).toHaveBeenCalledWith({ model: 'qwen3-embedding:4b', provider: 'ollama', dim: 2560 })
     expect(result.services).toMatchObject({ total: 2, healthy: 1, active: 1, unhealthy: 1, failed: 1 })
   })
 

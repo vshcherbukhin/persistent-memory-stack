@@ -19,27 +19,29 @@ import { dirname, resolve } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 
 /** Candidate prompt locations, in priority order (dev/tsx, build, monorepo). */
-const CANDIDATES = [
+const candidates = (name:string) => [
   // dev (tsx) or built (dist): apps/api/{src,dist}/protocol → persistent-memory/prompts
-  resolve(here, '../../../../prompts/fact-extraction.md'),
+  resolve(here, '../../../../prompts', name),
   // package-local fallback if a future image layout copies prompts beside the app
-  resolve(here, '../../../prompts/fact-extraction.md'),
+  resolve(here, '../../../prompts', name),
   // env override (set in the container if the layout differs)
-  process.env.FACT_EXTRACTION_PROMPT_FILE
+  name==='fact-extraction.md' && process.env.FACT_EXTRACTION_PROMPT_FILE
     ? resolve(process.env.FACT_EXTRACTION_PROMPT_FILE)
     : '',
 ].filter(Boolean)
 
-function loadPrompt(): string {
-  for (const candidate of CANDIDATES) {
+function loadPrompt(name:string): string {
+  const paths=candidates(name)
+  for (const candidate of paths) {
     if (existsSync(candidate)) return readFileSync(candidate, 'utf-8')
   }
   throw new Error(
-    `fact-extraction.md not found — checked: ${CANDIDATES.join(', ')}. ` +
+    `${name} not found — checked: ${paths.join(', ')}. ` +
       'The Shape-gate prompt must ship in the image; set ' +
       'FACT_EXTRACTION_PROMPT_FILE to override the path.',
   )
 }
 
 /** The fact-extraction system prompt, loaded once at boot (fail-fast). */
-export const FACT_EXTRACTION_PROMPT: string = loadPrompt()
+export const FACT_EXTRACTION_PROMPT: string = loadPrompt('fact-extraction.md')
+export const KNOWLEDGE_CONTENT_PROMPT: string = loadPrompt('knowledge-content.md')

@@ -20,6 +20,7 @@ import { applyTheme, dashboardThemeUrl, readTheme, type ThemePreference } from '
 import { EmbeddingSetup, embeddingTestSignature } from './EmbeddingSetup'
 import { ResourceSummary } from './ResourceSummary'
 import { RESOURCE_MODELS, evaluateResources, recommendResources, type ResourceSnapshot } from '../../shared/resource-policy'
+import { type EnvironmentCheck, type EnvironmentProbe } from '../../shared/environment'
 import { type Flow, type Phase, phasesFor, nextPhase, prevPhase, prereqsBlocked, modelPresence, extractionNextBlocked, memorySettingsForFlow } from './flow'
 
 const LOCAL_DASHBOARD_URL = 'http://localhost:3200'
@@ -356,7 +357,6 @@ export default function App() {
               }} />}
               {phase === 'prereqs' && <Prereqs {...shared} />}
               {phase === 'account' && <Account {...shared} />}
-              {phase === 'remote' && <RemoteConnect {...shared} />}
               {phase === 'embedding' && <EmbeddingSetup {...shared} tested={embeddingTested} setTested={setEmbeddingTested} set={(key, value) => setAnswers(current => ({ ...current, [key]: value }))} />}
               {phase === 'pullModel' && <PullModel {...shared} />}
               {phase === 'extraction' && <Extraction {...shared} />}
@@ -364,7 +364,6 @@ export default function App() {
               {phase === 'registration' && <Registration {...shared} />}
               {phase === 'rule' && <RuleStep {...shared} />}
               {phase === 'review' && <Review flow={flow} answers={answers} serverPin={serverPin} setNextDisabled={setNextDisabled} setFault={setFault} embeddingTested={embeddingTested} onEmbedding={() => setPhaseAndResetGate('embedding')} onGoto={setPhaseAndResetGate} />}
-              {flow !== 'full' && phase === 'shared' && <SharedConnect {...shared} />}
               {phase === 'install' && (
                 <Install
                   flow={flow}
@@ -502,7 +501,7 @@ function FlowRouter({ onPick }: { onPick: (f: Flow, personalMemoryEnabled: boole
 }
 
 // ── Prereqs (flow-aware) ──────────────────────────────────────────────────────────
-interface PrereqResult {
+interface PrereqResult extends Record<EnvironmentCheck, EnvironmentProbe> {
   platform?: string
   automaticInstallSupported?: boolean
   automaticInstallComponents?: Partial<Record<PrereqKey, boolean>>
@@ -527,13 +526,21 @@ interface PrereqResult {
   recommendedModelPresent: boolean
 }
 
-type PrereqKey = 'node' | 'docker' | 'compose' | 'ollama'
+type PrereqKey = EnvironmentCheck | 'ollama'
 type PrecheckStatus = 'pending' | 'verifying' | 'installing' | 'ok' | 'warn'
 
 const PREREQ_ITEMS: { key: PrereqKey; label: string }[] = [
-  { key: 'node', label: 'Node 24 LTS / 22.12+ (22.x)' },
-  { key: 'docker', label: 'Docker daemon' },
-  { key: 'compose', label: 'Docker Compose v2' },
+  { key: 'node', label: 'Node 24.x / 22.12+ (22.x)' },
+  { key: 'npm', label: 'npm 10.x / 11.x' },
+  { key: 'git', label: 'Git' },
+  { key: 'bash', label: 'Native Bash / Git Bash' },
+  { key: 'docker', label: 'Docker Linux engine' },
+  { key: 'compose', label: 'Docker Compose 2.24.4+' },
+  { key: 'buildx', label: 'Docker Buildx' },
+  { key: 'rootWrite', label: 'Installation write access' },
+  { key: 'ports', label: 'Required host ports' },
+  { key: 'network', label: 'Build package registries' },
+  { key: 'composeConfig', label: 'Saved Compose configuration' },
   { key: 'ollama', label: 'Ollama (host)' },
 ]
 
@@ -586,16 +593,13 @@ function HomebrewManualCard({ detail, manual }: { detail: string; manual?: NonNu
 }
 
 function prereqProbe(p: PrereqResult, key: PrereqKey): { ok: boolean; detail: string; installed?: boolean } {
-  if (key === 'node') return p.node
-  if (key === 'docker') return p.docker
-  if (key === 'compose') return p.compose
-  return p.ollama
+  return p[key] ?? { ok: false, detail: 'This required check was not reported. Restart setup and check again.' }
 }
 
 function prereqAction(p: PrereqResult, key: PrereqKey): string | undefined {
   if (p.automaticInstallComponents ? !p.automaticInstallComponents[key] : p.automaticInstallSupported === false) return undefined
   const brewMissing = !!(p.homebrew && !p.homebrew.ok)
-  if (key === 'node') return p.node.ok || brewMissing ? undefined : 'Install'
+  if (key === 'node' || key === 'npm' || key === 'git' || key === 'bash' || key === 'buildx') return prereqProbe(p, key).ok || brewMissing ? undefined : 'Install / Repair'
   if (key === 'docker') return p.docker.ok ? undefined : p.docker.installed ? 'Start' : brewMissing ? undefined : 'Install'
   if (key === 'compose') return p.compose.ok || brewMissing ? undefined : 'Install / Repair'
   if (key === 'ollama') return p.ollama.ok ? undefined : p.ollama.installed ? 'Start' : brewMissing ? undefined : 'Install'
@@ -610,19 +614,23 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [restartRequired, setRestartRequired] = useState(false)
+  const checkGeneration = useRef(0)
   const check = async () => {
+    const generation = ++checkGeneration.current
     setP(null)
     setCompletedChecks(0)
     setError(null)
     try {
       const [result] = await Promise.all([getJSON<PrereqResult>('/api/prereqs'), refreshResources()])
+      if (generation !== checkGeneration.current) return
       setP(result)
       if (result.node.ok) setRestartRequired(false)
     } catch (e) {
+      if (generation !== checkGeneration.current) return
       setError(e instanceof Error ? e.message : String(e))
     }
   }
-  useEffect(() => { void check() }, [])
+  useEffect(() => { void check(); return () => { checkGeneration.current++ } }, [])
   useEffect(() => {
     if (!p) return
     setCompletedChecks(0)
@@ -633,7 +641,7 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
   const localEnabled = resources ? recommendResources(resources).localEnabled : false
   const blocked = prereqsBlocked(flow, p, { personalMemoryEnabled: answers.personalMemoryEnabled }) || !baseline?.allowed
   const brewMissing = !!(p?.homebrew && !p.homebrew.ok)
-  useEffect(() => { setNextDisabled(!p || completedChecks < PREREQ_ITEMS.length || blocked) }, [p, completedChecks, blocked])
+  useEffect(() => { setNextDisabled(!p || completedChecks < PREREQ_ITEMS.length || blocked || !!installing || restartRequired) }, [p, completedChecks, blocked, installing, restartRequired])
   const scanned = !!p && completedChecks >= PREREQ_ITEMS.length
   const failedRequired = p ? PREREQ_ITEMS.filter(item => item.key !== 'ollama' && !prereqProbe(p, item.key).ok).length : 0
   const showFault = !installing && ((!restartRequired && blocked && scanned) || !!error)
@@ -649,7 +657,7 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
         if (update) setProgress(update)
         if (e.type === 'stdout') setLog((l) => [...l.slice(-300), String(e.chunk)])
         if (e.type === 'error' && e.message) failed = String(e.message)
-        if (component === 'node' && e.type === 'done' && e.ok === true && e.restartRequired === true) needsRestart = true
+        if ((component === 'node' || component === 'npm') && e.type === 'done' && e.ok === true && e.restartRequired === true) needsRestart = true
       })
     } catch (e) {
       failed = e instanceof Error ? e.message : String(e)
@@ -710,7 +718,7 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
               status={probe.ok ? 'ok' : 'warn'}
               label={item.label}
               detail={detail}
-              action={item.key === 'node' && restartRequired ? undefined : prereqAction(p, item.key)}
+              action={(item.key === 'node' || item.key === 'npm') && restartRequired ? undefined : prereqAction(p, item.key)}
               onInstall={installing ? undefined : () => void install(item.key)}
             />
           )
@@ -727,6 +735,7 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
       ) : null}
       {resources && baseline ? <ResourceSummary snapshot={resources} assessment={baseline} /> : <Notice tone="warn">{resourceError ?? 'Measuring RAM and disk space…'}</Notice>}
       <p className="field-hint">The baseline assumes API keys for both embeddings and fact extraction. Ollama adds model-specific requirements in the Embeddings step.</p>
+      <p className="field-hint">A supported Node runtime with npm is required to launch this wizard. Install it from nodejs.org first if setup cannot start. Install and Start actions can request operating-system approval; a Node/npm change requires a new terminal and wizard restart. Docker Desktop upgrades can restart its engine; setup rechecks readiness afterward.</p>
       {installing && progress ? (
         <PrereqProgress progress={progress} component={PREREQ_ITEMS.find(item => item.key === installing)!.label} />
       ) : null}
@@ -752,7 +761,7 @@ function Prereqs({ flow, answers, setNextDisabled, setFault, resources, resource
       ) : null}
       {scanned && !blocked && !error && !installing && !restartRequired ? (
         <Notice tone="ok" title="Ready to configure">
-          Node, Docker and Compose are satisfied{p && p.ollama.ok ? ', and Ollama is present, so a local embedding model stays available' : ''}. Choose embeddings and extraction in the next steps.
+          Required host checks are satisfied{p && p.ollama.ok ? ', and Ollama is present, so a local embedding model stays available' : ''}. Setup rechecks the saved environment on the server before installation.
         </Notice>
       ) : null}
       {(p || error) && !installing ? (
@@ -887,151 +896,6 @@ function Account({ answers, set, setNextDisabled, setFault, flow, remoteIdentity
   )
 }
 
-// ── Optional Shared Memories connection ─────────────────────────────────────────
-function SharedConnect(props: StepProps) {
-  const { answers, set, remoteIdentity, setRemoteIdentity, setServerPin, setNextDisabled } = props
-  const [sharedConnectEnabled, setSharedConnectEnabled] = useState(answers.memoryInstallMode === 'personal-and-shared')
-  useEffect(() => {
-    set('memoryInstallMode', sharedConnectEnabled ? 'personal-and-shared' : 'personal-only')
-    set('defaultMemorySurface', 'personal')
-    if (!sharedConnectEnabled) {
-      setRemoteIdentity(null)
-      setServerPin(null)
-    }
-  }, [sharedConnectEnabled])
-  useEffect(() => {
-    setNextDisabled(sharedConnectEnabled && !remoteIdentity)
-  }, [sharedConnectEnabled, remoteIdentity])
-
-  useEffect(() => { if (!sharedConnectEnabled) props.setFault(false) }, [sharedConnectEnabled])
-
-  return (
-    <section>
-      <h2>Connect Shared Memories</h2>
-      {!sharedConnectEnabled ? <p className="lede">Optional. Personal Memories is already fully configured — this only adds a second, team-owned space.</p> : null}
-      <label className={`checkrow flow-isolation-option${sharedConnectEnabled ? ' checked' : ''}`}>
-        <input type="checkbox" checked={sharedConnectEnabled} onChange={(e) => setSharedConnectEnabled(e.target.checked)} />
-        <span className="checkbox" aria-hidden>{sharedConnectEnabled ? <Icon name="check" size={11} /> : ''}</span>
-        <span className="checkrow-label">Connect this local dashboard to Shared Memories</span>
-        <span className="checkrow-tag">can be added later</span>
-      </label>
-      {sharedConnectEnabled ? (
-        <div className="shared-connect-body">
-          <RemoteConnect {...props} nested />
-        </div>
-      ) : (
-        <>
-          <Notice>Shared Memories can be connected any time from the local dashboard under <b>Shared memories → Connection</b>. Skipping now changes nothing about your personal stack.</Notice>
-          <div className="shared-skip-art"><Lattice width={220} height={110} /></div>
-        </>
-      )}
-    </section>
-  )
-}
-
-// ── Shared server connector token test ─────────────────────────────────────────
-type RemoteError = { kind: 'unreachable' | 'bad_token'; url: string; portHint: boolean }
-
-function RemoteConnect({ answers, set, serverPin, setServerPin, remoteIdentity, setRemoteIdentity, setNextDisabled, setFault, nested = false }: StepProps & { nested?: boolean }) {
-  const [testing, setTesting] = useState(false)
-  const [whoami, setWhoami] = useState<RemoteIdentity | null>(remoteIdentity)
-  const [error, setError] = useState<RemoteError | null>(null)
-  useEffect(() => { setWhoami(remoteIdentity) }, [remoteIdentity])
-  useEffect(() => { setNextDisabled(!whoami) }, [whoami])
-  useEffect(() => { setFault(!!error) }, [error])
-  const clearConnection = () => {
-    setWhoami(null)
-    setRemoteIdentity(null)
-    setServerPin(null)
-    setError(null)
-  }
-  const setRemoteApiUrl = (value: string) => {
-    clearConnection()
-    set('remoteApiUrl', value)
-  }
-  const setRemoteToken = (value: string) => {
-    clearConnection()
-    set('remoteToken', value)
-  }
-  const missingLocalPort = (urlText: string) => {
-    try {
-      const url = new URL(urlText)
-      return (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && !url.port
-    } catch {
-      return false
-    }
-  }
-  const test = async () => {
-    setTesting(true); setError(null); setWhoami(null); setServerPin(null); setRemoteIdentity(null)
-    const r = await postJSON<{ config: RemoteServerConfig | null; whoami: RemoteIdentity | null; error?: string }>(
-      '/api/remote/test', { apiUrl: answers.remoteApiUrl, token: answers.remoteToken },
-    ).catch(() => ({ config: null, whoami: null, error: 'unreachable' }))
-    setTesting(false)
-    const pin = serverPinFromConfig(r.config)
-    const url = answers.remoteApiUrl.replace(/\/+$/, '')
-    if (r.error === 'unreachable' || !pin) {
-      setError({ kind: 'unreachable', url, portHint: missingLocalPort(answers.remoteApiUrl) })
-      return
-    }
-    if (r.error === 'bad_token' || !r.whoami) { setError({ kind: 'bad_token', url, portHint: false }); setServerPin(pin); return }
-    const identity = r.whoami
-    const alias = identity.userDisplayName?.trim() || (identity.userEmail?.includes('@') ? identity.userEmail.split('@')[0] : '')
-    setServerPin(pin); setWhoami(identity); setRemoteIdentity(identity)
-    set('teamName', identity.teamName ?? '')
-    set('userEmail', identity.userEmail ?? '')
-    set('userName', alias)
-  }
-  return (
-    <section>
-      {nested ? (
-        <>
-          <h3>Shared Memories server</h3>
-          <p className="note">The connector token is saved in the local dashboard as a masked secret.</p>
-        </>
-      ) : (
-        <>
-          <h2>Shared Memories server</h2>
-          <p className="lede">The connector token is saved in the local dashboard as a masked secret.</p>
-        </>
-      )}
-      <Field label="Shared API URL" hint="The Persistent Memory API URL printed by the shared server installer.">
-        <input className={`mono${error?.kind === 'unreachable' ? ' invalid' : ''}`} value={answers.remoteApiUrl} onChange={(e) => setRemoteApiUrl(e.target.value)} placeholder="http://127.0.0.1:12090" />
-      </Field>
-      <Field label="Connector token" hint={<>Server-issued token for this local dashboard (<code>tokenId.secret</code>).</>}>
-        <input type="password" className={`mono${error?.kind === 'bad_token' ? ' invalid' : ''}`} value={answers.remoteToken} onChange={(e) => setRemoteToken(e.target.value)} placeholder="tokenId.secret" />
-      </Field>
-      <div className="btn-row">
-        <button type="button" className="btn secondary" onClick={() => void test()} disabled={testing || !answers.remoteApiUrl || !answers.remoteToken}>
-          <Icon name="cloud_sync" size={15} /> {testing ? 'Testing…' : 'Test connection'}
-        </button>
-      </div>
-      {error?.kind === 'unreachable' ? (
-        <Notice tone="fault" title={`Couldn’t reach ${error.url}/config`} role="alert">
-          {error.portHint
-            ? <>Local server installs need the API port — for example <code>http://127.0.0.1:12090</code> for a client-managed embeddings validation server.</>
-            : 'Check the URL and that the shared server is running.'}
-          <p className="note">{nested ? 'Nothing was saved. You can also clear the checkbox and connect later from the dashboard.' : 'Nothing was saved.'}</p>
-        </Notice>
-      ) : null}
-      {error?.kind === 'bad_token' ? (
-        <>
-          {serverPin ? <Notice tone="ok">Server reachable · pins <code>{serverPin.model} @ {serverPin.dim}</code></Notice> : null}
-          <Notice tone="fault" icon="lock" title="The token was rejected" role="alert">
-            Check it was copied whole (<code>tokenId.secret</code>, including the dot) and has not expired. Connector tokens are issued by a super-admin on the shared server.
-          </Notice>
-        </>
-      ) : null}
-      {whoami ? (
-        <Notice tone="ok" title="Connected">
-          <b>{whoami.userEmail ?? 'server user'}</b>{whoami.teamName ? <> on team <b>{whoami.teamName}</b></> : null}; role <b>{whoami.adminLevel}</b>.
-          <p className="note">Server pins <code>{serverPin?.model} @ {serverPin?.dim}</code>.</p>
-        </Notice>
-      ) : null}
-    </section>
-  )
-}
-
-// ── Pull model (engine flow — pull the server's exact pin) ────────────────────────
 function PullModel({ serverPin, setNextDisabled }: StepProps) {
   const model = serverPin?.model ?? ''
   const [pulled, setPulled] = useState<boolean | null>(null)
@@ -1150,7 +1014,7 @@ function Extraction({ answers, set, setNextDisabled, setFault }: StepProps) {
         </div>
       </div>
       {isAnthropic ? (
-        <Field label="ANTHROPIC_API_KEY (mandatory)" hint={<>Stored only in the local <code>.env.persistent-memory</code>; masked in the review step.</>}>
+        <Field label="ANTHROPIC_API_KEY / Claude OAuth token (mandatory)" hint={<>Stored only in the local <code>.env.persistent-memory</code>; masked in the review step.</>}>
           <input type="password" className={testState === 'error' ? 'invalid' : keyOnFile && !typedKey?.trim() ? 'readonly' : undefined} value={answers.anthropicApiKey} onChange={(e) => set('anthropicApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} />
         </Field>
       ) : (
@@ -1158,8 +1022,14 @@ function Extraction({ answers, set, setNextDisabled, setFault }: StepProps) {
           <input type="password" className={testState === 'error' ? 'invalid' : keyOnFile && !typedKey?.trim() ? 'readonly' : undefined} value={answers.openaiApiKey} onChange={(e) => set('openaiApiKey', e.target.value)} placeholder={keyOnFile ? '•••• existing key — leave blank to keep' : 'sk-…'} />
         </Field>
       )}
+      {isAnthropic ? <Notice title="Use a Claude subscription token">
+        With a paid Claude Pro, Max, Team, or Enterprise subscription, run <code>claude setup-token</code> in your terminal and approve it in the browser.
+        The command prints a one-year OAuth token; paste it into the credential field above. It does not save the token for you.
+        This uses your Claude subscription and is distinct from Anthropic Console API billing. A successful fact-extraction test is still required.
+        {' '}<a href="https://code.claude.com/docs/en/authentication#generate-a-long-lived-token" target="_blank" rel="noopener noreferrer">Official token instructions</a>
+      </Notice> : null}
       {keyOnFile && testState !== 'error' ? <Notice tone="ok">An existing <code>{isAnthropic ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'}</code> was found in your <code>.env.persistent-memory</code> — leave the field blank to keep it, or enter a new one to replace it.</Notice> : null}
-      {needsKey ? <Notice tone="warn">An API key is required to continue.</Notice> : null}
+      {needsKey ? <Notice tone="warn">A provider credential is required to continue.</Notice> : null}
       <div className="btn-row">
         <button type="button" className={`btn${needsKey ? '' : ' secondary'}`} onClick={() => void testFactExtraction()} disabled={needsKey || testState === 'testing'}>
           <Icon name={testState === 'error' ? 'refresh' : 'bolt'} size={15} /> {testState === 'testing' ? 'Testing…' : testState === 'error' ? 'Test again' : 'Test fact extraction'}
@@ -1592,9 +1462,7 @@ function Install({ flow, body, onToken, onDone, onBack, setFault }: { flow: Flow
   const total = steps.length || 1
   const failedIndex = steps.findIndex((step) => step.state === 'failed')
   const title = failed ? 'Install failed' : running ? 'Installing' : 'Install complete'
-  const sub = body.memoryInstallMode === 'personal-and-shared'
-    ? 'Bringing up the local personal stack, connecting Shared Memories, then registering the stream MCP. ~5–10 min.'
-    : 'Bringing up the local personal stack, then registering the stream MCP and writing the rule. ~5–10 min.'
+  const sub = 'Bringing up the local personal stack, then registering the stream MCP and writing the rule. ~5–10 min.'
   const [copied, setCopied] = useState(false)
   const copyLog = () => {
     try { void navigator.clipboard.writeText(log.join('')) } catch { /* clipboard unavailable */ }
@@ -1646,7 +1514,7 @@ function Done({ flow, token, apps, passwordConfigured, embedding, summary }: { f
   const copy = () => { if (token) { try { void navigator.clipboard.writeText(token) } catch { /* ignore */ } setCopied(true); setTimeout(() => setCopied(false), 1600) } }
   const go = async () => {
     const fin = await getJSON<{ dashboardUrl: string }>('/api/finish').catch(() => ({ dashboardUrl: LOCAL_DASHBOARD_URL }))
-    void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})
+    void postJSON('/api/shutdown', {}).catch(() => {})
     window.location.assign(dashboardThemeUrl(fin.dashboardUrl, readTheme()))
   }
   const restart = [
@@ -1706,7 +1574,7 @@ function Done({ flow, token, apps, passwordConfigured, embedding, summary }: { f
           {token ? <span className="note">Store the token in your password manager first.</span> : null}
         </div>
       ) : (
-        <div className="btn-row"><button type="button" className="btn primary" onClick={() => void fetch('/api/shutdown', { method: 'POST' }).catch(() => {})}>Done</button></div>
+        <div className="btn-row"><button type="button" className="btn primary" onClick={() => void postJSON('/api/shutdown', {}).catch(() => {})}>Done</button></div>
       )}
     </section>
   )

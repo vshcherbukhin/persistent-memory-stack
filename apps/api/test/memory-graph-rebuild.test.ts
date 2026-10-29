@@ -46,10 +46,14 @@ describe('resolveMemoryGraphRebuildRequest', () => {
 })
 
 describe('dashboard memory routes keep Graphiti in the normal mutation path', () => {
-  it('marks changed/imported rows graph-pending and delegates episode stamping to the sync helper', () => {
-    expect(adminMemoriesRoute.match(/graphSyncPendingPatch/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
-    expect(adminMemoriesRoute.match(/postMemoryGraphEpisodeAndStamp/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
-    expect(adminMemoriesRoute).toContain('graphVersion: graphVersion.graphVersion')
+  it('queues canonical and imported rows honestly while the existing worker owns graph processing', () => {
+    const canonical = readFileSync(new URL('../src/services/knowledge.ts', import.meta.url), 'utf8')
+    const archive = readFileSync(new URL('../src/routes/knowledge-archive.ts', import.meta.url), 'utf8')
+    const worker = readFileSync(new URL('../../../apps/worker/src/steps/memory-graph-backfill.ts', import.meta.url), 'utf8')
+    expect(canonical).toContain("graphStatus: 'pending'")
+    expect(archive).toContain("graphStatus:'pending'")
+    expect(worker).toContain('replayMemoryGraphBackfillRows')
+    expect(worker).toContain('memory:${row.id}:revision:')
   })
 
   it('uses a single-use live-impact preview and durable lifecycle commands for dashboard deletes', () => {
@@ -73,13 +77,10 @@ describe('dashboard memory routes keep Graphiti in the normal mutation path', ()
     expect(dataMemoriesRoute).toContain('consumedAt: null')
   })
 
-  it('uses the graph-only row version when conditionally stamping an inline graph episode', () => {
-    const dataMemoriesRoute = readFileSync(
-      fileURLToPath(new URL('../src/routes/memories.ts', import.meta.url)),
-      'utf8',
-    )
-    expect(dataMemoriesRoute).toContain('Vector bookkeeping advances updatedAt but deliberately leaves the graph')
-    expect(dataMemoriesRoute.match(/select: \{ graphVersion: true \}/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
-    expect(adminMemoriesRoute.match(/select: \{ graphVersion: true \}/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+  it('uses graph and accepted-record versions when stamping a derived episode', () => {
+    const sync = readFileSync(new URL('../../../layers/graph/src/api/memory-graph-sync.ts', import.meta.url), 'utf8')
+    expect(sync).toContain('graphVersion: row.graphVersion')
+    expect(sync).toContain('revision: row.revision')
+    expect(sync).toContain("ownershipState: 'personal', deletedAt: null")
   })
 })
