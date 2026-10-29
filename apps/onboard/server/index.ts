@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 import { homedir } from 'node:os'
 import Fastify from 'fastify'
 import fastifyStatic from '@fastify/static'
@@ -20,15 +20,14 @@ import {
   buildPrereqInstallPlan,
   prereqInstallCapabilities,
   parseCommandPresence,
-  parseDockerInfo,
-  parseComposeVersion,
-  parseNodeVersion,
   parseOllamaTags,
   hasModel,
   homebrewManualInstallCommands,
   manualPrereqHint,
   type PrereqComponent,
   type PrereqInstallStep,
+  PREREQ_COMPONENTS,
+  node24FromWingetVersions,
 } from './prereq.js'
 import { parseEnvFile, type WizardPayload } from './install.js'
 import { readApps } from './detect.js'
@@ -47,6 +46,8 @@ import { createNdjsonStream } from './ndjson.js'
 import { createPrereqOutputParser } from './progress.js'
 import { chooseFolder } from './folder-picker.js'
 import { agentProfileEnvironment } from './agent-profiles.js'
+import { readEnvironment } from './environment.js'
+import { registerMutationNonce } from './session-guard.js'
 
 const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : process.env.ONBOARD_PORT ?? 4319)
 const PM_ROOT = process.platform === 'win32' ? nativeWindowsPath(process.env.PM_ROOT ?? process.cwd()) : process.env.PM_ROOT ?? process.cwd()
@@ -74,6 +75,7 @@ app.addHook('onRequest', async (req, reply) => {
   const reason = originGuardReason(req.method, req.headers.host, req.headers.origin, PORT)
   if (reason) return reply.code(403).send({ error: reason })
 })
+registerMutationNonce(app)
 
 function execCapture(cmd: string, args: string[]): Promise<{ code: number; stdout: string }> {
   return new Promise((resolve) => {
@@ -114,29 +116,31 @@ async function brewEnv(): Promise<NodeJS.ProcessEnv> {
 }
 
 async function prereqState() {
-  const [brewPath, dockerVersion, docker, compose, node, ollamaWhich, ollamaTags] = await Promise.all([
+  const saved = existsSync(ENV_PATH) ? parseEnv(readFileSync(ENV_PATH, 'utf8')) as Record<string, string> : {}
+  const [environment, brewPath, wingetWhich, ollamaWhich, ollamaTags] = await Promise.all([
+    readEnvironment({ root: PM_ROOT, env: saved }),
     detectBrewPath(),
-    execCapture('docker', ['--version']),
-    execCapture('docker', ['info', '--format', '{{.OSType}}']),
-    execCapture('docker', ['compose', 'version']),
-    // Probe the running interpreter, not a different Node selected later on PATH.
-    execCapture(process.execPath, ['-v']),
+    process.platform === 'win32' ? execCapture(presenceCommand('winget').command, presenceCommand('winget').args) : Promise.resolve({ code: 1, stdout: '' }),
     execCapture(presenceCommand('ollama').command, presenceCommand('ollama').args),
     fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok ? r.json() : null).catch(() => null),
   ])
   const models = parseOllamaTags(ollamaTags)
-  const dockerInstalled = dockerVersion.code === 0
-  const dockerInfo = parseDockerInfo(docker.stdout, docker.code)
+  const wingetPath = parseCommandPresence('WinGet', wingetWhich.stdout, wingetWhich.code).path ?? null
+  const dockerDesktopPath = process.platform === 'win32' ? win32.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Docker', 'Docker', 'Docker Desktop.exe') : null
+  const hasDockerDesktop = !!dockerDesktopPath && existsSync(dockerDesktopPath)
   const ollamaPresence = parseCommandPresence('Ollama', ollamaWhich.stdout, ollamaWhich.code)
   const ollamaInstalled = !!ollamaPresence.installed
   const ollamaRunning = !!ollamaTags && typeof ollamaTags === 'object'
     && 'models' in ollamaTags && Array.isArray(ollamaTags.models)
   return {
+    ...environment.checks,
+    environment,
     platform: process.platform,
     automaticInstallSupported: process.platform === 'darwin' || process.platform === 'win32',
-    automaticInstallComponents: prereqInstallCapabilities(process.platform),
+    automaticInstallComponents: prereqInstallCapabilities(process.platform, { winget: !!wingetPath, dockerDesktop: hasDockerDesktop }),
+    wingetPath, dockerDesktopPath, hasDockerDesktop,
     manualHints: process.platform === 'darwin' ? null : Object.fromEntries(
-      (['node', 'docker', 'compose', 'ollama'] as const).map((key) => [key,
+      PREREQ_COMPONENTS.filter(key => key !== 'homebrew').map((key) => [key,
         key === 'ollama' && process.platform === 'win32'
           ? 'Choose Install to download the official Ollama installer, or Start to run an existing installation. The wizard checks readiness automatically.'
           : manualPrereqHint(key, process.platform)]),
@@ -152,15 +156,6 @@ async function prereqState() {
         ? homebrewManualInstallCommands(process.arch)
         : null,
     },
-    docker: {
-      ...dockerInfo,
-      ok: dockerInstalled && dockerInfo.ok,
-      installed: dockerInstalled,
-      running: dockerInfo.ok,
-      detail: dockerInstalled ? dockerInfo.detail : 'Docker Desktop not found.',
-    },
-    compose: parseComposeVersion(compose.stdout, compose.code),
-    node: parseNodeVersion(node.stdout),
     ollama: {
       ok: ollamaInstalled && ollamaRunning,
       installed: ollamaInstalled,
@@ -181,15 +176,16 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 function prereqReady(component: PrereqComponent, state: Awaited<ReturnType<typeof prereqState>>): boolean {
   if (component === 'homebrew') return !!state.homebrew.ok
-  if (component === 'node') return !!state.node.ok
-  if (component === 'docker' || component === 'compose') return !!state.docker.ok && !!state.compose.ok
+  if (component === 'node' || component === 'npm' || component === 'git' || component === 'bash') return !!state[component].ok
+  if (component === 'docker' || component === 'compose' || component === 'buildx') return !!state.docker.ok && !!state.compose.ok && !!state.buildx.ok
   if (component === 'ollama') return !!state.ollama.ok
   return false
 }
 
 async function waitForPrereqReady(component: PrereqComponent, emit: (e: unknown) => void): Promise<boolean> {
   emit({ type: 'progress', id: `wait-${component}`, stage: 'ready' })
-  for (let i = 0; i < 90; i++) {
+  const deadline = Date.now() + 180_000
+  for (let i = 0; i < 90 && Date.now() < deadline; i++) {
     const state = await prereqState()
     if (prereqReady(component, state)) {
       emit({ type: 'stdout', id: `wait-${component}`, chunk: `${component} is ready.\n` })
@@ -197,7 +193,7 @@ async function waitForPrereqReady(component: PrereqComponent, emit: (e: unknown)
     }
     const detail =
       component === 'homebrew' ? state.homebrew.detail :
-        component === 'node' ? state.node.detail :
+        component === 'node' || component === 'npm' || component === 'git' || component === 'bash' ? state[component].detail :
           component === 'ollama' ? state.ollama.detail :
             `${state.docker.detail} ${state.compose.detail}`
     emit({ type: 'stdout', id: `wait-${component}`, chunk: `${component}: ${detail} (${i + 1}/90)\n` })
@@ -254,6 +250,7 @@ async function runPrereqStep(step: PrereqInstallStep, emit: (e: unknown) => void
 
 let prerequisiteInstallActive = false
 app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } }>('/api/prereqs/install', async (req, reply) => {
+  if (!PREREQ_COMPONENTS.includes(req.body?.component)) return reply.code(400).send({ error: 'unknown_prerequisite', message: 'Choose a supported prerequisite action.' })
   if (installationActive || prerequisiteInstallActive) return reply.code(409).send({ error: 'installation_active', message: 'An installation is already running. Wait for it to finish.' })
   if (req.body?.component === 'ollama') {
     const snapshot = await readResources({ installPath: PM_ROOT })
@@ -267,6 +264,8 @@ app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } 
   const releaseWork = idleLifecycle.beginWork()
   try {
     const state = await prereqState()
+    const nodeVersions = process.platform === 'win32' && (req.body.component === 'node' || req.body.component === 'npm')
+      ? await execCapture('winget', ['show', '--id', 'OpenJS.NodeJS.LTS', '--exact', '--source', 'winget', '--versions', '--accept-source-agreements']) : null
     const plan = buildPrereqInstallPlan(req.body.component, {
       platform: process.platform,
       brewPath: state.homebrew.path,
@@ -274,6 +273,8 @@ app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } 
       hasCompose: !!state.compose.ok,
       hasOllama: !!state.ollama.installed,
       root: PM_ROOT,
+      wingetPath: state.wingetPath, dockerDesktopPath: state.dockerDesktopPath, hasDockerDesktop: state.hasDockerDesktop,
+      node24Version: nodeVersions?.code === 0 ? node24FromWingetVersions(nodeVersions.stdout) : null,
     })
     emit({ type: 'run-start', steps: plan.map((s) => ({ id: s.id, name: s.name })) })
     for (const step of plan) {
@@ -284,7 +285,7 @@ app.post<{ Body: { component: PrereqComponent; resourceAcknowledged?: boolean } 
         return
       }
     }
-    if (req.body.component === 'node') {
+    if (req.body.component === 'node' || req.body.component === 'npm') {
       // Replacing the binary on disk cannot change this already-running process.
       emit({ type: 'stdout', id: 'node-restart', chunk: 'Node 24 was installed. Stop this installer with Ctrl+C, open a terminal using Node 24 (verify with node -v), then run npm run install-persistent-memory again. The current installer must be restarted before continuing.\n' })
       emit({ type: 'done', ok: true, restartRequired: true })
@@ -496,6 +497,7 @@ registerInstallRoute<InstallBody>(app, {
     return () => { installationActive = false; releaseWork() }
   },
   readResources: () => readResources({ installPath: PM_ROOT }),
+  checkEnvironment: (env) => readEnvironment({ root: PM_ROOT, env }),
   buildWizard: buildWizardPayload,
   onToken: token => { bootstrapToken = token },
 })

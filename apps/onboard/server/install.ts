@@ -20,6 +20,9 @@ import { targetMemoryFiles, writeRuleTargets, ruleRepairWarning } from './rule.j
 import { writeOwnershipManifest } from './ownership.js'
 import { hostCommand } from './host.js'
 import { writeInstallSuccess } from './install-success.js'
+import { readEnvironment } from './environment.js'
+import { environmentIssues } from '../shared/environment.js'
+import { readFileSync } from 'node:fs'
 
 export type InstallEvent =
   | { type: 'run-start'; total: number; steps: { id: string; name: string }[] }
@@ -75,6 +78,8 @@ export interface InstallContext {
   env: Record<string, string>
   /** the wizard answers needed by the 'fn' steps + flow selection. */
   wizard?: WizardPayload
+  /** Captured under the server activity lock; external changes require review. */
+  expectedEnvText?: string
 }
 
 /** Register the MCP into the selected agent apps' configs (in-process 'fn' step). */
@@ -242,6 +247,17 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
   const runtime = parseNodeVersion(process.version)
   if (!runtime.ok) {
     emit({ type: 'error', id: 'node', message: runtime.detail })
+    emit({ type: 'done', ok: false })
+    return
+  }
+  const requirements = environmentIssues(await readEnvironment({ root: ctx.root, env: ctx.env }))
+  if (requirements.length) {
+    emit({ type: 'error', id: 'environment', message: requirements.map((issue) => issue.message).join(' ') })
+    emit({ type: 'done', ok: false })
+    return
+  }
+  if (ctx.expectedEnvText !== undefined && readFileSync(join(ctx.root, '.env.persistent-memory'), 'utf8') !== ctx.expectedEnvText) {
+    emit({ type: 'error', id: 'environment', message: 'The saved configuration changed during checks. Review it and retry installation.' })
     emit({ type: 'done', ok: false })
     return
   }

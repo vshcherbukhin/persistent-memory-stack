@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "persistent-memory data layer \u2014 the two Prisma 7 clients (prisma=pm_app data / ownerPrisma=pmuser owner), the runInTenant() RLS tx wrapper, the audit guard (guardedPrisma), and the AsyncLocalStorage tenant context. Consumed by api AND worker. Owns the generated-client import; callers never touch generated/prisma directly. The two connection strings are INJECTED via initDb() so @pm/db depends on no app-specific config module.",
+  "description": "persistent-memory data layer — the two Prisma 7 clients (prisma=pm_app data / ownerPrisma=pmuser owner), the runInTenant() RLS tx wrapper, the audit guard (guardedPrisma), and the AsyncLocalStorage tenant context. Consumed by api AND worker. Owns the generated-client import; callers never touch generated/prisma directly. The two connection strings are INJECTED via initDb() so @pm/db depends on no app-specific config module.",
   "exports": {
     ".": {
       "types": "./dist/packages/db/src/index.d.ts",
@@ -17,13 +17,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.10.1",
-    "@prisma/client": "^7.10.1",
-    "pg": "^8.22.0"
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "pg": "8.23.1"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
-    "typescript": "^5.7.2",
-    "vitest": "^4.1.9"
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
   }
 }

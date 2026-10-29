@@ -56,12 +56,26 @@ export function dockerCommand(args, { cwd, env, timeout = 120_000, stream = fals
   })
 }
 
+/** Antivirus/indexers can briefly hold an existing file on Windows. Retry the
+ * atomic replace only; never delete/truncate the previous accepted ledger. */
+export function atomicReplace(source, destination, {
+  platform = process.platform, rename = renameSync,
+  wait = milliseconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+} = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try { rename(source, destination); return } catch (error) {
+      if (platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error
+      wait(Math.min(10 * 2 ** attempt, 250))
+    }
+  }
+}
+
 export function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true })
   const temporary = `${path}.${randomUUID()}.tmp`
   try {
     writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
-    renameSync(temporary, path)
+    atomicReplace(temporary, path)
   } finally { if (existsSync(temporary)) unlinkSync(temporary) }
 }
 

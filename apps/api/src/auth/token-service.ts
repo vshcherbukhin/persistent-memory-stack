@@ -32,7 +32,7 @@ const BEARER = /^Bearer\s+(.+)$/i
 // All writes hit the CONTROL table app_user → ownerPrisma (pm_app has no grant).
 
 /** argon2id params — read at call time so env overrides apply (match seed.ts). */
-function argonOptions(): argon2.Options {
+function argonOptions(): argon2.HashOptions {
   return {
     type: argon2.argon2id,
     memoryCost: config.ARGON2_MEMORY_KIB,

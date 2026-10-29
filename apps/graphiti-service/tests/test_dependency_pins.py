@@ -6,7 +6,7 @@ import unittest
 
 class GraphitiDependencyPinsTest(unittest.TestCase):
     def test_graph_backend_client_and_redis_are_exactly_pinned(self) -> None:
-        """A clean image build must not resolve a later incompatible redis-py."""
+        """Keep the tested graph/backend pair fixed during clean builds."""
         requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
         lines = requirements.read_text(encoding="utf-8").splitlines()
         pins = {
@@ -18,5 +18,5 @@ class GraphitiDependencyPinsTest(unittest.TestCase):
 
         self.assertEqual(pins.get("graphiti-core[falkordb,anthropic]"), "0.29.2")
         self.assertEqual(pins.get("anthropic"), "1.3.0")
-        self.assertEqual(pins.get("falkordb"), "1.6.2")
-        self.assertEqual(pins.get("redis"), "8.0.1")
+        self.assertEqual(pins.get("falkordb"), "1.8.1")
+        self.assertEqual(pins.get("redis"), "8.1.0")

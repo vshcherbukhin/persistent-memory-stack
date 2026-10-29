@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # persistent-memory-api — multi-stage TS/Node build (Phase 3, workspace P5, P6).
 #
@@ -24,7 +24,7 @@
 # stage needs only packages/db/dist (no separate generated/ copy). The api's own dist is a
 # clean dist/** tree (rootDir:"src"); entry = dist/server.js.
 #
-#   node:22-alpine = Maintenance LTS (security-supported to 2027-04-30).
+#   Node 24 uses the release's immutable Alpine image digest below.
 #
 # Stages: deps (workspace install) → shared-build → build (prisma + db + api) → runtime.
 # Runtime reuses the deps stage and prunes locally instead of running a second
@@ -33,10 +33,10 @@
 # =============================================================================
 
 # ── Stage 1: workspace install (root lockfile) ───────────────────────────────
-FROM node:22-alpine AS deps
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
 WORKDIR /app
 # Root manifest + lockfile + each member's manifest, then a deterministic install.
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/db/package.json ./packages/db/
 COPY layers/memory-vector/package.json ./layers/memory-vector/
@@ -48,22 +48,24 @@ COPY layers/core/schema/package.json ./layers/core/schema/
 COPY deploy/scripts/npm-ci-with-retry.sh /usr/local/bin/npm-ci-with-retry
 RUN chmod +x /usr/local/bin/npm-ci-with-retry
 RUN --mount=type=cache,target=/root/.npm npm-ci-with-retry
+# Locked dependencies may be fully hoisted. Keep staged COPY paths present for
+# either a flat tree or genuinely nested workspace dependencies.
+RUN mkdir -p packages/shared/node_modules apps/api/node_modules layers/core/schema/node_modules
 
 # ── Stage 2: build @pm/shared (composite library) ────────────────────────────
-# NOTE: npm does NOT fully hoist this workspace — it keeps per-member
-# node_modules (apps/api/node_modules, layers/core/schema/node_modules) alongside the root one
-# (version-driven nesting). So every stage must carry the node_modules it needs
-# from BOTH the root AND the relevant member dir.
-FROM node:22-alpine AS shared-build
+# npm may version-nest dependencies in member node_modules. Preserve the shared
+# package's locked dependency tree alongside the hoisted root dependencies.
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS shared-build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 RUN rm -f packages/shared/tsconfig.tsbuildinfo
 RUN node /app/node_modules/typescript/bin/tsc -p packages/shared/tsconfig.json
 
 # ── Stage 3: build — generate the Prisma client, then compile @pm/db + the api ─
-FROM node:22-alpine AS build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 # Carry member node_modules forward (npm keeps fastify/zod/@fastify-multipart/
@@ -110,12 +112,12 @@ COPY apps/api/src ./apps/api/src
 RUN node /app/node_modules/typescript/bin/tsc -b apps/api/tsconfig.json
 
 # ── Stage 4: runtime — prod deps + the self-contained dist trees ──────────────
-FROM node:22-alpine AS runtime
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # Prod-only deps at the workspace ROOT so @pm/shared + @pm/db are present as
 # hoisted symlinks and argon2's prebuilt alpine binding is installed.
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/db/package.json ./packages/db/
 COPY layers/memory-vector/package.json ./layers/memory-vector/
@@ -128,6 +130,7 @@ COPY layers/core/schema/package.json ./layers/core/schema/
 # hitting the registry again. Keep member node_modules because npm may version-nest
 # production deps under apps/api/ and the prisma workspace.
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/layers/core/schema/node_modules ./layers/core/schema/node_modules
 RUN npm prune --omit=dev && npm cache clean --force

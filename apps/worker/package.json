@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "persistent-memory BullMQ ingest worker (Phase 6) \u2014 consumes the pm.ingest queue and runs the 7-step pipeline (fetch \u2192 extract \u2192 chunk \u2192 persist \u2192 embed (Mode A) \u2192 graphiti \u2192 status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",
+  "description": "persistent-memory BullMQ ingest worker (Phase 6) — consumes the pm.ingest queue and runs the 7-step pipeline (fetch → extract → chunk → persist → embed (Mode A) → graphiti → status), EMBEDDING_MODE-aware, writing team-stamped rows via @pm/db's runInTenant under RLS. Consumes @pm/db + @pm/shared (storage/queue/extract/embeddings/qdrant).",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b tsconfig.json",
@@ -17,19 +17,22 @@
     "@pm/graph": "*",
     "@pm/security-dlp": "*",
     "@pm/shared": "*",
-    "bullmq": "^5.34.0",
-    "dotenv": "^17.4.2",
-    "ioredis": "^5.4.0",
-    "nodemailer": "^10.2.1",
-    "web-push": "^3.6.7",
-    "zod": "^4.6.7"
+    "bullmq": "5.81.5",
+    "dotenv": "17.4.2",
+    "ioredis": "5.11.1",
+    "nodemailer": "10.2.1",
+    "web-push": "3.6.7",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
-    "@types/nodemailer": "^7.0.0",
-    "@types/web-push": "^3.6.4",
-    "tsx": "^4.22.4",
-    "typescript": "^5.7.2",
-    "vitest": "^4.1.9"
+    "@types/node": "24.19.2",
+    "@types/nodemailer": "8.0.2",
+    "@types/web-push": "3.6.4",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
   }
 }

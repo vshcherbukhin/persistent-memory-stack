@@ -60,7 +60,7 @@ services:
   # dependents on persistent-memory-qdrant-health's health instead.
   # ---------------------------------------------------------------------------
   qdrant:
-    image: qdrant/qdrant:v1.18.2
+    image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-qdrant
     ports:
       - "${PM_HOST_BIND:-127.0.0.1}:${PM_QDRANT_HTTP_PORT:-7333}:6333"   # REST / dashboard
@@ -107,7 +107,7 @@ services:
   # browser UI on 3000 (host 3100). Internal: persistent-memory-falkordb:6379.
   # ---------------------------------------------------------------------------
   falkordb:
-    image: falkordb/falkordb:v4.18.10
+    image: falkordb/falkordb:v4.18.10@sha256:0d793d4b249a9cf0837faa9f30fea1b86fb50086fc8aa21e9447078a07f995bc
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-falkordb
     ports:
       - "${PM_HOST_BIND:-127.0.0.1}:${PM_FALKORDB_PORT:-6380}:6379"      # FalkorDB / Redis protocol
@@ -141,7 +141,7 @@ services:
   # HTTP/Browser 7474 (host 7475), Bolt 7687 (host 7688).
   # ---------------------------------------------------------------------------
   neo4j:
-    image: neo4j:5.26.27
+    image: neo4j:5.26.27@sha256:937fbd163e302a5751dd329b719c1b05e2a4293af223d61b1aa17e3dea087709
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-neo4j
     profiles: ["neo4j"]
     ports:
@@ -172,7 +172,7 @@ services:
   # below MUST mount at /var/lib/postgresql/data. Internal: 5432 (host 5433).
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:17.10
+    image: postgres:17.10@sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-postgres
     ports:
       - "${PM_HOST_BIND:-127.0.0.1}:${PM_POSTGRES_PORT:-5433}:5432"
@@ -202,7 +202,7 @@ services:
   # correct queue behavior). AOF enabled so in-flight jobs survive a restart.
   # ---------------------------------------------------------------------------
   redis:
-    image: redis:8-alpine
+    image: redis:8-alpine@sha256:47b08295737773de3b711fb86f13ae802f5074e96a9a2d29f5f80164ac08c046
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-redis
     command:
       - redis-server
@@ -229,14 +229,13 @@ services:
   # ---------------------------------------------------------------------------
   # MinIO — S3-compatible object store (evidence blobs). Internal S3 API 9000
   # (host 9002), console 9001 (host 9003).
-  # NOTE: the community minio/minio image was de-published / repo ARCHIVED on
-  # 2025-10-23. The last published tag RELEASE.2025-09-07T16-13-09Z is still
-  # pullable but receives NO further security patches. A maintained drop-in is
-  # cgr.dev/chainguard/minio:latest (same command/ports/env). Flag to the team.
-  # Healthcheck uses `mc ready local` (curl was removed from the image).
+  # Official public images are unavailable. Build the pinned official source
+  # with verified archive/module hashes; preserve the existing S3/data contract.
   # ---------------------------------------------------------------------------
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    build:
+      context: ../../apps/minio
+    image: ${PM_IMAGE_PREFIX:-persistent-memory}-minio:latest
     container_name: ${PM_CONTAINER_PREFIX:-persistent-memory}-minio
     command: server /data --console-address ":9001"
     ports:
@@ -248,7 +247,7 @@ services:
     volumes:
       - persistent_memory_minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "/usr/bin/pm-minio-health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -69,6 +69,7 @@ export const MetadataShape = {
       'gotcha-discovered',
       'user-correction',
       'postmortem',
+      'document',
       'confluence',
       'test-failure',
       'heal-cycle',
@@ -77,8 +78,8 @@ export const MetadataShape = {
   severity: z.enum(['high', 'medium', 'low']).optional().describe('Optional severity. e.g. "high"'),
   epic: z.string().optional().describe('Optional epic scope string.'),
   feature: z.string().optional().describe('Optional feature scope string.'),
-  pageId: z.string().optional().describe('Confluence page id — REQUIRED when category="prd".'),
-  confluenceUrl: z.string().optional().describe('Confluence URL — REQUIRED when category="prd".'),
+  pageId: z.string().optional().describe('Optional legacy page provenance; never required for personal requirements.'),
+  confluenceUrl: z.string().optional().describe('Optional legacy source URL; retained for historical record compatibility.'),
   // Phase 9: the agent may classify the memory tier. provenance + confidence are
   // SERVER-determined (from source + the gate LLM) and cannot be set here.
   tier: z

@@ -11,7 +11,7 @@ export function supportedNode(version = process.versions.node) {
 }
 
 export function assertSupportedNode(version = process.versions.node) {
-  if (!supportedNode(version)) throw new Error(`Node ${version} is outside this application's supported host versions. Use Node 24 LTS (24.x) or Node 22.12+ within 22.x, then restart the installer in that terminal. Newer Current releases are not yet validated.`)
+  if (!supportedNode(version)) throw new Error(`Node ${version} is outside this application's supported host versions. Use Node 24 LTS (24.x) or Node 22.12+ within 22.x, then restart the installer in that terminal. Other major versions are not validated by this application.`)
 }
 
 export function npmInvocation(args, { env = process.env, execPath = process.execPath, exists = existsSync } = {}) {

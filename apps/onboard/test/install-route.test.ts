@@ -9,6 +9,11 @@ import { registerEmbeddingTestRoute } from '../server/embedding-test.ts'
 import { genSecrets, renderEnv, type Answers } from '../server/env.ts'
 import type { InstallContext, InstallEvent, WizardPayload } from '../server/install.ts'
 import { GiB, type ResourceSnapshot } from '../shared/resource-policy.ts'
+import { REQUIRED_ENVIRONMENT_CHECKS, type EnvironmentSnapshot } from '../shared/environment.ts'
+
+function environment(): EnvironmentSnapshot {
+  return { capturedAt: new Date().toISOString(), ok: true, checks: Object.fromEntries(REQUIRED_ENVIRONMENT_CHECKS.map(key => [key, { ok: true, detail: 'Verified synthetic prerequisite.' }])) as EnvironmentSnapshot['checks'] }
+}
 
 const answers: Answers = {
   deploymentMode: 'local', embeddingMode: 'server', embedProvider: 'openai',
@@ -51,16 +56,17 @@ describe('installation activity and saved configuration', () => {
       return () => { active = false }
     }
     const readResources = vi.fn(async () => resources)
+    const checkEnvironment = vi.fn(async (_env: Record<string, string>) => environment())
     const buildWizard = vi.fn(() => wizard)
     const run = vi.fn(async (_context: InstallContext, emit: (event: InstallEvent) => void) => { emit({ type: 'done', ok: true }) })
     const localResources = vi.fn(async (): Promise<string | null> => null)
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ embeddings: [Array(1024).fill(0.125)] })))
-    registerInstallRoute(app, { root, envPath, beginInstallation: begin, readResources, buildWizard, run })
+    registerInstallRoute(app, { root, envPath, beginInstallation: begin, readResources, checkEnvironment, buildWizard, run })
     registerEnvWriteRoute(app, envPath, { canWrite: () => !active })
     registerEmbeddingTestRoute(app, envPath, { beginTest: begin, checkLocalResources: localResources, fetchImpl: fetcher })
     cleanup.push(async () => { await app.close(); rmSync(root, { recursive: true, force: true }) })
     return {
-      app, envPath, original, readResources, buildWizard, run, localResources, fetcher,
+      app, envPath, original, readResources, checkEnvironment, buildWizard, run, localResources, fetcher,
       active: () => active,
       install: () => app.inject({ method: 'POST', url: '/api/install', payload: {} }),
       test: (model = 'qwen3-embedding:0.6b', dim = 1024) => app.inject({ method: 'POST', url: '/api/embedding/test', payload: { provider: 'ollama', model, dim } }),
@@ -85,6 +91,47 @@ describe('installation activity and saved configuration', () => {
     expect((await installing).statusCode).toBe(200)
     expect(fixture.run).toHaveBeenCalledOnce()
     expect(fixture.run.mock.calls[0]?.[0].env.OPENAI_API_KEY).toBe('synthetic-key')
+    expect(fixture.active()).toBe(false)
+  })
+
+  it('revalidates prerequisites under the same lock, rejects forged client pass flags and retries with fresh evidence', async () => {
+    const fixture = setup()
+    const entered = deferred<void>()
+    const probe = deferred<EnvironmentSnapshot>()
+    fixture.checkEnvironment.mockImplementation(async () => { entered.resolve(); return probe.promise })
+    const installing = fixture.app.inject({ method: 'POST', url: '/api/install', payload: { prerequisitesPassed: true, environment: environment() } }).then(reply => reply)
+    await entered.promise
+    expect(fixture.active()).toBe(true)
+    expect((await fixture.save()).statusCode).toBe(409)
+    expect((await fixture.install()).statusCode).toBe(409)
+    const rejected = environment()
+    rejected.checks.compose = { ok: false, detail: 'Compose 2.24.4+ required.' }
+    probe.resolve(rejected)
+    const response = await installing
+    expect(response.statusCode).toBe(422)
+    expect(response.json().error).toBe('environment_requirements')
+    expect(fixture.run).not.toHaveBeenCalled()
+    expect(fixture.active()).toBe(false)
+    fixture.checkEnvironment.mockImplementation(async () => environment())
+    expect((await fixture.install()).statusCode).toBe(200)
+    expect(fixture.checkEnvironment).toHaveBeenCalledTimes(2)
+    expect(fixture.checkEnvironment.mock.calls[0][0].EMBED_PROVIDER).toBe('openai')
+  })
+
+  it('rejects stale server observations and externally changed configuration before any install step', async () => {
+    const fixture = setup()
+    fixture.checkEnvironment.mockImplementation(async () => ({ ...environment(), capturedAt: '2020-01-01T00:00:00Z' }))
+    expect((await fixture.install()).statusCode).toBe(422)
+    expect(fixture.run).not.toHaveBeenCalled()
+    fixture.checkEnvironment.mockImplementation(async () => {
+      writeFileSync(fixture.envPath, fixture.original + '\n# changed outside this wizard\n')
+      return environment()
+    })
+    const changed = await fixture.install()
+    expect(changed.statusCode).toBe(409)
+    expect(changed.json().error).toBe('configuration_changed')
+    expect(readFileSync(fixture.envPath, 'utf8')).toContain('changed outside this wizard')
+    expect(fixture.run).not.toHaveBeenCalled()
     expect(fixture.active()).toBe(false)
   })
 

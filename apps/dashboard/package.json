@@ -2,7 +2,7 @@
   "name": "persistent-memory-dashboard",
   "version": "2.0.0",
   "private": true,
-  "description": "persistent-memory control-plane dashboard webapp (Next.js 15, App Router). STANDALONE \u2014 NOT a @pm/* workspace member: it talks to persistent-memory-api ONLY over HTTP, so it has NO @pm/db / @pm/shared deps, NO Prisma, NO argon2, NO database.",
+  "description": "persistent-memory control-plane dashboard webapp (Next.js 15, App Router). STANDALONE — NOT a @pm/* workspace member: it talks to persistent-memory-api ONLY over HTTP, so it has NO @pm/db / @pm/shared deps, NO Prisma, NO argon2, NO database.",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "tsc --noEmit && next build",
@@ -12,31 +12,34 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
-    "@fontsource-variable/manrope": "^5.3.0",
-    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
+    "@fontsource-variable/manrope": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
     "d3-force-3d": "3.0.6",
-    "material-icons": "^1.13.14",
+    "material-icons": "1.13.14",
     "next": "15.5.28",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "react-force-graph-2d": "1.29.1",
-    "react-force-graph-3d": "1.29.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-force-graph-2d": "1.29.2",
+    "react-force-graph-3d": "1.29.2",
     "react-markdown": "10.1.0",
-    "recharts": "^3.3.0",
+    "recharts": "3.10.1",
     "remark-gfm": "4.0.1",
-    "three": "0.185.1",
+    "three": "0.186.1",
     "three-spritetext": "1.10.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@types/three": "0.185.4",
-    "typescript": "^5.7.0",
-    "vitest": "^4.1.12"
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
   },
   "overrides": {
     "postcss": "^8.5.10"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
   }
 }

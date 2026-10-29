@@ -773,14 +773,15 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).not.toContain('Custom local domain')
     expect(app).not.toContain('Register domain')
   })
-  it('renames prerequisites and keeps a fixed four-card pre-check surface', () => {
+  it('shows the required host checks and keeps optional Ollama separate', () => {
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
 
     expect(app).toContain("prereqs: 'Environment pre-check'")
     expect(app).toContain('const PREREQ_ITEMS')
-    expect(app).toContain("key: 'node', label: 'Node 24 LTS / 22.12+ (22.x)'")
-    expect(app).toContain("key: 'docker', label: 'Docker daemon'")
-    expect(app).toContain("key: 'compose', label: 'Docker Compose v2'")
+    expect(app).toContain("key: 'node', label: 'Node 24.x / 22.12+ (22.x)'")
+    expect(app).toContain("key: 'docker', label: 'Docker Linux engine'")
+    expect(app).toContain("key: 'compose', label: 'Docker Compose 2.24.4+'");
+    for (const key of ['npm', 'git', 'bash', 'buildx', 'ports', 'rootWrite', 'network', 'composeConfig']) expect(app).toContain(`key: '${key}'`)
     expect(app).toContain("key: 'ollama', label: 'Ollama (host)'")
     expect(app).toContain("type PrecheckStatus = 'pending' | 'verifying' | 'installing' | 'ok' | 'warn'")
     expect(app).not.toContain('Re-check')
@@ -791,7 +792,10 @@ describe('nextPhase / prevPhase (per flow)', () => {
     expect(app).toContain('<h2>Your account</h2>')
     expect(app).not.toContain('<h2>Your team & account</h2>')
     expect(app).toContain('Dashboard password (optional)')
-    expect(app).toContain('ANTHROPIC_API_KEY (mandatory)')
+    expect(app).toContain('ANTHROPIC_API_KEY / Claude OAuth token (mandatory)')
+    expect(app).toContain('claude setup-token')
+    expect(app).toContain('one-year OAuth token')
+    expect(app).toContain('distinct from Anthropic Console API billing')
     expect(app).toContain('OPENAI_API_KEY (mandatory)')
     expect(app).toContain('Test fact extraction')
     expect(app).toContain('/api/extraction/test')

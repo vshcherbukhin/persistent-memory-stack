@@ -138,11 +138,6 @@ export function preGate(content: string, metadata: WriteMetadata): string[] {
       : false
   if (!anyVerbatim) missing.push('graph_entity_in_content')
 
-  if (category === 'prd') {
-    if (!metadata.pageId) missing.push('metadata.pageId')
-    if (!metadata.confluenceUrl) missing.push('metadata.confluenceUrl')
-  }
-
   return missing
 }
 

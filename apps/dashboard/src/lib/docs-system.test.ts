@@ -520,7 +520,7 @@ describe('dashboard documentation integration', () => {
     const docsPackage = JSON.parse(readFileSync(docsPackageUrl, 'utf8')) as {
       devDependencies?: Record<string, string>
     }
-    expect(docsPackage.devDependencies?.mermaid).toBe('11.16.0')
+    expect(docsPackage.devDependencies?.mermaid).toBe('12.2.0')
     expect(dockerfile).toContain('node_modules/mermaid/dist/mermaid.min.js')
     expect(dockerfile).toContain('/site/assets/javascripts/mermaid.min.js')
     expect(rootPackage.scripts?.['docs:install']).toBe('node scripts/docs-tool.mjs install')
@@ -583,7 +583,7 @@ describe('dashboard documentation integration', () => {
     const history = root('documentation/release-history.md')
 
     expect(docsPackage.version).toMatch(/^\d+\.\d+\.\d+$/)
-    expect(requirements.trim()).toBe('mkdocs-material==9.7.6')
+    expect(requirements.split(/\r?\n/).filter((line) => line && !line.startsWith('#'))).toEqual(['mkdocs-material==9.8.0'])
     expect(config).toContain('site_name: PM Management Documentation')
     expect(config).toContain('custom_dir: documentation/overrides')
     expect(config).toContain('logo: assets/images/pm-logo.svg')

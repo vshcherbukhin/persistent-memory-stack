@@ -26,6 +26,7 @@ import { planRegistration } from '../server/register.ts'
 import { testExtractionConnection } from '../server/extraction-test.ts'
 import { hostCommand } from '../server/host.ts'
 import { parseEnvFile } from '../server/install.ts'
+import { REQUIRED_ENVIRONMENT_CHECKS } from '../shared/environment.ts'
 
 function execFileSync(command: string, args: string[], options: Omit<ExecFileSyncOptions, 'encoding'> & { encoding?: 'utf8' } = {}): string {
   const resolved = hostCommand(command, command === 'bash' ? args.map((arg) => /^[a-z]:[\\/]/i.test(arg) ? arg.replaceAll('\\', '/') : arg) : args, { env: options.env ?? process.env })
@@ -72,11 +73,14 @@ describe('genSecrets', () => {
 describe('local dashboard URL', () => {
   it('uses the passwordless localhost dashboard URL and does not prompt for sudo before the wizard opens', () => {
     const script = readFileSync(new URL('../../../deploy/scripts/onboard.sh', import.meta.url), 'utf8')
+    const launcher = readFileSync(new URL('../../../scripts/host-lifecycle.mjs', import.meta.url), 'utf8')
     const server = readFileSync(new URL('../server/index.ts', import.meta.url), 'utf8')
     const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8')
 
-    expect(script).toContain('DASHBOARD_URL="${DASHBOARD_URL:-${ADMIN_URL:-http://localhost:${DASHBOARD_PORT}}}"')
-    expect(script).toContain('DASHBOARD_URL="$DASHBOARD_URL" ADMIN_URL="$DASHBOARD_URL"')
+    expect(script).toContain('exec node scripts/host-lifecycle.mjs install "$@"')
+    expect(script).not.toContain('npm install')
+    expect(launcher).toContain('env.DASHBOARD_URL ?? env.ADMIN_URL ?? `http://localhost:${env.PM_DASHBOARD_PORT ?? 3200}`')
+    expect(launcher).toContain('DASHBOARD_URL: dashboardUrl, ADMIN_URL: dashboardUrl')
     expect(script).not.toContain('ensure_dashboard_host')
     expect(script).not.toContain('sudo tee -a /etc/hosts')
     expect(server).toContain("const DEFAULT_DASHBOARD_URL = 'http://localhost:3200'")
@@ -338,7 +342,8 @@ describe('prereq parsers', () => {
   })
   it('installer aliases allow API configuration without Ollama; the embeddings step enforces local readiness', () => {
     const p = {
-      node: { ok: true, detail: 'Node v25.6.1.' },
+      ...Object.fromEntries(REQUIRED_ENVIRONMENT_CHECKS.map(key => [key, { ok: true, detail: 'Verified.' }])),
+      node: { ok: true, detail: 'Node v24.14.1.' },
       docker: { ok: true, detail: 'Docker daemon is running.' },
       compose: { ok: true, detail: 'Docker Compose v2.32.1.' },
       ollama: { ok: false, detail: 'Ollama not reachable.' },

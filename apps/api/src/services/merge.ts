@@ -1,5 +1,5 @@
 /** Personal-space hybrid retrieval. Postgres is authoritative for ownership, filters and revisions. */
-import type { QdrantClient } from '@qdrant/js-client-rest'
+import type { QdrantClient } from '@pm/shared/qdrant'
 import { searchVectors, type ActivePin, type KnowledgeFilter } from '@pm/shared'
 import { Prisma, runInTenant, getCtx, type Tx } from '@pm/db'
 import { knowledgeWhere } from './knowledge.ts'

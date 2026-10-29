@@ -50,8 +50,9 @@ minimum requirement.
 All configurations need at least 2 logical CPUs (4 recommended), Docker Linux
 containers with 4 GiB of memory (6 recommended), and 25 GiB free inside Docker
 storage (40 recommended). Supported host architectures are x64 and arm64.
-Prepare Node 24.x LTS or Node 22.12+ in the Node 22 line, Git, and Docker Desktop;
-Windows also needs Git Bash. Only those two Node major versions are supported;
+Prepare Node 24.x or Node 22.12+ in the Node 22 line, npm 10 or 11, Git, and Docker
+Desktop with its Linux engine running. Compose 2.24.4+ and Buildx are required;
+native Bash must include curl. Windows uses Git for Windows Bash. Only those two Node major versions are supported;
 Node 25, 26, and other majors are not supported host runtimes for this installer.
 
 Application and model disk budgets are added when they share a filesystem.

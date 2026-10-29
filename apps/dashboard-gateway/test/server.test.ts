@@ -589,7 +589,7 @@ describe('gateway routing', () => {
   it('compiles gateway TypeScript before its production image starts JavaScript', async () => {
     const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8')
 
-    expect(dockerfile).toContain('FROM node:22-alpine AS build')
+    expect(dockerfile).toMatch(/FROM node:24-alpine@sha256:[a-f0-9]{64} AS build/)
     expect(dockerfile).toContain('RUN npm run build -w persistent-memory-dashboard-gateway')
     expect(dockerfile).toContain('CMD ["node", "dist/index.js"]')
   })

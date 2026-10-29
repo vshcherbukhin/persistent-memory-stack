@@ -3,6 +3,8 @@
  * All supported flow ids install the local personal stack. Historical flow ids
  * remain accepted without enabling a connector.
  */
+import { REQUIRED_ENVIRONMENT_CHECKS } from '../../shared/environment'
+
 export type Flow = 'full' | 'engine' | 'mcp'
 
 export type Phase =
@@ -72,7 +74,7 @@ export function memorySettingsForFlow(flow: Flow, answers: MemorySettings, serve
   }
 }
 
-export interface PrereqGateState {
+export interface PrereqGateState extends Partial<Record<typeof REQUIRED_ENVIRONMENT_CHECKS[number], { ok: boolean }>> {
   node: { ok: boolean }
   docker: { ok: boolean }
   compose: { ok: boolean }
@@ -83,7 +85,7 @@ export function prereqsBlocked(flow: Flow, p: PrereqGateState | null, options: F
   if (!p) return true
   // Ollama is optional: a machine that can run the stack with remote APIs must
   // reach the embedding-provider selection even without a local model runtime.
-  return !p.node.ok || !p.docker.ok || !p.compose.ok
+  return REQUIRED_ENVIRONMENT_CHECKS.some((key) => p[key]?.ok !== true)
 }
 
 export type ModelPresence = 'installed' | 'will-be-installed'

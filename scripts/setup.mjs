@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertSupportedNode, nodeEnvironment, run, runNpm } from './host-runtime.mjs'
+import { assertDependencyLocks } from './verify-dependency-locks.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -9,11 +10,12 @@ export async function runSetup({
   runCommand = run, runNpmCommand = runNpm, log = console.log,
 } = {}) {
   assertSupportedNode(nodeVersion)
+  assertDependencyLocks()
   const options = { cwd: root, env: nodeEnvironment({ env }) }
   // Labels are fixed product text: never include environment values or argv.
   const steps = [
     ['Create the pre-update snapshot', () => runCommand(process.execPath, ['scripts/pre-update-snapshot.mjs', '--from-setup'], options)],
-    ['Install application dependencies', () => runNpmCommand(['install'], options)],
+    ['Install locked application dependencies', () => runNpmCommand(['ci', '--no-audit', '--no-fund'], options)],
     ['Generate the Prisma client', () => runNpmCommand(['run', 'prisma:generate'], options)],
     ['Build the update coordinator', () => runNpmCommand(['run', 'build:update-coordinator'], options)],
     ['Install the update coordinator', () => runCommand(process.execPath, ['scripts/install-update-coordinator.mjs', '--root', env.PM_COORDINATOR_INSTALL_ROOT || root], options)],

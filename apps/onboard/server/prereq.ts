@@ -16,7 +16,8 @@ export interface ToolProbeResult extends ProbeResult {
   path?: string | null
 }
 
-export type PrereqComponent = 'homebrew' | 'node' | 'docker' | 'compose' | 'ollama'
+export const PREREQ_COMPONENTS = ['homebrew', 'node', 'npm', 'git', 'bash', 'docker', 'compose', 'buildx', 'ollama'] as const
+export type PrereqComponent = typeof PREREQ_COMPONENTS[number]
 
 export interface PrereqInstallHostState {
   platform: NodeJS.Platform | string
@@ -25,6 +26,10 @@ export interface PrereqInstallHostState {
   hasCompose?: boolean
   hasOllama: boolean
   root?: string
+  wingetPath?: string | null
+  node24Version?: string | null
+  dockerDesktopPath?: string | null
+  hasDockerDesktop?: boolean
 }
 
 export interface PrereqInstallStep {
@@ -59,6 +64,7 @@ export function buildPrereqInstallPlan(
   component: PrereqComponent,
   host: PrereqInstallHostState,
 ): PrereqInstallStep[] {
+  if (!PREREQ_COMPONENTS.includes(component)) throw new Error('Unknown prerequisite action.')
   if (host.platform === 'win32' && component === 'ollama') {
     return [{
       id: host.hasOllama ? 'start-ollama' : 'install-ollama',
@@ -68,6 +74,24 @@ export function buildPrereqInstallPlan(
         '-Action', host.hasOllama ? 'Start' : 'Install'],
     }]
   }
+  if (host.platform === 'win32') {
+    if (component === 'homebrew') throw new Error(manualPrereqHint(component, host.platform))
+    const docker = component === 'docker' || component === 'compose' || component === 'buildx'
+    if (docker && component === 'docker' && host.hasDockerDesktop && host.dockerDesktopPath) {
+      return [{ id: 'start-docker', name: 'Start Docker Desktop', cmd: [host.dockerDesktopPath], detached: true }]
+    }
+    if (!host.wingetPath) throw new Error(`${manualPrereqHint(component, host.platform)} WinGet is unavailable, so setup cannot run an automatic install.`)
+    const node = component === 'node' || component === 'npm'
+    if (node && !/^24\.\d+\.\d+$/.test(host.node24Version ?? '')) throw new Error('A supported Node 24 version could not be resolved from WinGet. Install Node 24.x manually and restart setup.')
+    const id = node ? 'OpenJS.NodeJS.LTS' : docker ? 'Docker.DockerDesktop' : 'Git.Git'
+    const steps: PrereqInstallStep[] = [{
+      id: `install-${component}`, name: `${docker && host.hasDocker ? 'Update' : 'Install'} ${node ? 'Node 24 with npm' : docker ? 'Docker Desktop' : 'Git for Windows'}`,
+      cmd: [host.wingetPath, docker && host.hasDocker ? 'upgrade' : 'install', '--id', id, '--exact', '--source', 'winget',
+        ...(node ? ['--version', host.node24Version!] : []), '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'],
+    }]
+    if (docker && host.dockerDesktopPath) steps.push({ id: 'start-docker', name: 'Start Docker Desktop', cmd: [host.dockerDesktopPath], detached: true })
+    return steps
+  }
   if (host.platform !== 'darwin') {
     throw new Error(manualPrereqHint(component, host.platform))
   }
@@ -75,8 +99,8 @@ export function buildPrereqInstallPlan(
   const steps: PrereqInstallStep[] = []
   const needsBrew =
     component === 'homebrew' ||
-    component === 'node' ||
-    ((component === 'docker' || component === 'compose') && (!host.hasDocker || (component === 'compose' && !host.hasCompose))) ||
+    component === 'node' || component === 'npm' || component === 'git' || component === 'bash' ||
+    ((component === 'docker' || component === 'compose' || component === 'buildx') && (!host.hasDocker || component !== 'docker')) ||
     (component === 'ollama' && !host.hasOllama)
   if (needsBrew && !host.brewPath) {
     throw new Error('Install Homebrew manually in Terminal, then run the environment pre-check again before using brew-backed install actions.')
@@ -87,7 +111,7 @@ export function buildPrereqInstallPlan(
   }
 
   const brew = host.brewPath ?? 'brew'
-  if (component === 'node') {
+  if (component === 'node' || component === 'npm') {
     steps.push({
       id: 'install-node',
       name: 'Install Node 24',
@@ -100,15 +124,16 @@ export function buildPrereqInstallPlan(
     })
     return steps
   }
+  if (component === 'git' || component === 'bash') return [{ id: `install-${component}`, name: `Install ${component === 'git' ? 'Git' : 'Bash and curl'}`, cmd: [brew, 'install', component, ...(component === 'bash' ? ['curl'] : [])] }]
 
-  if ((component === 'docker' || component === 'compose') && (!host.hasDocker || (component === 'compose' && !host.hasCompose))) {
+  if ((component === 'docker' || component === 'compose' || component === 'buildx') && (!host.hasDocker || component !== 'docker')) {
     steps.push({
       id: 'install-docker',
-      name: 'Install Docker Desktop',
-      cmd: [brew, 'install', '--cask', 'docker-desktop'],
+      name: host.hasDocker ? 'Update Docker Desktop' : 'Install Docker Desktop',
+      cmd: [brew, host.hasDocker ? 'upgrade' : 'install', '--cask', 'docker-desktop'],
     })
   }
-  if (component === 'docker' || component === 'compose') {
+  if (component === 'docker' || component === 'compose' || component === 'buildx') {
     steps.push({
       id: 'start-docker',
       name: 'Start Docker Desktop',
@@ -144,12 +169,17 @@ export function buildPrereqInstallPlan(
 }
 
 /** Per-component capabilities: Windows Ollama does not require Homebrew/WinGet. */
-export function prereqInstallCapabilities(platform: string): Record<PrereqComponent, boolean> {
+export function prereqInstallCapabilities(platform: string, options: { winget?: boolean; dockerDesktop?: boolean } = {}): Record<PrereqComponent, boolean> {
+  const packageManager = platform === 'darwin' || (platform === 'win32' && options.winget === true)
   return {
     homebrew: false,
-    node: platform === 'darwin',
-    docker: platform === 'darwin',
-    compose: platform === 'darwin',
+    node: packageManager,
+    npm: packageManager,
+    git: packageManager,
+    bash: packageManager,
+    docker: packageManager || (platform === 'win32' && options.dockerDesktop === true),
+    compose: packageManager,
+    buildx: packageManager,
     ollama: platform === 'darwin' || platform === 'win32',
   }
 }
@@ -158,13 +188,23 @@ export function prereqInstallCapabilities(platform: string): Record<PrereqCompon
 export function manualPrereqHint(component: PrereqComponent, platform: string): string {
   const restart = platform === 'win32' ? ' Reopen PowerShell and restart the installer after installing.' : ' Restart the installer after installing.'
   if (component === 'homebrew') return 'Homebrew is only used for automatic prerequisite installation on macOS.'
-  if (component === 'node') return `Install Node.js 24 LTS (24.x) or Node 22.12+ within 22.x with npm from https://nodejs.org/. Newer Current releases are not yet validated.${restart}`
-  if (component === 'docker' || component === 'compose') return platform === 'win32'
-    ? 'Install Docker Desktop for Windows from https://docs.docker.com/desktop/setup/install/windows-install/, enable its WSL 2 backend, start Docker Desktop and select Linux containers. Docker Compose v2 is included.'
-    : 'Install and start Docker Engine or Docker Desktop with Linux containers and Docker Compose v2.'
+  if (component === 'node' || component === 'npm') return `Install Node.js 24.x or Node 22.12+ within 22.x with npm 10.x or 11.x from https://nodejs.org/. Other major versions are not validated by this application.${restart}`
+  if (component === 'git' || component === 'bash') return platform === 'win32' ? `Install Git for Windows from https://git-scm.com/downloads/win; setup needs its native Git Bash, not WSL.${restart}` : `Install Git and native Bash with your operating system's package manager.${restart}`
+  if (component === 'docker' || component === 'compose' || component === 'buildx') return platform === 'win32'
+    ? 'Install Docker Desktop for Windows from https://docs.docker.com/desktop/setup/install/windows-install/, enable its WSL 2 backend, start Docker Desktop and select Linux containers. Compose 2.24.4+ and Buildx are required.'
+    : 'Install and start Docker Engine or Docker Desktop with Linux containers, Compose 2.24.4+ and Buildx.'
   return platform === 'win32'
     ? `Install and open Ollama for Windows from https://ollama.com/download/windows. Keep Ollama running for host embeddings.${restart}`
     : 'Install and start Ollama from https://ollama.com/download.'
+}
+
+/** Select only stable24.x metadata; never install the upstream LTS alias blindly. */
+export function node24FromWingetVersions(output: string): string | null {
+  const versions = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^24\.\d+\.\d+$/.test(line))
+  return versions.sort((a, b) => {
+    const aa = a.split('.').map(Number); const bb = b.split('.').map(Number)
+    return bb[1]! - aa[1]! || bb[2]! - aa[2]!
+  })[0] ?? null
 }
 
 /** `docker info --format {{.OSType}}` must report a running Linux engine. */
@@ -182,16 +222,20 @@ export function parseDockerInfo(stdout: string, exitCode: number): ProbeResult {
   return { ok: true, detail: 'Docker Linux engine is running.' }
 }
 
-/** `docker compose version` → require Compose v2 (the "docker compose" subcommand). */
+export const MINIMUM_COMPOSE_VERSION = '2.24.4'
+
+/** Application-tested floor; vendor Desktop suffixes are accepted, prereleases are not. */
 export function parseComposeVersion(stdout: string, exitCode: number): ProbeResult {
-  const m = /version v?(\d+)\.(\d+)\.(\d+)/i.exec(stdout)
+  const m = /version v?(\d+)\.(\d+)\.(\d+)([^\s]*)/i.exec(stdout)
   if (exitCode !== 0 || !m) {
-    return { ok: false, detail: 'Docker Compose v2 not found — install/upgrade Docker Desktop (the `docker compose` plugin).' }
+    return { ok: false, detail: `Docker Compose ${MINIMUM_COMPOSE_VERSION}+ was not found. Install or update Docker Desktop/the Compose plugin.` }
   }
   const major = Number(m[1])
-  return major >= 2
+  const supported = (major > 2 || (major === 2 && (Number(m[2]) > 24 || (Number(m[2]) === 24 && Number(m[3]) >= 4)))) &&
+    /^(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(m[4] ?? '') && !/-(?:rc|alpha|beta|dev)/i.test(m[4] ?? '')
+  return supported
     ? { ok: true, detail: `Docker Compose v${m[1]}.${m[2]}.${m[3]}.` }
-    : { ok: false, detail: `Docker Compose v${m[1]} is too old; v2+ required.` }
+    : { ok: false, detail: `Docker Compose ${m[1]}.${m[2]}.${m[3]} is outside the tested requirement; ${MINIMUM_COMPOSE_VERSION}+ stable is required.` }
 }
 
 /** Supported host lines, not every version accepted by a dependency's engine range. */
@@ -201,7 +245,7 @@ export function parseNodeVersion(stdout: string): ProbeResult {
   const major = Number(m[1])
   return (major === 24 || (major === 22 && Number(m[2]) >= 12))
     ? { ok: true, detail: `Node v${m[1]}.${m[2]}.${m[3]}.` }
-    : { ok: false, detail: `This installer is running Node v${m[1]}.${m[2]}.${m[3]}. Use Node 24 LTS (24.x) or Node 22.12+ within 22.x, then restart the installer. Newer Current releases are not yet validated.` }
+    : { ok: false, detail: `This installer is running Node v${m[1]}.${m[2]}.${m[3]}. Use Node 24.x or Node 22.12+ within 22.x, then restart the installer. Other major versions are not validated by this application.` }
 }
 
 export function parseCommandPresence(label: string, stdout: string, exitCode: number): ToolProbeResult {

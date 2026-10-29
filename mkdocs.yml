@@ -54,6 +54,7 @@ nav:
       - "Windows preparation": installation/windows-installation.md
       - "Installation steps": installation/installation-steps.md
       - "Machine requirements and models": installation/machine-requirements.md
+      - "Dependency reproducibility": installation/dependency-reproducibility.md
       - "Uninstall memory stack": installation/uninstall-memory-stack.md
   - "Spaces":
       - "Personal Space Documentation":

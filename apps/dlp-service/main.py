@@ -21,6 +21,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from presidio_analyzer import AnalyzerEngine
+from presidio_analyzer.predefined_recognizers import EmailRecognizer
+from tldextract import TLDExtract
 
 from config import get_settings
 from models import HealthResponse, PiiFinding, ScanRequest, ScanResponse, SecretFinding
@@ -28,12 +30,28 @@ from models import HealthResponse, PiiFinding, ScanRequest, ScanResponse, Secret
 settings = get_settings()
 logger = logging.getLogger("persistent_memory.dlp")
 
+# Use only the snapshot shipped in the hash-locked tldextract package. A first
+# scan must neither download a changing suffix list nor depend on network access.
+_suffixes = TLDExtract(suffix_list_urls=(), cache_dir=None)
+
+
+class SnapshotEmailRecognizer(EmailRecognizer):
+    def validate_result(self, pattern_text: str):
+        return _suffixes(pattern_text).fqdn != ""
+
+
+def build_analyzer() -> AnalyzerEngine:
+    analyzer = AnalyzerEngine()
+    analyzer.registry.remove_recognizer("EmailRecognizer")
+    analyzer.registry.add_recognizer(SnapshotEmailRecognizer(name="EmailRecognizer"))
+    return analyzer
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Build the analyzer once — loads the spaCy NLP pipeline (slow; the compose
     # healthcheck start_period covers it). Reused across every request.
-    app.state.analyzer = AnalyzerEngine()
+    app.state.analyzer = build_analyzer()
     yield
 
 

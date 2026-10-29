@@ -7,6 +7,8 @@ nav_hidden: true
 
 [GitHub release v2.0.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.0)
 
+This entry describes the 2.0.0 candidate; publication is pending.
+
 | Service | Version | Change |
 | --- | --- | --- |
 | dashboard / docs / onboarding | 2.0.0 | Community branding, classified forms and personal-only setup. |
@@ -40,10 +42,23 @@ nav_hidden: true
   Only their dots blink for activity; labels and badge styling stay fixed.
 - Overview cards can be rearranged and resized, with automatic saved browser layouts
   and protected content widths. Live MCP activity and Corpus shape start equally split.
-  Hold a card to reveal faint drop positions; resize from its highlighted right edge.
+  Hold a card to reveal faint drop positions. Either resize edge snaps to the
+  twelve-column grid while the opposite edge and neighbouring cards stay fixed;
+  empty space is retained and resizing never moves cards to another row.
 - Active readiness checks refresh the local model lease before idle expiry. Startup
   is counted separately from stopped services, and SQL-only Overview statistics
   remain readable while embeddings warm up.
+- Installation uses exact npm versions and committed lockfiles, hash-locked Python
+  packages and scanner data, and immutable container/source versions. The storage
+  image builds from pinned official MinIO source for fresh installations.
+- The wizard checks supported Node/npm, native shell tools, the local Linux Docker
+  engine, Compose/Buildx, write access, host-port ownership, build registries and
+  machine resources. The server checks again before installation. Supported
+  prerequisite repairs have explicit Install/Start actions.
+- Claude extraction setup explains the one-year subscription token obtained with
+  `claude setup-token`, separately from Anthropic Console API billing.
+- Personal document requirements no longer require company accounts or page IDs;
+  obsolete notification and external-page update instructions are removed.
 
 This major release changes memory-tool inputs and retires sharing. Read the
 [contract and migration guide](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.0/documentation/spaces/personal/knowledge-contract.md)
