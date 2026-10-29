@@ -303,6 +303,10 @@ export function packRecallContext(input: {
       ...contradictionResults.flatMap((entry) => [entry.supersededRef, entry.supersededByRef].filter((id): id is string => Boolean(id))),
     ])
     const factRegistry = Object.fromEntries([...facts.entries()].filter(([id]) => referencedIds.has(id)))
+    const endpointUuids = new Set(Object.values(factRegistry)
+      .flatMap((fact) => [fact.source_node_uuid, fact.target_node_uuid])
+      .filter((uuid): uuid is string => uuid !== null))
+    const supportedCenter = (center: string | null) => center !== null && endpointUuids.has(center) ? center : null
     const included: RecallPlaneCountValue = {
       memories: memories.length,
       graphFacts: graphRefs.length,
@@ -328,8 +332,8 @@ export function packRecallContext(input: {
       facts: factRegistry,
       graph: { factRefs: graphRefs },
       entities: entityRows,
-      timeline: { centerNodeUuid: input.timelineCenterNodeUuid, entries: timelineEntries },
-      contradictions: { centerNodeUuid: input.contradictionCenterNodeUuid, results: contradictionResults },
+      timeline: { centerNodeUuid: supportedCenter(input.timelineCenterNodeUuid), entries: timelineEntries },
+      contradictions: { centerNodeUuid: supportedCenter(input.contradictionCenterNodeUuid), results: contradictionResults },
       followup: {
         memoryIds: followupMemoryIds,
         entities: followupEntityNames,
