@@ -60,7 +60,7 @@ describe('memory update error handling', () => {
 
     await expect(updateMemoryAction({
       id: 'memory-id',
-      project: 'target-project',
+      contractVersion: 2, expectedRevision: 3, intent: 'reclassification', changes: { content: 'A complete classified memory update with evidence.' }, reason: 'Owner supplied a corrected classification.', evidence: [{ kind: 'user', reference: 'conversation:fixture', evidence: 'Owner corrected the classification explicitly.' }], idempotencyKey: 'fixture-update-key',
       surface: 'personal',
     })).resolves.toEqual({
       ok: false,
@@ -74,7 +74,7 @@ describe('memory update error handling', () => {
 
     await expect(updateMemoryAction({
       id: 'memory-id',
-      content: 'updated content',
+      contractVersion: 2, expectedRevision: 3, intent: 'correction', changes: { content: 'A complete corrected memory with source evidence.' }, reason: 'Owner corrected the remembered behavior.', evidence: [{ kind: 'user', reference: 'conversation:fixture', evidence: 'Owner corrected the behavior explicitly.' }], idempotencyKey: 'fixture-failure-key',
       surface: 'personal',
     })).rejects.toThrow('unexpected failure')
   })

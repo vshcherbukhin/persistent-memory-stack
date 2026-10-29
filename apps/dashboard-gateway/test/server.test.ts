@@ -337,7 +337,7 @@ describe('gateway routing', () => {
     }, { statePath, dashboardBaseUrl: 'http://dashboard:3000', proxy: proxied })
 
     expect(page.status).toBe(200)
-    expect(page.body).toContain('Updating Persistent Memory to the latest release')
+    expect(page.body).toContain('Updating Persistent Memory')
     expect(asset.status).toBe(204)
     expect(proxied).toHaveBeenCalledTimes(1)
   })
@@ -407,7 +407,8 @@ describe('gateway routing', () => {
     }, { statePath, dashboardBaseUrl: 'http://dashboard:3000', proxy: proxied })
 
     expect(result.status).toBe(200)
-    expect(result.body).toContain('Updating Persistent Memory to the latest release 4.0.8')
+    expect(result.body).toContain('Updating Persistent Memory to version 4.0.8')
+    expect(result.body).not.toContain('latest release')
     expect(result.body).toContain('Waiting for the refreshed dashboard to accept traffic')
     expect(proxied).toHaveBeenCalledTimes(1)
   })
@@ -486,7 +487,7 @@ describe('gateway routing', () => {
     expect(html).toContain('/api/update/dashboard-ready')
     expect(html).toContain("const handoffSeenKey = 'pm:public-v1:update-handoff-seen-id'")
     expect(html).toContain('localStorage.setItem(handoffSeenKey, state.id)')
-    expect(html).toContain('Updating Persistent Memory to the latest release')
+    expect(html).toContain('Updating Persistent Memory')
     expect(html).not.toContain('class="status"')
   })
 
@@ -588,7 +589,7 @@ describe('gateway routing', () => {
   it('compiles gateway TypeScript before its production image starts JavaScript', async () => {
     const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8')
 
-    expect(dockerfile).toContain('FROM node:22-alpine AS build')
+    expect(dockerfile).toMatch(/FROM node:24-alpine@sha256:[a-f0-9]{64} AS build/)
     expect(dockerfile).toContain('RUN npm run build -w persistent-memory-dashboard-gateway')
     expect(dockerfile).toContain('CMD ["node", "dist/index.js"]')
   })

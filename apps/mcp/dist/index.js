@@ -22,18 +22,18 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { ApiClient, idleSessionIds, loadConfig, log, missingMcpSessionResponse, registerAllTools, startMcpSession, withMcpRequestContext, } from '@pm/mcp-runtime';
+import { ApiClient, idleSessionIds, loadConfig, log, missingMcpSessionResponse, registerAllTools, startMcpSession, startClientEmbeddingRetries, withMcpRequestContext, } from '@pm/mcp-runtime';
 import { resolveStartupContext } from "./startup.js";
 const SERVER_INSTRUCTIONS = [
     'Persistent Memory is a mandatory project-memory system.',
-    'For every non-trivial task, first call recall_context with the task query and project/repo name.',
+    'For non-trivial work, call recall_context(query) across the personal owner space. Current project is a contextHints ranking hint; an explicit project filter is strict.',
     'recall_context returns closest memories plus graph facts, entity expansions, timeline entries, and contradictions; do not rely on search_memories alone.',
     'Use add_memory/update_memory/delete_memory immediately when the user correction or current evidence changes durable knowledge.',
 ].join(' ');
 function createMcpServer(api, runtime) {
     const server = new McpServer({
         name: 'persistent-memory-mcp-server',
-        version: '1.0.1',
+        version: '2.0.0',
     }, {
         instructions: SERVER_INSTRUCTIONS,
     });
@@ -238,7 +238,10 @@ async function runHttp(api, runtime, host, port) {
 }
 async function main() {
     const cfg = loadConfig(); // exits 1 on a missing required var
-    const { api, runtime } = await resolveStartupContext(cfg); // GET /config; builds client-managed bridge(s)
+    const { api, runtime } = await resolveStartupContext(cfg);
+    const stopEmbeddingRetries = startClientEmbeddingRetries(api, runtime);
+    process.once('SIGINT', stopEmbeddingRetries);
+    process.once('SIGTERM', stopEmbeddingRetries); // GET /config; builds client-managed bridge(s)
     await runHttp(api, runtime, cfg.PM_MCP_HTTP_HOST, cfg.PM_MCP_HTTP_PORT);
 }
 main().catch((err) => {

@@ -78,6 +78,7 @@ describe('memory graph sync status patches', () => {
         subjectKind: 'memory',
         subjectId: '11111111-1111-4111-8111-111111111111',
         operation: 'remove',
+        ownershipValidated: true,
         graphGroupId: 'pmg2_personal_project-a',
         graphEpisodeId: '33333333-3333-4333-8333-333333333333',
       }],

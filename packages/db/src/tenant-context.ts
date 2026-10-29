@@ -85,6 +85,7 @@ export type Tx = typeof prisma
  *                    can_read_all without requiring a current team.
  */
 export interface TenantRunOpts {
+  isolationLevel?: 'RepeatableRead'
   globalAdmin?: boolean
   teamIdOverride?: string | null
   readOnly?: boolean
@@ -106,8 +107,12 @@ export async function runInTenant<T>(
   const ctx = getCtx() // server-derived; never from the request body
 
   const globalAdmin = opts.globalAdmin === true && ctx.isGlobalSuperuser
-  const effectiveTeamId =
-    opts.teamIdOverride !== undefined ? opts.teamIdOverride : ctx.teamId
+  // Compatibility options cannot widen Community personal ownership. System
+  // maintenance remains RLS-bound to positively identified personal rows.
+  if (opts.teamIdOverride && ctx.teamId && opts.teamIdOverride !== ctx.teamId) {
+    throw new Error('Community personal operations cannot target another owner partition.')
+  }
+  const effectiveTeamId = ctx.teamId
 
   // Fail-closed: a team-scoped WRITE needs a target team. Reads (readOnly) and
   // the global-admin write path (global_write WITH CHECK is pm_is_global_admin())
@@ -119,9 +124,9 @@ export async function runInTenant<T>(
     )
   }
 
-  const canReadAll = ctx.isTeamMember || globalAdmin // SHARED tables (docs/graph) — universal
-  const readAllMemory = opts.readAllMemory === true || globalAdmin // MEMORY universal (dashboard)
-  const mountedCsv = ctx.mountedTeamIds.join(',') // '' → {} (own-team only)
+  const canReadAll = false
+  const readAllMemory = false
+  const mountedCsv = ''
   const bypassOwnerFloor = ctx.isTeamAdmin || ctx.isGlobalSuperuser || globalAdmin
 
   return prisma.$transaction(async (txRaw) => {
@@ -143,5 +148,5 @@ export async function runInTenant<T>(
     } finally {
       ctx.insideTenantTx = false
     }
-  })
+  }, opts.isolationLevel ? { isolationLevel: opts.isolationLevel } : {})
 }

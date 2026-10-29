@@ -26,6 +26,8 @@ type Kind = 'memory' | 'chunk'
 
 /** The columns the backfill scan selects. */
 export interface BackfillRow {
+  projectAssociations?: string[]
+  revision?: number
   id: string
   teamId: string
   project: string
@@ -34,6 +36,8 @@ export interface BackfillRow {
 }
 
 export interface BackfillItem {
+  projectAssociations?: string[]
+  revision?: number
   rowId: string
   sourceKind: Kind
   project: string
@@ -61,6 +65,8 @@ export function planBackfillUpserts(
       sourceKind: kind,
       project: r.project,
       vector,
+      ...(r.revision === undefined ? {} : { revision: r.revision }),
+      ...(r.projectAssociations ? { projectAssociations: r.projectAssociations } : {}),
       ...(r.documentId ? { documentId: r.documentId } : {}),
     }
     const list = byTeam.get(r.teamId)
@@ -77,7 +83,7 @@ async function backfillKind(deps: WorkerDeps, kind: Kind): Promise<number> {
   const rows = (await runInTenant<(BackfillRow & { content: string })[]>(
     (tx: Tx) =>
       (kind === 'memory'
-        ? tx.memory.findMany({ where: { embeddingStatus: 'pending' }, select, take: BATCH, orderBy: { createdAt: 'asc' } })
+        ? tx.memory.findMany({ where: { embeddingStatus: 'pending', ownershipState: 'personal', deletedAt: null }, select: { ...select, revision: true, projectAssociations: true }, take: BATCH, orderBy: { createdAt: 'asc' } })
         : tx.chunk.findMany({ where: { embeddingStatus: 'pending' }, select: { ...select, documentId: true }, take: BATCH, orderBy: { createdAt: 'asc' } })) as PromiseLike<
         (BackfillRow & { content: string })[]
       >,
@@ -122,9 +128,19 @@ async function backfillKind(deps: WorkerDeps, kind: Kind): Promise<number> {
       }
       const r =
         kind === 'memory'
-          ? await tx.memory.updateMany({ where: { id, embeddingStatus: 'pending' }, data })
+          ? await tx.memory.updateMany({ where: { id, revision: rows.find(row => row.id === id)?.revision, deletedAt: null, embeddingStatus: 'pending' }, data })
           : await tx.chunk.updateMany({ where: { id, embeddingStatus: 'pending' }, data })
       flipped += r.count
+      if (kind === 'memory' && r.count === 0) {
+        const current = await tx.memory.findUnique({ where: { id }, select: { revision: true } })
+        const attempted = rows.find(row => row.id === id)?.revision
+        const stalePoint = pointIds.get(id)
+        if (stalePoint && current?.revision !== attempted) {
+          // Exact version point only: another producer may already have made
+          // the current revision ready; never purge that newer point.
+          await deps.qdrant.delete('memory_vectors', { wait: true, points: [stalePoint] })
+        }
+      }
     }
   }, { globalAdmin: true })
 

@@ -14,6 +14,7 @@ const RETRYABLE_GRAPH_STATUSES = ['pending', 'failed'] satisfies GraphStatus[]
 const MAX_GRAPH_ERROR_LENGTH = 1000
 
 export interface MemoryGraphSyncRow {
+  revision?: number
   id: string
   teamId: string
   project: string
@@ -90,7 +91,7 @@ export async function queueUnstampedGraphEpisodeCleanup(
       project: row.project,
       subjectKind: 'memory',
       subjectId: row.id,
-      operation: 'remove',
+      operation: 'remove', ownershipValidated: true,
       graphGroupId: graph.groupId,
       graphEpisodeId: graph.episodeId,
     }],
@@ -109,7 +110,9 @@ async function stampGraphStatus(
         where: {
           id: row.id,
           graphVersion: row.graphVersion,
+          ...(row.revision === undefined ? {} : { revision: row.revision }),
           graphStatus: { in: RETRYABLE_GRAPH_STATUSES },
+          ownershipState: 'personal', deletedAt: null,
         },
         data,
       })

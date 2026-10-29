@@ -7,9 +7,8 @@ nav_order: 10
 ---
 # Install Persistent Memory
 
-The installer creates a local Personal Memories stack first: local storage,
-the local dashboard, and stream MCP. Shared Memories is optional and can be
-connected later from the dashboard. Published stable GitHub Releases are checked
+The installer creates one local Personal Memories stack: local storage,
+the local dashboard, and stream MCP. Published stable GitHub Releases are checked
 automatically after installation; no update-source account, token, or setup step
 is required. Installing an update remains an explicit action.
 
@@ -43,13 +42,28 @@ downloads still require network access.
 
 ## 2. Check your environment
 
-Confirm Node 24.x LTS or Node 22.12+ in the Node 22 line, Docker, and Docker Compose
-are ready. Windows also requires Git for Windows. Review the resource table's
+Confirm Node 24.x or Node 22.12+ in the Node 22 line, npm 10 or 11, Git,
+native Bash with curl, a running Docker Linux engine, Docker Compose 2.24.4 or
+newer, and Docker Buildx are ready. Windows uses Git for Windows Bash. Review the resource table's
 actual, minimum, and recommended RAM and disk figures. Next remains blocked
 until the base application can run with API embeddings and extraction. Missing
 Ollama is optional here; it is required only when you choose local embeddings.
 See [machine requirements](machine-requirements.md) before preparing a small Mac
 or Windows laptop.
+
+Environment checks also verify writable installation files, available ports (or
+ports already owned by this installation), the Compose configuration, and access
+to package registries. **Generate & Install** repeats these checks on the server
+under the installation lock; an earlier browser result cannot bypass a failure.
+Missing prerequisites show **Install**, **Start**, or platform-specific setup
+guidance. Windows uses fixed WinGet package IDs when WinGet is available; macOS
+uses Homebrew. Operating-system approval, a restart, or manual setup may still be
+required. Node and npm must already be usable to launch the wizard.
+
+The release uses committed npm lockfiles and hash-locked Python requirements.
+Installation fails if a lock is absent, inconsistent, or cannot be installed;
+it never falls back to choosing new dependency versions. See
+[Dependency reproducibility](dependency-reproducibility.md).
 
 The installer supports those two Node major versions only. Node 25, 26, and
 other majors are rejected even if an individual dependency supports them. If
@@ -92,6 +106,14 @@ Keep API keys private when sharing diagnostic details.
 Choose your extraction provider and model, then run **Test fact extraction**.
 The installer keeps Next disabled until that test succeeds for the current key
 and model.
+
+For Claude, the tip card explains the subscription-token option. With a paid
+Pro, Max, Team, or Enterprise subscription, run `claude setup-token`, approve the
+browser sign-in, and paste the printed one-year OAuth token into the credential
+field. This uses the Claude subscription rather than Anthropic Console API
+billing. The command does not save the token, and the wizard still requires a
+successful extraction test. See
+[Anthropic's token instructions](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token).
 
 ![Extraction configuration](../assets/lifecycle/onboarding/installer-extraction.png)
 
@@ -145,8 +167,7 @@ file and data volumes when retrying.
 
 Select **Go to dashboard**. Passwordless installs open Personal Overview
 directly; password-protected installs open the local login screen first.
-Configure any optional Shared Memories server connection later from this local
-dashboard; the personal-install wizard does not ask for a shared server or token.
+Community is personal-only; no company service connection is required.
 
 ![Installation complete](../assets/lifecycle/onboarding/installer-done.png)
 

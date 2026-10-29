@@ -4,7 +4,18 @@ const CONNECTION_ERROR = 'The installer connection was lost. Check its terminal.
 
 async function localFetch(url: string, options?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, options)
+    const method = (options?.method ?? 'GET').toUpperCase()
+    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return await fetch(url, options)
+    // Read the current process nonce for each explicit action; never replay the
+    // action automatically after a restart or a lost progress stream.
+    const session = await fetch('/api/session', { cache: 'no-store' })
+    if (!session.ok) throw new Error(CONNECTION_ERROR)
+    const body: unknown = await session.json()
+    const nonce = body && typeof body === 'object' ? (body as { nonce?: unknown }).nonce : null
+    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(nonce)) throw new Error(CONNECTION_ERROR)
+    const headers = new Headers(options?.headers)
+    headers.set('x-pm-onboard-nonce', nonce)
+    return await fetch(url, { ...options, headers })
   } catch {
     throw new Error(CONNECTION_ERROR)
   }

@@ -19,9 +19,10 @@ const dashboard = (path: string) => readFileSync(new URL(path, import.meta.url),
 const root = (path: string) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 const personalGuidePages = [
-  { file: 'index.md', screenshots: ['personal-space-start.png'] },
-  { file: 'navigation-and-spaces.md', screenshots: ['navigation-sidebar.png', 'space-switcher.png', 'tooltip-example.png'] },
+  { file: 'index.md', screenshots: [] },
+  { file: 'navigation-and-spaces.md', screenshots: [] },
   { file: 'overview.md', screenshots: ['overview-widgets.png'] },
+  { file: 'knowledge-contract.md', screenshots: [] },
   { file: 'memories.md', screenshots: ['memories-page.png', 'memory-details-modal.png', 'memory-edit-modal.png', 'memory-tools.png'] },
   { file: 'services.md', screenshots: ['services-page.png', 'mcp-sessions.png', 'service-logs-modal.png'] },
   { file: 'workers.md', screenshots: ['workers-page.png', 'worker-schedule-modal.png', 'worker-logs-modal.png'] },
@@ -35,9 +36,10 @@ const personalGuidePages = [
 
 const personalSpaceNavigation = [
   ['Start here', 'spaces/personal/index.md'],
-  ['Navigation and spaces', 'spaces/personal/navigation-and-spaces.md'],
+  ['Navigation', 'spaces/personal/navigation-and-spaces.md'],
   ['Overview', 'spaces/personal/overview.md'],
   ['Memories', 'spaces/personal/memories.md'],
+  ['Knowledge contract', 'spaces/personal/knowledge-contract.md'],
   ['Services', 'spaces/personal/services.md'],
   ['Workers', 'spaces/personal/workers.md'],
   ['Token usage', 'spaces/personal/token-usage.md'],
@@ -185,6 +187,7 @@ describe('dashboard documentation integration', () => {
       'navigation-and-spaces',
       'overview',
       'memories',
+      'knowledge-contract',
       'services',
       'workers',
       'token-usage',
@@ -200,7 +203,8 @@ describe('dashboard documentation integration', () => {
       icon: 'home',
     })
     expect(topics[0].markdown).toContain('# Personal Space guide')
-    expect(topics[0].markdown).toContain('../../assets/spaces/personal/personal-space-start.png')
+    expect(topics[0].markdown).toContain('Persistent Memory Community')
+    expect(topics[0].markdown).not.toContain('space switcher says')
     expect(topics[0].markdown).not.toMatch(/^---/)
     expect(dashboardDocumentationTopic('local-personal', 'not-a-topic').slug).toBe('getting-started')
   })
@@ -395,7 +399,7 @@ describe('dashboard documentation integration', () => {
     expect(mobileStyles).toMatch(/\.guide-image-dialog\s*{[^}]*padding: 50px 10px 10px/s)
   })
 
-  it('loads the canonical development guides for Shared and Hosted dashboard spaces', async () => {
+  it('retains truthful historical retirement notes for legacy sharing descriptors', async () => {
     vi.stubEnv(
       'DASHBOARD_GUIDE_ROOT',
       fileURLToPath(new URL('../../../../documentation', import.meta.url)),
@@ -411,21 +415,21 @@ describe('dashboard documentation integration', () => {
     expect(dashboardDocumentationFor('local-shared-client')).toEqual([
       expect.objectContaining({
         slug: 'getting-started',
-        title: 'Shared Space Documentation',
+        title: 'Retired Shared Memories client',
         icon: 'cloud_sync',
       }),
     ])
     expect(dashboardDocumentationFor('shared-server')).toEqual([
       expect.objectContaining({
         slug: 'getting-started',
-        title: 'Hosted Server Dashboard Documentation',
+        title: 'Retired Shared Memories server',
         icon: 'admin_panel_settings',
       }),
     ])
-    expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('**Status: In development.**')
-    expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('Personal Space remains the supported local workflow')
-    expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('**Status: In development.**')
-    expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('separate hosted control-plane dashboard')
+    expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('retired in Community')
+    expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('do not activate')
+    expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('retired in Community')
+    expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('outside\nactive personal recall')
     expect(guide).toContain('dashboardGuideSources')
     expect(guide).toContain('dashboard_space')
     expect(guide).not.toContain('FALLBACK_TOPICS')
@@ -438,10 +442,10 @@ describe('dashboard documentation integration', () => {
       '  - "Spaces":',
       '      - "Personal Space Documentation":',
       ...personalSpaceNavigation.map(([label, path]) => `          - "${label}": ${path}`),
-      '      - "Shared Space Documentation":',
-      '          - "In development": spaces/shared/index.md',
-      '      - "Hosted Server Dashboard Documentation":',
-      '          - "In development": spaces/hosted-server/index.md',
+      '      - "Historical sharing":',
+      '          - "Retired sharing": spaces/shared/index.md',
+      '      - "Historical sharing":',
+      '          - "Retired sharing": spaces/hosted-server/index.md',
     ].join('\n')
 
     expect(config).toMatch(/^strict: true$/m)
@@ -451,27 +455,16 @@ describe('dashboard documentation integration', () => {
     expect(config).not.toContain('      - Shared Server:')
   })
 
-  it('keeps Shared and Hosted user guides explicitly in development', () => {
-    const sharedUrl = new URL('../../../../documentation/spaces/shared/index.md', import.meta.url)
-    const hostedUrl = new URL('../../../../documentation/spaces/hosted-server/index.md', import.meta.url)
-
-    expect(existsSync(sharedUrl)).toBe(true)
-    expect(existsSync(hostedUrl)).toBe(true)
-    if (!existsSync(sharedUrl) || !existsSync(hostedUrl)) return
-
-    const shared = readFileSync(sharedUrl, 'utf8')
-    const hosted = readFileSync(hostedUrl, 'utf8')
-    expect(shared).toContain('title: Shared Space Documentation')
-    expect(shared).toContain('**Status: In development.**')
-    expect(shared).toContain('local Shared Space client and dashboard are in development')
-    expect(shared).toContain('Personal Space remains the supported local workflow')
-    expect(shared).not.toMatch(/^##? (Setup|Testing)$/m)
-    expect(hosted).toContain('title: Hosted Server Dashboard Documentation')
-    expect(hosted).toContain('**Status: In development.**')
-    expect(hosted).toContain('separate hosted control-plane dashboard')
-    expect(hosted).toMatch(/for superusers only/)
-    expect(hosted).not.toMatch(/authorized\s+administrator roles/)
-    expect(hosted).toMatch(/not a third local\s+space/)
+  it('keeps retired sharing guides free of active connection/setup instructions', () => {
+    for (const [path, title] of [['shared', 'client'], ['hosted-server', 'server']]) {
+      const content = root(`documentation/spaces/${path}/index.md`)
+      expect(content).toContain(`title: Retired Shared Memories ${title}`)
+      expect(content).toContain('retired in Community')
+      expect(content).toContain('outside\nactive personal recall')
+      expect(content).toContain('do not activate')
+      expect(content).not.toContain('Status: In development')
+      expect(content).not.toMatch(/^##? (Setup|Testing)$/m)
+    }
   })
 
   it('uses a fluid desktop grid with restrained sidebars and responsive overflow', () => {
@@ -504,7 +497,8 @@ describe('dashboard documentation integration', () => {
     expect(header).toContain('<Icon name="menu_book"')
     expect(header.indexOf('aria-label="Open documentation"')).toBeLessThan(header.indexOf('aria-label="Open release notes"'))
     expect(nav).toContain('className="nav-documentation"')
-    expect(nav).toContain("withSpace('/documentation', selectedSpace)")
+    expect(nav).toContain('href="/documentation"')
+    expect(nav).not.toContain('selectedSpace')
     expect(nav).toContain('<Icon name="menu_book"')
   })
 
@@ -526,7 +520,7 @@ describe('dashboard documentation integration', () => {
     const docsPackage = JSON.parse(readFileSync(docsPackageUrl, 'utf8')) as {
       devDependencies?: Record<string, string>
     }
-    expect(docsPackage.devDependencies?.mermaid).toBe('11.16.0')
+    expect(docsPackage.devDependencies?.mermaid).toBe('12.2.0')
     expect(dockerfile).toContain('node_modules/mermaid/dist/mermaid.min.js')
     expect(dockerfile).toContain('/site/assets/javascripts/mermaid.min.js')
     expect(rootPackage.scripts?.['docs:install']).toBe('node scripts/docs-tool.mjs install')
@@ -589,7 +583,7 @@ describe('dashboard documentation integration', () => {
     const history = root('documentation/release-history.md')
 
     expect(docsPackage.version).toMatch(/^\d+\.\d+\.\d+$/)
-    expect(requirements.trim()).toBe('mkdocs-material==9.7.6')
+    expect(requirements.split(/\r?\n/).filter((line) => line && !line.startsWith('#'))).toEqual(['mkdocs-material==9.8.0'])
     expect(config).toContain('site_name: PM Management Documentation')
     expect(config).toContain('custom_dir: documentation/overrides')
     expect(config).toContain('logo: assets/images/pm-logo.svg')
@@ -608,7 +602,7 @@ describe('dashboard documentation integration', () => {
     expect(new Set(releasedVersions).size).toBe(releasedVersions.length)
   })
 
-  it('keeps a complete screenshot-backed Personal Space guide', () => {
+  it('keeps the complete Personal guide inventory and validates every referenced screenshot', () => {
     const guideDirectory = new URL('../../../../documentation/spaces/personal/', import.meta.url)
     const expectedGuideFiles = personalGuidePages.map(({ file }) => file).sort()
     const actualGuideFiles = readdirSync(guideDirectory, { withFileTypes: true })
@@ -637,9 +631,9 @@ describe('dashboard documentation integration', () => {
       expect(content, `${file} must use portable Markdown cautions`).not.toMatch(/^!!! caution\b/m)
 
       const imageLinks = [...content.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1])
-      // The removed update settings appear in the old Notifications capture.
-      // Keep it unreferenced until a replacement can be captured through the required Chrome extension.
-      if (file === 'notifications.md') expect(imageLinks).toEqual([])
+      // Changed/prose-only guides must not acquire invented or stale visual evidence.
+      // Required live UI acceptance is tracked separately from documentation asset checks.
+      if (screenshots.length === 0) expect(imageLinks).toEqual([])
       else {
         expect(imageLinks.length, `${file} needs a real Personal Space screenshot`).toBeGreaterThan(0)
         expect(imageLinks[0], `${file} must lead with its full-page or primary-state screenshot`).toBe(`../../assets/spaces/personal/${screenshots[0]}`)
@@ -651,7 +645,15 @@ describe('dashboard documentation integration', () => {
         expect(existsSync(new URL(imageLink, url)), `${file} references missing screenshot ${imageLink}`).toBe(true)
       }
 
-      for (const section of ['Purpose', 'Read the page', 'Actions', 'States', 'Cautions', 'Troubleshooting']) {
+      const sections = ['navigation-and-spaces.md', 'knowledge-contract.md'].includes(file) ? [] : ['Purpose', 'Read the page', 'Actions', 'States', 'Cautions', 'Troubleshooting']
+      if (file === 'navigation-and-spaces.md') {
+        expect(content).toContain('Community edition')
+        expect(content).toContain('no space switcher')
+      }
+      if (file === 'knowledge-contract.md') {
+        for (const contract of ['memory_catalog', 'expectedRevision', 'idempotency', 'origin', 'applicability']) expect(content).toContain(contract)
+      }
+      for (const section of sections) {
         expect(content, `${file} needs a ${section} section`).toMatch(new RegExp(`^## ${section}$`, 'm'))
       }
     }

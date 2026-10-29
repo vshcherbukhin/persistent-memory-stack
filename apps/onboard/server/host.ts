@@ -35,6 +35,7 @@ export function hostEnvironment(options: HostOptions = {}): NodeJS.ProcessEnv {
     win32.dirname(options.execPath ?? process.execPath),
     ...currentPath.split(';').filter(Boolean),
     win32.join(programFiles, 'Docker', 'Docker', 'resources', 'bin'),
+    win32.join(programFiles, 'Git', 'cmd'),
     ...(local ? [win32.join(local, 'Programs', 'Ollama')] : []),
   ].join(';')
   return env

@@ -1,4 +1,4 @@
-export type ServiceStatusKind = 'healthy' | 'running' | 'stopped' | 'error' | 'unknown'
+export type ServiceStatusKind = 'healthy' | 'running' | 'stopped' | 'error' | 'unknown' | 'starting'
 
 type ServiceStatusSubject = {
   state: string
@@ -17,6 +17,7 @@ export function serviceIsActive(service: ServiceStatusSubject): boolean {
 
 /** Keep logical dependency observations honest: unknown is not stopped. */
 export function serviceStatusKind(service: ServiceStatusSubject): ServiceStatusKind {
+  if (service.health === 'starting' || service.state === 'starting') return 'starting'
   if (service.health === 'unhealthy' || service.state === 'unreachable' || service.state === 'dead') return 'error'
   if (service.state === 'unknown') return 'unknown'
   if (service.state === 'exited') {

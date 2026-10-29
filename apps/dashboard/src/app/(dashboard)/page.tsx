@@ -1,12 +1,14 @@
 import Link from 'next/link'
 import { requireControlPlane } from '@/lib/session'
-import { api } from '@/lib/api'
+import { api, normalizeMemorySurface } from '@/lib/api'
 import { isSuperuserLevel } from '@/lib/authz'
 import type { MemoryGraphFacet, OverviewSummary } from '@/lib/types'
 import { capabilityHealthPresentation } from '@/lib/capabilityHealth'
 import { streamMcpLogRef } from '@/lib/mcpSessionFormat'
 import { McpLiveSessionsPanel } from './McpLiveSessionsPanel'
 import { OverviewAutoRefresh } from './OverviewAutoRefresh'
+import { OverviewLayout, type OverviewLayoutCard } from './OverviewLayout'
+import { overviewMemorySummary } from '@/lib/overviewSummary'
 import {
   CorpusShapePanel,
   OverviewIncident,
@@ -31,12 +33,13 @@ function money(n: number): string {
 
 function serviceTone(s: OverviewSummary['services']): Tone {
   if (s.unavailable || s.failed > 0) return 'bad'
-  if (s.stopped > 0 || s.total === 0) return 'warn'
+  if (s.starting > 0 || s.stopped > 0 || s.total === 0) return 'warn'
   return 'ok'
 }
 
 function serviceBadge(s: OverviewSummary['services']): { label: string; tone: BadgeTone } {
   if (s.unavailable || s.failed > 0) return { label: 'error', tone: 'bad' }
+  if (s.starting > 0) return { label: 'starting', tone: 'warn' }
   if (s.stopped > 0 || s.total === 0) return { label: 'attention', tone: 'warn' }
   return { label: 'healthy', tone: 'ok' }
 }
@@ -133,12 +136,12 @@ export default async function OverviewPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = searchParams ? await searchParams : {}
-  const space = (Array.isArray(params.space) ? params.space[0] : params.space) === 'shared' ? 'shared' : 'personal'
+  const space = normalizeMemorySurface(Array.isArray(params.space) ? params.space[0] : params.space)
   const localWho = await requireControlPlane()
-  const who = space === 'shared' ? await api.memoryWhoami('shared') : localWho
+  const who = localWho
   const overview = await api.getOverview(space)
   const personalMode = localWho.deploymentMode === 'local' && space === 'personal'
-  const peopleHref = hrefWithSpace(space === 'shared' ? '/teams' : '/team-settings', space)
+  const peopleHref = hrefWithSpace('/team-settings', space)
   const showSettingsLink = isSuperuserLevel(who.adminLevel)
   const mcpSessions = overview.mcpSessions ?? { active: 0, stream: 0, legacy: 0, serviceStatus: 'unknown' as const }
   const servicesBadge = serviceBadge(overview.services)
@@ -180,12 +183,15 @@ export default async function OverviewPage({
   const pendingEmbedding = pendingResult.status === 'fulfilled' ? pendingResult.value.memories : 0
   // Prototype meta: recent writes plus anything still waiting to be searchable.
   const newestWrite = createdTimes[0]
-  const savedMemoriesMeta = [
-    writesLastDay > 0
+  const savedMemoriesMeta = overviewMemorySummary({
+    memoryCount: overview.counts.memories,
+    recentAvailable: recentResult.status === 'fulfilled',
+    recentSummary: writesLastDay > 0
       ? `+${writesCapped ? `${writesLastDay}+` : writesLastDay} in the last 24h`
       : newestWrite ? `No writes in 24h · last ${relativeAgo(newestWrite, now)}` : null,
-    pendingEmbedding > 0 ? `${pendingEmbedding} awaiting embedding` : null,
-  ].filter(Boolean).join(' · ') || 'No memories yet — your agents write here'
+    pendingAvailable: pendingResult.status === 'fulfilled',
+    pendingCount: pendingEmbedding,
+  })
 
   // One incident line, highest severity first, so a degraded stack states itself
   // before the reader has to interpret six cards.
@@ -226,6 +232,127 @@ export default async function OverviewPage({
               }
             : null
 
+  const cards: OverviewLayoutCard[] = [
+    { id: 'memories', content: (
+      <OverviewCard
+        href={hrefWithSpace(`/memories?surface=${space}`, space)}
+        label="Saved Memories"
+        value={compact(overview.counts.memories)}
+        meta={savedMemoriesMeta}
+        tone="neutral"
+        badge={personalMode ? 'personal' : 'shared'}
+        spark={<Sparkline points={writeBuckets} />}
+      />
+    ) },
+    ...(!personalMode ? [{ id: 'people' as const, content: (
+      <OverviewCard
+        href={peopleHref}
+        label="Team & Users"
+        value={`${compact(overview.counts.teams)} / ${compact(overview.counts.users)}`}
+        meta={`${overview.counts.superusers} superuser, ${overview.counts.admins} admin`}
+        tone="accent"
+        badge="teams / users"
+      />
+    ) }] : []),
+    { id: 'services', content: (
+      <OverviewCard
+        href={hrefWithSpace('/services', space)}
+        label="Services"
+        value={overview.services.unavailable ? 'Unavailable' : `${overview.services.active}/${overview.services.total}`}
+        meta={
+          overview.services.unavailable
+            ? 'Docker control sidecar unavailable'
+            : `${overview.services.active} active, ${overview.services.starting > 0 ? `${overview.services.starting} starting, ` : ''}${overview.services.stopped} stopped, ${overview.services.failed} failed`
+        }
+        tone={serviceTone(overview.services)}
+        badge={servicesBadge.label}
+        badgeTone={servicesBadge.tone}
+      />
+    ) },
+    { id: 'sessions', content: (
+      <OverviewCard
+        href={hrefWithSpace('/services?tab=mcp', space)}
+        label="MCP sessions"
+        value={compact(mcpSessions.active)}
+        meta="Sessions managed by stream MCP service"
+        tone={mcpSessionTone(mcpSessions)}
+        badge={mcpBadge.label}
+        badgeTone={mcpBadge.tone}
+      />
+    ) },
+    { id: 'workers', content: (
+      <OverviewCard
+        href={hrefWithSpace('/workers', space)}
+        label="Workers"
+        value={`${overview.workers.enabled}/${overview.workers.total}`}
+        meta={`${overview.workers.enabled} active, ${workerStoppedCount} stopped, ${overview.workers.failed} failed`}
+        tone={workerTone(overview.workers)}
+        badge={workersBadge.label}
+        badgeTone={workersBadge.tone}
+      />
+    ) },
+    { id: 'usage', content: (
+      <OverviewCard
+        href={hrefWithSpace('/usage', space)}
+        label="Token usage"
+        value={compact(overview.usage.tokens)}
+        meta={`${compact(overview.usage.requests)} requests in 24h, ${money(overview.usage.cost)}`}
+        tone="neutral"
+        badge="24h"
+        badgeTone="neutral"
+        spark={<Sparkline points={usageTrend} tone="var(--accent-2)" />}
+      />
+    ) },
+    { id: 'graph', content: (
+      <OverviewCard
+        href={hrefWithSpace(`/memories?surface=${space}&tab=graph`, space)}
+        label="Graph entities"
+        value={facetsUnavailable ? '—' : compact(entityCount)}
+        meta={
+          facetsUnavailable
+            ? 'Graph projection unavailable'
+            : `${compact(projectCount)} project${projectCount === 1 ? '' : 's'} · ${compact(badgeFacets.length)} categories`
+        }
+        tone={facetsUnavailable ? 'warn' : 'neutral'}
+      />
+    ) },
+    ...(showSettingsLink ? [{ id: 'fact-extraction' as const, content: (
+      <OverviewCard
+        href={hrefWithSpace('/settings?setting=fact-extraction', space)}
+        label="Fact extraction"
+        value={overview.settings.factExtractionModel}
+        meta={`${factExtractionHealth.message} ${observedLabel(overview.capabilityHealth.factExtraction, now)}`}
+        tone={factExtractionHealth.tone}
+        badge={factExtractionHealth.badge === 'healthy' ? 'operational' : factExtractionHealth.badge}
+        badgeTone={factExtractionHealth.tone}
+        actionLabel="Open settings"
+        compact
+        valueClassName="overview-card-model mono"
+        dataHealthState={overview.capabilityHealth.factExtraction.state}
+      />
+    ) }, { id: 'embeddings' as const, content: (
+      <OverviewCard
+        href={hrefWithSpace('/settings?setting=embeddings', space)}
+        label="Embeddings"
+        value={`${overview.settings.activeEmbedModel} @ ${overview.settings.activeEmbedDim}`}
+        meta={`${embeddingsHealth.message} ${observedLabel(overview.capabilityHealth.embeddings, now)}`}
+        tone={embeddingsHealth.tone}
+        badge={embeddingsHealth.badge === 'healthy' ? 'operational' : embeddingsHealth.badge}
+        badgeTone={embeddingsHealth.tone}
+        actionLabel="Open settings"
+        compact
+        valueClassName="overview-card-model mono"
+        dataHealthState={overview.capabilityHealth.embeddings.state}
+      />
+    ) }] : []),
+    { id: 'live-mcp', content: (
+      <McpLiveSessionsPanel initialClients={liveClients} initialLogRef={liveLogRef} initialError={liveError} />
+    ) },
+    { id: 'corpus', content: (
+      <CorpusShapePanel badges={badgeFacets} unavailable={facetsUnavailable} />
+    ) },
+  ]
+
   return (
     <div className="overview-page">
       <OverviewAutoRefresh />
@@ -237,122 +364,7 @@ export default async function OverviewPage({
           actionLabel={incident.actionLabel}
         />
       ) : null}
-      <section className="overview-grid" aria-label="Dashboard summary">
-        {/* Prototype order: the corpus leads, then runtime, then cost, then graph. */}
-        <OverviewCard
-          href={hrefWithSpace(`/memories?surface=${space}`, space)}
-          label="Saved Memories"
-          value={compact(overview.counts.memories)}
-          meta={savedMemoriesMeta}
-          tone="neutral"
-          badge={personalMode ? 'personal' : 'shared'}
-          spark={<Sparkline points={writeBuckets} />}
-        />
-        {!personalMode ? (
-          <OverviewCard
-            href={peopleHref}
-            label="Team & Users"
-            value={`${compact(overview.counts.teams)} / ${compact(overview.counts.users)}`}
-            meta={`${overview.counts.superusers} superuser, ${overview.counts.admins} admin`}
-            tone="accent"
-            badge="teams / users"
-          />
-        ) : null}
-        <OverviewCard
-          href={hrefWithSpace('/services', space)}
-          label="Services"
-          value={overview.services.unavailable ? 'Unavailable' : `${overview.services.active}/${overview.services.total}`}
-          meta={
-            overview.services.unavailable
-              ? 'Docker control sidecar unavailable'
-              : `${overview.services.active} active, ${overview.services.stopped} stopped, ${overview.services.failed} failed`
-          }
-          tone={serviceTone(overview.services)}
-          badge={servicesBadge.label}
-          badgeTone={servicesBadge.tone}
-        />
-        <OverviewCard
-          href={hrefWithSpace('/services?tab=mcp', space)}
-          label="MCP sessions"
-          value={compact(mcpSessions.active)}
-          meta="Sessions managed by stream MCP service"
-          tone={mcpSessionTone(mcpSessions)}
-          badge={mcpBadge.label}
-          badgeTone={mcpBadge.tone}
-        />
-        <OverviewCard
-          href={hrefWithSpace('/workers', space)}
-          label="Workers"
-          value={`${overview.workers.enabled}/${overview.workers.total}`}
-          meta={`${overview.workers.enabled} active, ${workerStoppedCount} stopped, ${overview.workers.failed} failed`}
-          tone={workerTone(overview.workers)}
-          badge={workersBadge.label}
-          badgeTone={workersBadge.tone}
-        />
-        <OverviewCard
-          href={hrefWithSpace('/usage', space)}
-          label="Token usage"
-          value={compact(overview.usage.tokens)}
-          meta={`${compact(overview.usage.requests)} requests in 24h, ${money(overview.usage.cost)}`}
-          tone="neutral"
-          badge="24h"
-          badgeTone="neutral"
-          spark={<Sparkline points={usageTrend} tone="var(--accent-2)" />}
-        />
-        <OverviewCard
-          href={hrefWithSpace(`/memories?surface=${space}&tab=graph`, space)}
-          label="Graph entities"
-          value={facetsUnavailable ? '—' : compact(entityCount)}
-          meta={
-            facetsUnavailable
-              ? 'Graph projection unavailable'
-              : `${compact(projectCount)} project${projectCount === 1 ? '' : 's'} · ${compact(badgeFacets.length)} categories`
-          }
-          tone={facetsUnavailable ? 'warn' : 'neutral'}
-        />
-      </section>
-
-      {showSettingsLink ? (
-        <section className="overview-capabilities">
-        <div className="section-label">Model capabilities</div>
-        <div className="overview-runtime-grid" role="group" aria-label="Model settings">
-          <OverviewCard
-            href={hrefWithSpace('/settings?setting=fact-extraction', space)}
-            label="Fact extraction"
-            value={overview.settings.factExtractionModel}
-            meta={`${factExtractionHealth.message} ${observedLabel(overview.capabilityHealth.factExtraction, now)}`}
-            tone={factExtractionHealth.tone}
-            badge={factExtractionHealth.badge === 'healthy' ? 'operational' : factExtractionHealth.badge}
-            badgeTone={factExtractionHealth.tone}
-            actionLabel="Open settings"
-            compact
-            valueClassName="overview-card-model mono"
-            dataHealthState={overview.capabilityHealth.factExtraction.state}
-          />
-          <OverviewCard
-            href={hrefWithSpace('/settings?setting=embeddings', space)}
-            label="Embeddings"
-            value={`${overview.settings.activeEmbedModel} @ ${overview.settings.activeEmbedDim}`}
-            meta={`${embeddingsHealth.message} ${observedLabel(overview.capabilityHealth.embeddings, now)}`}
-            tone={embeddingsHealth.tone}
-            badge={embeddingsHealth.badge === 'healthy' ? 'operational' : embeddingsHealth.badge}
-            badgeTone={embeddingsHealth.tone}
-            actionLabel="Open settings"
-            compact
-            valueClassName="overview-card-model mono"
-            dataHealthState={overview.capabilityHealth.embeddings.state}
-          />
-        </div>
-        </section>
-      ) : null}
-
-      <section className="overview-lower" aria-label="Live MCP activity and corpus shape">
-        <McpLiveSessionsPanel initialClients={liveClients} initialLogRef={liveLogRef} initialError={liveError} />
-        <CorpusShapePanel
-          badges={badgeFacets}
-          unavailable={facetsUnavailable}
-        />
-      </section>
+      <OverviewLayout key={JSON.stringify([who.userId, who.teamId])} identity={{ userId: who.userId, teamId: who.teamId }} cards={cards} />
     </div>
   )
 }

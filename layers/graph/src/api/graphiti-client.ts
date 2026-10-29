@@ -18,6 +18,7 @@
  */
 /** Mirrors graphiti-service models.py FactEdge (drops expired_at/fact_embedding). */
 export interface GraphitiFactEdge {
+  episodes?: string[]
   uuid: string
   name: string | null
   fact: string | null

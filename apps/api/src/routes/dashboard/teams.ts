@@ -24,13 +24,20 @@ const TeamOut = z.object({
 })
 
 export async function dashboardTeamRoutes(app: FastifyInstance): Promise<void> {
+  // Retain the local owner's existing display-name administration. Community
+  // cannot create/delete sharing partitions or administer another owner.
+  app.addHook('preHandler', async req => {
+    const target = (req.params as { id?: string }).id
+    if (req.method === 'POST' || req.method === 'DELETE' || (target && target !== req.identity!.teamId)) throw forbidden('sharing_retired', 'Community permits only the existing personal owner partition; shared partition management is retired.')
+  })
   const z4 = app.withTypeProvider<ZodTypeProvider>()
 
   z4.get(
     '/teams',
     { schema: { response: { 200: z.object({ teams: z.array(TeamOut) }) } } },
-    async () => {
+    async (req) => {
       const rows = await ownerPrisma.team.findMany({
+        where: { id: req.identity!.teamId! },
         orderBy: { name: 'asc' },
         include: { _count: { select: { members: true } } },
       })

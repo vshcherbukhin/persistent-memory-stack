@@ -132,6 +132,7 @@ def _edge_to_fact(e) -> FactEdge:
     """From a graphiti_core EntityEdge object (POST /episodes, /search)."""
     return FactEdge(
         uuid=e.uuid,
+        episodes=getattr(e, "episodes", []) or [],
         name=getattr(e, "name", None),
         fact=getattr(e, "fact", None),
         source_node_uuid=getattr(e, "source_node_uuid", None),
@@ -148,6 +149,7 @@ def _row_to_fact(r: dict) -> FactEdge:
     """From a Cypher result row dict (/timeline, /contradictions, between-nodes)."""
     return FactEdge(
         uuid=r["uuid"],
+        episodes=r.get("episodes") or [],
         name=r.get("name"),
         fact=r.get("fact"),
         source_node_uuid=r.get("source_node_uuid"),

@@ -81,7 +81,7 @@ describe('searchVectors filter builder', () => {
     const f = fakeClient()
     await searchVectors(f.client, args({ project: 'gotham', sourceKind: 'memory' }))
     expect(f.captured.body.filter.must).toEqual([
-      { key: 'project', match: { value: 'gotham' } },
+      { should: [{ key: 'project', match: { value: 'gotham' } }, { key: 'project_associations', match: { value: 'gotham' } }] },
       { key: 'source_kind', match: { value: 'memory' } },
     ])
   })

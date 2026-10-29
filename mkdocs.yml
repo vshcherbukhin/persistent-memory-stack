@@ -47,20 +47,22 @@ extra_css:
   - stylesheets/material-icons-outlined.css
   - stylesheets/pm-management.css
 extra:
-  docs_version: 1.3.2
+  docs_version: 2.0.0
 nav:
   - "Home": index.md
   - "Installation":
       - "Windows preparation": installation/windows-installation.md
       - "Installation steps": installation/installation-steps.md
       - "Machine requirements and models": installation/machine-requirements.md
+      - "Dependency reproducibility": installation/dependency-reproducibility.md
       - "Uninstall memory stack": installation/uninstall-memory-stack.md
   - "Spaces":
       - "Personal Space Documentation":
           - "Start here": spaces/personal/index.md
-          - "Navigation and spaces": spaces/personal/navigation-and-spaces.md
+          - "Navigation": spaces/personal/navigation-and-spaces.md
           - "Overview": spaces/personal/overview.md
           - "Memories": spaces/personal/memories.md
+          - "Knowledge contract": spaces/personal/knowledge-contract.md
           - "Services": spaces/personal/services.md
           - "Workers": spaces/personal/workers.md
           - "Token usage": spaces/personal/token-usage.md
@@ -69,10 +71,10 @@ nav:
           - "System Settings": spaces/personal/system-settings.md
           - "Profile": spaces/personal/profile.md
           - "Releases and updates": spaces/personal/releases-and-updates.md
-      - "Shared Space Documentation":
-          - "In development": spaces/shared/index.md
-      - "Hosted Server Dashboard Documentation":
-          - "In development": spaces/hosted-server/index.md
+      - "Historical sharing":
+          - "Retired sharing": spaces/shared/index.md
+      - "Historical sharing":
+          - "Retired sharing": spaces/hosted-server/index.md
   - "Stack Architecture":
       - "Architecture": stack-architecture/architecture.md
       - "Operations": stack-architecture/operations.md

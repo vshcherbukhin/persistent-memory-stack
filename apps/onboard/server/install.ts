@@ -20,6 +20,9 @@ import { targetMemoryFiles, writeRuleTargets, ruleRepairWarning } from './rule.j
 import { writeOwnershipManifest } from './ownership.js'
 import { hostCommand } from './host.js'
 import { writeInstallSuccess } from './install-success.js'
+import { readEnvironment } from './environment.js'
+import { environmentIssues } from '../shared/environment.js'
+import { readFileSync } from 'node:fs'
 
 export type InstallEvent =
   | { type: 'run-start'; total: number; steps: { id: string; name: string }[] }
@@ -75,6 +78,8 @@ export interface InstallContext {
   env: Record<string, string>
   /** the wizard answers needed by the 'fn' steps + flow selection. */
   wizard?: WizardPayload
+  /** Captured under the server activity lock; external changes require review. */
+  expectedEnvText?: string
 }
 
 /** Register the MCP into the selected agent apps' configs (in-process 'fn' step). */
@@ -132,41 +137,6 @@ function doWriteRule(ctx: InstallContext, emit: (e: InstallEvent) => void): bool
     return true
   } catch (e) {
     emit({ type: 'stdout', id: 'write-rule', chunk: `write-rule failed: ${e instanceof Error ? e.message : String(e)}\n` })
-    return false
-  }
-}
-
-async function doSharedConnect(ctx: InstallContext, emit: (e: InstallEvent) => void): Promise<boolean> {
-  const w = ctx.wizard
-  if (!w || w.memoryInstallMode !== 'personal-and-shared') {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared Memories not selected — skipping.\n' })
-    return true
-  }
-  if (!w.sharedApiUrl || !w.sharedUserToken) {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared API URL and connector token are required.\n' })
-    return false
-  }
-  try {
-    const res = await fetch(`${w.personalApiUrl ?? 'http://localhost:8090'}/dashboard/shared-connection`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ apiUrl: w.sharedApiUrl, token: w.sharedUserToken }),
-    })
-    if (!res.ok) {
-      let message = `${res.status}`
-      try {
-        const body = (await res.json()) as { message?: string; error?: string }
-        message = body.message ?? body.error ?? message
-      } catch {
-        /* ignore non-json error body */
-      }
-      emit({ type: 'stdout', id: 'shared-connect', chunk: `Shared connection failed: ${message}\n` })
-      return false
-    }
-    emit({ type: 'stdout', id: 'shared-connect', chunk: 'Shared Memories connection saved in the local dashboard.\n' })
-    return true
-  } catch (e) {
-    emit({ type: 'stdout', id: 'shared-connect', chunk: `Shared connection failed: ${e instanceof Error ? e.message : String(e)}\n` })
     return false
   }
 }
@@ -280,6 +250,17 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
     emit({ type: 'done', ok: false })
     return
   }
+  const requirements = environmentIssues(await readEnvironment({ root: ctx.root, env: ctx.env }))
+  if (requirements.length) {
+    emit({ type: 'error', id: 'environment', message: requirements.map((issue) => issue.message).join(' ') })
+    emit({ type: 'done', ok: false })
+    return
+  }
+  if (ctx.expectedEnvText !== undefined && readFileSync(join(ctx.root, '.env.persistent-memory'), 'utf8') !== ctx.expectedEnvText) {
+    emit({ type: 'error', id: 'environment', message: 'The saved configuration changed during checks. Review it and retry installation.' })
+    emit({ type: 'done', ok: false })
+    return
+  }
   const w = ctx.wizard
   const flow = w?.flow ?? 'full'
   const steps = buildSteps({
@@ -353,9 +334,7 @@ export async function runInstall(ctx: InstallContext, emit: (e: InstallEvent) =>
     if (step.kind === 'fn') {
       const ok = step.fnId === 'register'
         ? doRegister(ctx, token, emit)
-        : step.fnId === 'shared-connect'
-          ? await doSharedConnect(ctx, emit)
-          : doWriteRule(ctx, emit)
+        : doWriteRule(ctx, emit)
       emit({ type: 'step-done', id: step.id, ok })
       if (!ok) {
         emit({ type: 'error', id: step.id, message: `Step "${step.name}" failed — see output above.` })

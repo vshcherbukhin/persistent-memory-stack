@@ -1,3 +1,4 @@
+BEGIN;
 -- ============================================================================
 -- persistent-memory — Row-Level Security
 --
@@ -6,11 +7,11 @@
 -- even if an API filter has a bug.
 --
 -- ACCESS MODEL (documentation/stack-architecture/access-model.md):
---   • READS are UNIVERSAL — any authenticated team member reads ANY team's rows.
---   • WRITES are current-team only (WITH CHECK team_id = current team) EXCEPT a
---     global super-admin (the dashboard cross-team path) who may write any team.
---   • memory adds an OWNERSHIP FLOOR — a plain member may only UPDATE/DELETE rows
---     they created; team-admins / super-admins bypass it within their team.
+--   Community's restrictive policies at the end of this file require the
+--   validated local-owner partition, positive record/source ownership and current
+--   evidence. Historical permissive policies remain migration-compatible but
+--   cannot override those floors. Mounted grants and global roles cannot widen
+--   the personal boundary. Ambiguous/foreign data remains preserved and unreadable.
 --
 -- Apply ORDER (see install.sh / package.json): connect as the OWNER (pmuser via
 -- DATABASE_MIGRATE_URL), then
@@ -316,8 +317,8 @@ BEGIN
     EXECUTE format($f$
       CREATE POLICY write_floor ON public.%I
         AS RESTRICTIVE FOR ALL TO pm_app
-        USING      (pm_can_read_all() OR pm_is_global_admin())
-        WITH CHECK (team_id = pm_current_team_id() OR pm_is_global_admin())
+        USING      (team_id = pm_current_team_id())
+        WITH CHECK (team_id = pm_current_team_id())
     $f$, t);
   END LOOP;
 END
@@ -541,3 +542,95 @@ CREATE POLICY write_floor ON public.security_alert
 --                      'project_memory_binding','graph_lifecycle_operation',
 --                      'graph_episode_provenance','graph_delete_preview')
 --    ORDER BY relname;
+-- Community personal-only compatibility window. Dormant grants/control tables do
+-- not confer data access. SECURITY DEFINER exposes only a boolean partition test;
+-- pm_app never receives SELECT on local_identity or ownership credentials.
+CREATE OR REPLACE FUNCTION pm_is_personal_partition(candidate uuid) RETURNS boolean
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  SELECT EXISTS (SELECT 1 FROM public.local_identity li WHERE li.id = 'singleton' AND li.team_id = candidate)
+$$;
+REVOKE ALL ON FUNCTION pm_is_personal_partition(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pm_is_personal_partition(uuid) TO pm_app;
+
+DO $$ DECLARE t text; BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'source','document','chunk','entity','claim','relationship','investigation',
+    'investigation_link','ingest_job','memory','security_alert',
+    'graph_lifecycle_operation','graph_episode_provenance','graph_delete_preview'
+  ] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS community_personal_boundary ON public.%I', t);
+    EXECUTE format('CREATE POLICY community_personal_boundary ON public.%I AS RESTRICTIVE FOR ALL USING (pm_is_personal_partition(team_id) AND team_id = pm_current_team_id()) WITH CHECK (pm_is_personal_partition(team_id) AND team_id = pm_current_team_id())', t);
+  END LOOP;
+END $$;
+
+DROP POLICY IF EXISTS community_memory_visibility ON memory;
+CREATE POLICY community_memory_visibility ON memory AS RESTRICTIVE FOR SELECT
+  USING (ownership_state = 'personal' AND deleted_at IS NULL);
+DROP POLICY IF EXISTS community_memory_update ON memory;
+CREATE POLICY community_memory_update ON memory AS RESTRICTIVE FOR UPDATE
+  USING (ownership_state = 'personal' AND deleted_at IS NULL)
+  WITH CHECK (ownership_state = 'personal');
+DROP POLICY IF EXISTS community_memory_delete ON memory;
+CREATE POLICY community_memory_delete ON memory AS RESTRICTIVE FOR DELETE
+  USING (ownership_state = 'personal');
+
+DO $$ DECLARE t text; BEGIN
+  FOREACH t IN ARRAY ARRAY['memory_revision','memory_write_receipt','knowledge_term','memory_import_quarantine'] LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('GRANT SELECT, INSERT ON public.%I TO pm_app', t);
+    EXECUTE format('REVOKE UPDATE, DELETE ON public.%I FROM pm_app', t);
+    EXECUTE format('DROP POLICY IF EXISTS personal_record ON public.%I', t);
+    EXECUTE format('CREATE POLICY personal_record ON public.%I FOR ALL USING (team_id = pm_current_team_id() AND pm_is_personal_partition(team_id)) WITH CHECK (team_id = pm_current_team_id() AND pm_is_personal_partition(team_id))', t);
+  END LOOP;
+END $$;
+
+
+-- Derived evidence inherits positive source ownership; a local partition alone
+-- cannot authenticate historical cached/foreign documents or downloadable blobs.
+CREATE OR REPLACE FUNCTION pm_is_personal_owner(candidate uuid) RETURNS boolean
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  SELECT EXISTS(SELECT 1 FROM public.local_identity li WHERE li.id='singleton' AND li.user_id=candidate)
+$$;
+REVOKE ALL ON FUNCTION pm_is_personal_owner(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pm_is_personal_owner(uuid) TO pm_app;
+DROP POLICY IF EXISTS personal_source_owner ON source;
+CREATE POLICY personal_source_owner ON source AS RESTRICTIVE FOR ALL
+  USING (ownership_state='personal' AND pm_is_personal_owner(owner_id)) WITH CHECK (ownership_state='personal' AND pm_is_personal_owner(owner_id));
+DROP POLICY IF EXISTS personal_document_source ON document;
+CREATE POLICY personal_document_source ON document AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM source s WHERE s.id=document.source_id AND s.ownership_state='personal'))
+  WITH CHECK (EXISTS(SELECT 1 FROM source s WHERE s.id=document.source_id AND s.ownership_state='personal'));
+DROP POLICY IF EXISTS personal_chunk_source ON chunk;
+CREATE POLICY personal_chunk_source ON chunk AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM document d WHERE d.id=chunk.document_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM document d WHERE d.id=chunk.document_id));
+DROP POLICY IF EXISTS personal_ingest_source ON ingest_job;
+CREATE POLICY personal_ingest_source ON ingest_job AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM source s WHERE s.id=ingest_job.source_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM source s WHERE s.id=ingest_job.source_id));
+DROP POLICY IF EXISTS personal_entity_source ON entity;
+CREATE POLICY personal_entity_source ON entity AS RESTRICTIVE FOR ALL
+  USING (resolution_key IS NOT NULL OR EXISTS(SELECT 1 FROM document d WHERE d.id=entity.document_id))
+  WITH CHECK (resolution_key IS NOT NULL OR EXISTS(SELECT 1 FROM document d WHERE d.id=entity.document_id));
+DROP POLICY IF EXISTS personal_claim_source ON claim;
+CREATE POLICY personal_claim_source ON claim AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM memory m WHERE m.id=claim.memory_id AND m.revision=claim.memory_revision) OR EXISTS(SELECT 1 FROM document d WHERE d.id=claim.document_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM memory m WHERE m.id=claim.memory_id AND m.revision=claim.memory_revision) OR EXISTS(SELECT 1 FROM document d WHERE d.id=claim.document_id));
+DROP POLICY IF EXISTS personal_relationship_source ON relationship;
+CREATE POLICY personal_relationship_source ON relationship AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM memory m WHERE m.id=relationship.memory_id AND m.revision=relationship.memory_revision) OR (memory_id IS NULL AND EXISTS(SELECT 1 FROM entity e WHERE e.id=relationship.subject_entity_id AND e.document_id IS NOT NULL)))
+  WITH CHECK (EXISTS(SELECT 1 FROM memory m WHERE m.id=relationship.memory_id AND m.revision=relationship.memory_revision) OR (memory_id IS NULL AND EXISTS(SELECT 1 FROM entity e WHERE e.id=relationship.subject_entity_id AND e.document_id IS NOT NULL)));
+DROP POLICY IF EXISTS personal_investigation_owner ON investigation;
+CREATE POLICY personal_investigation_owner ON investigation AS RESTRICTIVE FOR ALL
+  USING (ownership_state='personal' AND pm_is_personal_owner(owner_id))
+  WITH CHECK (ownership_state='personal' AND pm_is_personal_owner(owner_id));
+DROP POLICY IF EXISTS personal_investigation_link ON investigation_link;
+CREATE POLICY personal_investigation_link ON investigation_link AS RESTRICTIVE FOR ALL
+  USING (EXISTS(SELECT 1 FROM investigation i WHERE i.id=investigation_link.investigation_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM investigation i WHERE i.id=investigation_link.investigation_id));
+DROP POLICY IF EXISTS personal_lifecycle_validation ON graph_lifecycle_operation;
+CREATE POLICY personal_lifecycle_validation ON graph_lifecycle_operation AS RESTRICTIVE FOR ALL
+  USING (ownership_validated) WITH CHECK (ownership_validated);
+
+COMMIT;

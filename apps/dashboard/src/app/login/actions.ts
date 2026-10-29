@@ -48,7 +48,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     }
     if (!who) return { error: 'Invalid or revoked recovery token.' }
     if (!canAccessServerDashboard(who.adminLevel, who.deploymentMode ?? 'server')) {
-      return { error: 'The shared server dashboard is super-admin only. Use your local dashboard to manage Shared Memories.' }
+      return { error: 'This dashboard requires the validated local owner identity. Use the Personal Memories installation on this computer.' }
     }
 
     await setSession(token)
@@ -75,7 +75,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const who = await whoamiWithToken(login.sessionToken).catch(() => null)
   if (!who) return { error: 'Could not verify the dashboard session. Try again.' }
   if (!canAccessServerDashboard(who.adminLevel, who.deploymentMode ?? 'server')) {
-    return { error: 'The shared server dashboard is super-admin only. Use your local dashboard to manage Shared Memories.' }
+    return { error: 'This dashboard requires the validated local owner identity. Use the Personal Memories installation on this computer.' }
   }
   await setSession(login.sessionToken)
   redirect('/')

@@ -1,12 +1,8 @@
-import { requireControlPlane } from '@/lib/session'
-import { api } from '@/lib/api'
-import { TeamsClient } from './TeamsClient'
+import { notFound } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
-export default async function TeamsPage() {
-  await requireControlPlane()
-  const teams = await api.listTeams()
-
-  return <TeamsClient teams={teams} />
+/** Community has no multi-user or shared partition administration. */
+export default function RetiredAdministrationPage() {
+  notFound()
 }

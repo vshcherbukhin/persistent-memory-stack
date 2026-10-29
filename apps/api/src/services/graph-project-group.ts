@@ -2,7 +2,7 @@ import { deriveProjectGraphGroup, type GraphMemorySurface } from '@pm/graph'
 import { config } from '../config.ts'
 
 export function currentMemorySurface(): GraphMemorySurface {
-  return config.MEMORY_SURFACE ?? (config.DEPLOYMENT_MODE === 'local' ? 'personal' : 'shared')
+  return 'personal'
 }
 
 export function graphProjectGroup(teamId: string, project: string): string {
@@ -12,7 +12,9 @@ export function graphProjectGroup(teamId: string, project: string): string {
   return deriveProjectGraphGroup({
     // Existing installations have TOKEN_PEPPER already. The literal fallback is
     // only for the no-secret local developer fixture and is never sent to users.
-    secret: config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret',
+    // A separate derived namespace preserves old graphs without admitting mixed
+    // historical/foreign episodes into personal recall. Rebuild is explicit.
+    secret: `personal-knowledge-v2:${config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret'}`,
     teamId,
     project,
     surface: currentMemorySurface(),

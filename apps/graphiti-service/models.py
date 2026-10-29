@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field, model_validator
 # /timeline and /contradictions filter on invalid_at (event-time), NOT expired_at.
 # -----------------------------------------------------------------------------
 class FactEdge(BaseModel):
+    episodes: list[str] = []  # exact source provenance; missing is not trusted
     uuid: str
     name: str | None = None  # relation / predicate type, e.g. "RUNS_ON"
     fact: str | None = None  # natural-language fact text

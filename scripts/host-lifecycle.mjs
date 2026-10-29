@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertSupportedNode, findGitBash, hostEnvironment, run, runNpm } from './host-runtime.mjs'
+import { assertSupportedNode, findGitBash, hostEnvironment, nodeEnvironment, run, runNpm } from './host-runtime.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const commands = { update: 'update.sh', uninstall: 'uninstall.sh', start: 'start.sh', stop: 'stop.sh', verify: 'verify-install.sh' }
@@ -120,11 +120,16 @@ export async function main([action, ...args] = process.argv.slice(2)) {
   }
   if (!['install', 'check', ...Object.keys(commands)].includes(action)) throw new Error(`Unknown host command: ${action}`)
   assertSupportedNode()
+  // The wizard uses native Node/npm and can repair missing Git/Bash itself.
+  // Shell-based lifecycle actions still require a validated Bash first.
+  if (action === 'install') {
+    assertShellLineEndings()
+    return onboard(nodeEnvironment({ env: process.env }))
+  }
   const bash = process.platform === 'win32' ? findGitBash() : 'bash'
   const env = hostEnvironment({ bash })
   if (action === 'check') return preflight(env, bash)
   assertShellLineEndings()
-  if (action === 'install') return onboard(env)
   await run(bash, ['deploy/scripts/' + commands[action], ...args], { cwd: root, env })
 }
 

@@ -979,6 +979,8 @@ function printSummary(defaults: ServerModeDefaults, answers: ServerModeAnswers):
 }
 
 async function main(argv: string[]): Promise<void> {
+  throw new Error('Shared server installation is retired in Community. Use npm run install-persistent-memory for the local personal stack. Existing data and credentials are preserved.')
+
   const options = parseArgs(argv)
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const baseDefaults = defaultsForServerMode(options.mode)

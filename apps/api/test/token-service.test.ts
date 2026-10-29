@@ -253,12 +253,12 @@ describe('deriveIdentity', () => {
       isTeamMember: true,
       isTeamAdmin: true,
       isGlobalSuperuser: false,
-      mountedTeamIds: ['team-a'],
+      mountedTeamIds: [],
       insideTenantTx: false,
     })
   })
 
-  it('team-bound admin → isTeamAdmin, mounts resolved', async () => {
+  it('team-bound admin retains identity but old mounts confer no read scope', async () => {
     h.userRow = await makeUser(
       { id: 'user-1', teamId: 'team-own', adminLevel: 'admin', tokenId: 'tok123' },
       'good-secret-value',
@@ -272,7 +272,7 @@ describe('deriveIdentity', () => {
       isTeamMember: true,
       isTeamAdmin: true,
       isGlobalSuperuser: false,
-      mountedTeamIds: ['team-a'],
+      mountedTeamIds: [],
       insideTenantTx: false,
     })
   })
@@ -297,9 +297,9 @@ describe('deriveIdentity', () => {
 })
 
 describe('resolveMountedTeams', () => {
-  it('returns grantor teams (de-duped, own excluded)', async () => {
+  it('returns no mounted teams even when historical grants exist', async () => {
     h.grantRows = [{ grantorTeamId: 'team-a' }, { grantorTeamId: 'team-a' }, { grantorTeamId: 'team-own' }]
-    expect(await resolveMountedTeams('team-own')).toEqual(['team-a'])
+    expect(await resolveMountedTeams('team-own')).toEqual([])
   })
   it('no mounts → empty', async () => {
     h.grantRows = []

@@ -274,6 +274,10 @@ export class ApiError extends Error {
       )
     }
 
+    if (status === 503 && code === 'embeddings_starting') {
+      return new ApiError(status, code,
+        'Embeddings service is still launching. Please try again shortly. This memory operation was not started; no memory was saved or updated.', body)
+    }
     if (status === 503 && code === 'fact_extraction_quota_exhausted') {
       return new ApiError(
         status,

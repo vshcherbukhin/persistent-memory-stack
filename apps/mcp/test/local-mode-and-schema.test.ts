@@ -20,7 +20,7 @@ function collectTools(register: (server: unknown) => void): Map<string, Tool> {
   const tools = new Map<string, Tool>()
   const server = {
     registerTool(name: string, options: Tool['options'], handler: Tool['handler']) {
-      tools.set(name, { options, handler })
+      tools.set(name, { options, handler: async input => handler(z.object(options.inputSchema ?? {}).parse(input)) })
     },
   }
   register(server)
@@ -82,7 +82,7 @@ describe('local-mode MCP auth', () => {
     } as never))
 
     for (const tool of [
-      ...['add_memory', 'search_memories', 'search_memories_by_entities', 'get_memories'].map((name) => memories.get(name)),
+      ...['search_memories', 'get_memories', 'get_memory', 'delete_memory'].map((name) => memories.get(name)),
       ...['search_graph', 'get_entity', 'get_timeline', 'get_contradictions'].map((name) => graph.get(name)),
     ]) {
       const surface = tool?.options.inputSchema?.surface
@@ -97,7 +97,7 @@ describe('local-mode MCP auth', () => {
       personalOnlyRuntime,
       'shared',
       'named-project',
-    )).resolves.toMatchObject({ ok: false, error: expect.stringContaining('not configured') })
+    )).resolves.toMatchObject({ ok: false, error: expect.stringContaining('retired') })
   })
 
   it('returns actionable contract recovery instead of schema-invalid graph output from every graph read tool', async () => {
@@ -141,105 +141,16 @@ describe('local-mode MCP auth', () => {
     expect(result.content?.[0]?.text).toContain('graph_response_contract_invalid')
   })
 
-  it('routes memory reads and writes through the selected memory surface', async () => {
-    const personalApi = {
-      get: vi.fn(async (path: string) => {
-        if (path.startsWith('/project-memory-bindings/')) {
-          return { project: path.split('/').at(-1), surface: path.endsWith('shared-project') ? 'shared' : 'personal' }
-        }
-        throw new Error(`unexpected personal GET ${path}`)
-      }),
-      post: vi.fn(async () => ({
-        id: 'mem-personal',
-        shape: 'atomic',
-        category: 'note',
-        project: 'persistent-memory',
-        restructured: false,
-        content: 'personal memory',
-        embeddingStatus: 'embedded',
-        memoryTier: 'semantic',
-        sourceProvenance: 'user_direct',
-        confidence: 1,
-      })),
-    }
-    const sharedApi = {
-      get: vi.fn(),
-      post: vi.fn(async () => ({ results: [], counts: { own: 0, other: 0 } })),
-    }
-    const memories = collectTools((server) => registerMemoryTools(server as never, {
-      api: sharedApi,
-      runtime: {
-        ...runtime,
-        memorySurfaces: {
-          defaultSurface: 'personal',
-          personal: { api: personalApi, runtime },
-          shared: { api: sharedApi, runtime },
-        },
-      },
-    } as never))
-
-    await memories.get('add_memory')!.handler({
-      content: '[component_Test] personal memory routing should store locally. Root cause: explicit surface selection. Fix: use personal API.',
-      project: 'persistent-memory',
-      metadata: { category: 'note', entities: ['component_Test'], source: 'manual' },
-    })
-    await memories.get('search_memories')!.handler({ query: 'routing', surface: 'shared', project: 'shared-project', limit: 20 })
-
-    expect(personalApi.post).toHaveBeenCalledWith('/memories', expect.objectContaining({ project: 'persistent-memory' }))
-    expect(sharedApi.post).toHaveBeenCalledWith('/memories/search', expect.objectContaining({ query: 'routing' }))
-  })
-
-  it('honors explicit Shared routing for collection and id-based memory tools', async () => {
-    const personalApi = {
-      get: vi.fn(async (path: string) => {
-        if (path.startsWith('/project-memory-bindings/')) return { project: 'shared-project', surface: 'shared' }
-        throw new Error(`unexpected personal GET ${path}`)
-      }),
-    }
-    const sharedApi = {
-      get: vi.fn(async (path: string) => {
-        if (path === '/memories') return { results: [], nextCursor: null }
-        if (path === '/entities') return { entities: [] }
-        if (path.startsWith('/memories/')) return { id: 'memory-id', project: 'shared-project', category: 'note' }
-        throw new Error(`unexpected shared GET ${path}`)
-      }),
-      post: vi.fn(async (path: string) => {
-        if (path === '/memories/search-by-entities') return { results: [] }
-        throw new Error(`unexpected shared POST ${path}`)
-      }),
-      patch: vi.fn(async () => ({ id: 'memory-id', restructured: false })),
-      delNoContent: vi.fn(async () => undefined),
-      del: vi.fn(async () => ({ deleted: 1 })),
-    }
-    const sharedRuntime: Runtime = {
-      ...runtime,
-      memorySurfaces: {
-        defaultSurface: 'personal',
-        personal: { api: personalApi, runtime },
-        shared: { api: sharedApi, runtime },
-      },
-    }
-    const memories = collectTools((server) => registerMemoryTools(server as never, {
-      api: personalApi,
-      runtime: sharedRuntime,
-    } as never))
-
-    await expect(selectMemoryContext({} as never, personalApi as never, sharedRuntime, 'shared')).resolves.toMatchObject({ ok: true, api: sharedApi, surface: 'shared' })
-    await memories.get('search_memories_by_entities')!.handler({ surface: 'shared', entities: ['component_Test'], project: 'shared-project' })
-    await memories.get('get_memories')!.handler({ surface: 'shared', project: 'shared-project' })
-    await memories.get('get_memory')!.handler({ surface: 'shared', id: 'memory-id' })
-    await memories.get('update_memory')!.handler({ surface: 'shared', id: 'memory-id', content: 'Updated shared memory content is long enough to satisfy the memory shape gate.' })
-    await memories.get('delete_memory')!.handler({ surface: 'shared', id: 'memory-id' })
-    await memories.get('delete_all_memories')!.handler({ surface: 'shared', project: 'shared-project', confirm: true })
-    await memories.get('list_entities')!.handler({ surface: 'shared', project: 'shared-project' })
-
-    expect(sharedApi.post).toHaveBeenCalledWith('/memories/search-by-entities', expect.objectContaining({ entities: ['component_Test'] }))
-    expect(sharedApi.get).toHaveBeenCalledWith('/memories', expect.objectContaining({ project: 'shared-project' }))
-    expect(sharedApi.get).toHaveBeenCalledWith('/memories/memory-id')
-    expect(sharedApi.patch).toHaveBeenCalledWith('/memories/memory-id', expect.objectContaining({ content: expect.any(String) }))
-    expect(sharedApi.delNoContent).toHaveBeenCalledWith('/memories/memory-id')
-    expect(sharedApi.del).toHaveBeenCalledWith('/memories', expect.objectContaining({ project: 'shared-project', confirm: true }))
-    expect(sharedApi.get).toHaveBeenCalledWith('/entities', expect.objectContaining({ project: 'shared-project' }))
+  it('never exposes old shape writes, bulk tools or Shared surface inputs', async () => {
+    const api = { get: vi.fn(), post: vi.fn(), patch: vi.fn() }
+    const tools = collectTools(server => registerMemoryTools(server as never, { api, runtime } as never))
+    expect(tools.has('memory_catalog')).toBe(true)
+    for (const retired of ['search_memories_by_entities', 'delete_all_memories', 'list_entities']) expect(tools.has(retired)).toBe(false)
+    expect(z.object(tools.get('add_memory')!.options.inputSchema!).safeParse({ content: 'Legacy shape content that is long enough to pass the old gate.', project: 'alpha', metadata: { category: 'fix', entities: ['component_alpha'], source: 'user-correction' } }).success).toBe(false)
+    await expect(tools.get('get_memory')!.handler({ surface: 'shared', id: EXAMPLE_USER_ID })).rejects.toThrow()
+    expect(api.get).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.patch).not.toHaveBeenCalled()
   })
 })
 
@@ -259,7 +170,8 @@ describe('MCP structuredContent matches declared outputSchema', () => {
       isOwnTeam: true,
       createdAt: '2026-06-30T00:00:00.000Z',
       recordUpdatedAt: '2026-06-30T00:00:00.000Z',
-      memoryTier: 'semantic',
+      revision: 1, classification: null, classificationStatus: 'legacy_unclassified', embeddingStatus: 'embedded', graphStatus: 'ok',
+    memoryTier: 'semantic',
       sourceProvenance: 'user-correction',
       confidence: 0.95,
     }
@@ -309,7 +221,7 @@ describe('MCP structuredContent matches declared outputSchema', () => {
         throw new Error(`unexpected GET ${path}`)
       }),
       post: vi.fn(async (path: string) => {
-        if (path === '/memories/search') return { results: [memoryRow], counts: { own: 1, other: 0 } }
+        if (path === '/memories/search') return { results: [memoryRow], counts: { own: 1, other: 0 }, diagnostics: { semantic: 'available', lexical: 'available', graphExpansion: 'resolved_topics' } }
         if (path === '/documents/search') return { results: [chunkHit], counts: { own: 1, other: 0 } }
         throw new Error(`unexpected POST ${path}`)
       }),
@@ -344,7 +256,7 @@ describe('MCP structuredContent matches declared outputSchema', () => {
     const identity = collectTools((server) => registerIdentityTools(server as never, { api, runtime } as never))
 
     const result = await identity.get('whoami')!.handler({})
-    const readableTeams = await identity.get('list_readable_teams')!.handler({})
+    expect(identity.has('list_readable_teams')).toBe(false)
 
     expect(result.structuredContent).toMatchObject({
       userDisplayName: EXAMPLE_USER_NAME,
@@ -353,11 +265,6 @@ describe('MCP structuredContent matches declared outputSchema', () => {
     })
     expect(JSON.stringify(result)).toContain(EXAMPLE_USER_NAME)
     expect(JSON.stringify(result)).toContain(EXAMPLE_TEAM_NAME)
-    expect(JSON.stringify(readableTeams)).toContain('personal memories in this local stack')
-    expect(JSON.stringify(readableTeams)).not.toContain(EXAMPLE_TEAM_NAME)
-    expect(readableTeams.structuredContent).toEqual({
-      ownTeam: EXAMPLE_TEAM_ID,
-      mountedTeams: [],
-    })
+
   })
 })

@@ -4,26 +4,26 @@ import { parseReleaseHistoryForUi } from './releaseHistory'
 import { APP_VERSION } from './version'
 
 describe('release history UI parsing', () => {
-  it('ships the current and historical public releases in both published history copies', () => {
+  it('keeps the prepared candidate and historical releases aligned in both history copies', () => {
     const rootHistory = readFileSync(new URL('../../../../release-history.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const dashboardHistory = readFileSync(new URL('../../public/release-history.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const rootPackage = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')) as { version: string; persistentMemoryReleaseLine: string }
     expect(dashboardHistory).toBe(rootHistory)
-    expect(APP_VERSION).toBe('1.3.2')
+    expect(APP_VERSION).toBe('2.0.0')
     expect(rootPackage.version).toBe(APP_VERSION)
     expect(rootPackage.persistentMemoryReleaseLine).toBe('public-v1')
     expect(rootHistory).toContain('<!-- persistent-memory-release-line: public-v1 -->')
     const cards = parseReleaseHistoryForUi(dashboardHistory)
-    expect(cards).toHaveLength(10)
+    expect(cards).toHaveLength(11)
     expect(cards[0]).toMatchObject({ version: APP_VERSION, latest: true })
     expect(cards.slice(1).map(card => ({version: card.version, latest: card.latest}))).toEqual(
-      ['1.3.1', '1.3.0', '1.2.0', '1.1.4', '1.1.3', '1.1.2', '1.1.1', '1.1.0', '1.0.0'].map(version => ({version, latest: false})),
+      ['1.3.2', '1.3.1', '1.3.0', '1.2.0', '1.1.4', '1.1.3', '1.1.2', '1.1.1', '1.1.0', '1.0.0'].map(version => ({version, latest: false})),
     )
     expect(cards[0]!.services.length).toBeGreaterThan(0)
     expect(cards[0]!.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({ service: 'dashboard / dashboard layer', version: '1.3.2' }),
-      expect.objectContaining({ service: 'onboarding', version: '1.3.1' }),
-      expect.objectContaining({ service: 'api', version: '1.0.4' }),
+      expect.objectContaining({ service: 'dashboard / docs / onboarding', version: APP_VERSION }),
+      expect.objectContaining({ service: 'api / worker / database / shared / schema', version: APP_VERSION }),
+      expect.objectContaining({ service: 'mcp / mcp-runtime / graph', version: APP_VERSION }),
     ]))
     expect(cards[0]!.body).not.toContain('persistent-memory-release-line')
     expect(cards[0]!.body).not.toContain('<!--')

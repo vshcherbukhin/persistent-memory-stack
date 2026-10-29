@@ -6,7 +6,7 @@
  * graphStatus='pending' (missed attempt) or 'failed' (last attempt threw).
  */
 import { memoryGraphEpisodeName } from '@pm/shared'
-import { runInTenant, type Prisma, type Tx } from '@pm/db'
+import { runInTenant, Prisma, type Tx } from '@pm/db'
 import type { WorkerDeps } from '../deps.ts'
 import { withSystemTenant } from '../tenant.ts'
 import { postEpisode } from './graphiti.ts'
@@ -18,6 +18,7 @@ const RETRYABLE_GRAPH_STATUSES = ['pending', 'failed'] as const
 const MAX_GRAPH_ERROR_LENGTH = 1000
 
 export interface MemoryGraphBackfillRow {
+  revision?: number
   id: string
   teamId: string
   project: string
@@ -27,7 +28,7 @@ export interface MemoryGraphBackfillRow {
 }
 
 export interface MemoryGraphBackfillClient {
-  postEpisode: (input: { groupId: string; name: string; episodeBody: string; referenceTime: Date }) => Promise<string>
+  postEpisode: (input: { groupId: string; name: string; episodeBody: string; referenceTime: Date; idempotencyKey?: string }) => Promise<string>
   groupIdFor?: (row: MemoryGraphBackfillRow) => string
 }
 
@@ -46,7 +47,9 @@ export interface MemoryGraphBackfillReplayResult {
 }
 
 export function buildMemoryGraphBackfillWhere(): Prisma.MemoryWhereInput {
-  return { graphStatus: { in: [...RETRYABLE_GRAPH_STATUSES] } }
+  // Legacy graph enrichment is explicit/resumable, never an automatic bulk paid
+  // inference run merely because the product was upgraded.
+  return { graphStatus: { in: [...RETRYABLE_GRAPH_STATUSES] }, ownershipState: 'personal', deletedAt: null, knowledge: { not: Prisma.DbNull } }
 }
 
 function graphErrorMessage(err: unknown): string {
@@ -75,6 +78,7 @@ export async function replayMemoryGraphBackfillRows(
         name,
         episodeBody: row.content,
         referenceTime: row.graphVersion,
+        idempotencyKey: `memory:${row.id}:revision:${row.revision ?? row.graphVersion.toISOString()}`,
       })
       stats.synced += 1
       syncedIds.push(row.id)
@@ -103,7 +107,7 @@ export async function memoryGraphBackfill(deps: WorkerDeps): Promise<string> {
           where: buildMemoryGraphBackfillWhere(),
           orderBy: { graphVersion: 'asc' },
           take: BATCH,
-          select: { id: true, teamId: true, project: true, content: true, graphVersion: true, graphStatus: true },
+          select: { id: true, teamId: true, project: true, content: true, graphVersion: true, graphStatus: true, revision: true },
         }) as PromiseLike<MemoryGraphBackfillRow[]>,
       { globalAdmin: true, readOnly: true, readAllMemory: true },
     )
@@ -113,10 +117,10 @@ export async function memoryGraphBackfill(deps: WorkerDeps): Promise<string> {
     const result = await replayMemoryGraphBackfillRows(rows, {
       postEpisode: (input) => postEpisode(deps.graphitiUrl, deps.graphitiTimeoutMs, input),
       groupIdFor: (row) => deriveProjectGraphGroup({
-        secret: config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret',
+        secret: `personal-knowledge-v2:${config.GRAPH_GROUP_SECRET || config.TOKEN_PEPPER || 'local-development-graph-group-secret'}`,
         teamId: row.teamId,
         project: row.project,
-        surface: config.MEMORY_SURFACE ?? (config.DEPLOYMENT_MODE === 'local' ? 'personal' : 'shared'),
+        surface: 'personal',
       }),
     })
 
@@ -130,7 +134,9 @@ export async function memoryGraphBackfill(deps: WorkerDeps): Promise<string> {
           where: {
             id,
             graphVersion: row.graphVersion,
+            ...(row.revision === undefined ? {} : { revision: row.revision }),
             graphStatus: { in: [...RETRYABLE_GRAPH_STATUSES] },
+            ownershipState: 'personal', deletedAt: null,
           },
           data: {
             graphStatus: 'ok',
@@ -150,7 +156,7 @@ export async function memoryGraphBackfill(deps: WorkerDeps): Promise<string> {
               project: row.project,
               subjectKind: 'memory',
               subjectId: row.id,
-              operation: 'remove',
+              operation: 'remove', ownershipValidated: true,
               graphGroupId: graph.groupId,
               graphEpisodeId: graph.episodeId,
             }],

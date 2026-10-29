@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # persistent-memory-graphiti — Python/FastAPI temporal-graph microservice (P4)
 #
@@ -21,7 +21,7 @@
 # ----------------------------------------------------------------------------
 # Stage 1 — builder: resolve + install deps into /opt/venv
 # ----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS builder
 
 # Build-time toolchain for any wheels that need compiling (graphiti-core deps are
 # largely pure-python/prebuilt wheels, but keep gcc available for safety). These
@@ -37,14 +37,15 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install deps first (own layer) so app-code edits don't bust the dep cache.
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock build-requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r build-requirements.lock \
+    && pip install --no-cache-dir --no-build-isolation --require-hashes -r requirements.lock \
+    && pip check
 
 # ----------------------------------------------------------------------------
 # Stage 2 — runtime: slim image, venv + app, non-root
 # ----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
 
 # - PYTHONUNBUFFERED: logs flush immediately (visible in `docker compose logs`).
 # - PYTHONDONTWRITEBYTECODE: no .pyc clutter on the app tree.

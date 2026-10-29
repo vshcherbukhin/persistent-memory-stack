@@ -142,12 +142,16 @@ describe('terminal update script', () => {
     expect(script).toContain('target_version="${HANDOFF_TARGET_VERSION_OVERRIDE:-$(current_package_version)}"')
   })
 
-  it('counts Graph V2 progress with the worker’s exact derived-partition predicate', async () => {
+  it('reports graph preservation without replaying or purging the legacy corpus', async () => {
     const script = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
+    const cli=await readFile(new URL('../../worker/src/graph-v2-migration-cli.ts',import.meta.url),'utf8')
 
     expect(script).toContain('worker node dist/graph-v2-progress-cli.js')
     expect(script).not.toContain("graph_group_id LIKE 'pmg:v2:%'")
     expect(script).not.toContain("graph_status = 'ok' AND graph_group_id IS NOT NULL")
+    expect(cli).toContain('inspectCommunityGraphCompatibility')
+    expect(cli).not.toContain('runGraphV2Migration')
+    expect(cli).not.toContain('GraphitiClient')
   })
 
   it('normalizes unset and relative handoff paths before exporting them to Compose', () => {
@@ -292,7 +296,7 @@ describe('terminal update script', () => {
     expect(script).toContain('Bridge release ${version} is verified. Continuing to the next required release.')
   })
 
-  it('runs the resumable Graph V2 migration only after the protected updater snapshot and database migration', async () => {
+  it('checks graph preservation only after the protected updater snapshot and database migration', async () => {
     const script = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
     const migrate = script.indexOf('Migrations applied (prisma migrate deploy).')
     const graph = script.lastIndexOf('run_graph_v2_migration_with_probe')
@@ -302,7 +306,7 @@ describe('terminal update script', () => {
     expect(script).toContain('node dist/graph-v2-migration-cli.js --snapshot-id="$HANDOFF_RUN_ID"')
   })
 
-  it('adds a reusable non-fatal progress probe around the Graph V2 migration', async () => {
+  it('adds a reusable non-fatal progress probe around graph preservation', async () => {
     const script = await readFile(new URL('../../../deploy/scripts/update.sh', import.meta.url), 'utf8')
 
     expect(script).toContain('run_progress_probe()')
@@ -312,7 +316,7 @@ describe('terminal update script', () => {
     expect(script).toContain('progress check failed; the update continues')
     expect(script).toContain('graph_v2_progress_probe()')
     expect(script).toContain('worker node dist/graph-v2-progress-cli.js')
-    expect(script).toContain('run_progress_probe "graph migration" "verifying" "87" "Rebuilding and validating project-scoped graph partitions." graph_v2_progress_probe')
+    expect(script).toContain('run_progress_probe "graph migration" "verifying" "87" "Checking preserved legacy graphs and classified projection state." graph_v2_progress_probe')
     expect(script).toContain('stop_progress_probe\n        return 0')
     expect(script).toContain('stop_progress_probe\n    release_coordinator_reservation')
   })

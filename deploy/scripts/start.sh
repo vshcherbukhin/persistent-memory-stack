@@ -194,6 +194,7 @@ else
     echo "Remote embeddings (${EMBED_PROVIDER}/${EMBED_MODEL}) configured — host Ollama is not required."
 fi
 
+node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs" --env-file "$ENV_FILE" --require-ready
 "${COMPOSE[@]}" up -d
 
 echo ""

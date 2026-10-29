@@ -99,10 +99,10 @@ function serviceStatusDescription(service: ServiceStatus): string | null {
     return 'Status updates after the latest request or a manual Fact extraction test in System Settings.'
   }
   if (service.service === 'embeddings') {
-    return 'Status updates after the latest embedding request, backfill, or a manual Embeddings test in System Settings.'
+    return 'Readiness checks confirm the loaded model can embed. Request, backfill and manual test results also update health.'
   }
   if (service.service === 'ollama (host)') {
-    return 'Host reachability is checked by the Ollama probe. Docker logs are not available.'
+    return 'The Ollama probe checks model residency and embedding readiness. Docker logs are not available.'
   }
   return null
 }

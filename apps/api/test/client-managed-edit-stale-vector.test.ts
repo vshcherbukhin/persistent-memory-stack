@@ -1,108 +1,67 @@
-/**
- * Stale-embedding sync on memory EDIT / IMPORT (#3b + the Phase-3 review gaps).
- *
- * Whenever a content change ends with embeddingStatus='pending' — client-managed
- * embeddings (no server embedder) OR a server-managed embed/upsert FAILURE — leaving the old Qdrant point
- * in place would let search serve a STALE vector for the new content. So every
- * such path MUST: (1) force embeddingStatus='pending', and (2) DELETE the existing
- * qdrantPointId from the memory_vectors collection. The P6 consumer re-embeds the
- * pending row later, recreating the SAME deterministic point id (#4) from the
- * rowId — so the round-trip is orphan-free.
- *
- * Covered paths:
- *   • data-plane PATCH /memories/:id   — client-managed + server-managed embed/upsert failure
- *   • admin    PATCH /dashboard/memories/:id — client-managed + server-managed embed failure
- *   • admin    POST  /dashboard/memories/import — client-managed/embed-fail re-import
- *
- * The handlers are deep inside route closures (full Fastify + Qdrant + RLS + the
- * Shape gate to exercise live), so this is a source-drift guard in the same spirit
- * as project-default.test.ts: it pins the stale-point branches in BOTH route files
- * so a regression that drops a delete or a pending-mark is caught.
- */
-import { describe, it, expect } from 'vitest'
+/** Architecture guards for the v2 projection fence replacing inline legacy upserts. */
+import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { KnowledgeUpdate, KnowledgeWrite } from '@pm/shared'
+import { parseKnowledge } from '../src/services/knowledge.ts'
+const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+const canonical = source('../src/services/knowledge.ts')
+const routes = source('../src/routes/knowledge.ts')
+const archive = source('../src/routes/knowledge-archive.ts')
+const merge = source('../src/services/merge.ts')
+const worker = source('../../../apps/worker/src/steps/embed-backfill.ts')
 
-const dataPlane = readFileSync(
-  fileURLToPath(new URL('../src/routes/memories.ts', import.meta.url)),
-  'utf8',
-)
-const adminPlane = readFileSync(
-  fileURLToPath(new URL('../src/routes/dashboard/memories.ts', import.meta.url)),
-  'utf8',
-)
-
-describe('data-plane PATCH /memories/:id — client-managed edit drops the stale point', () => {
-  it('detects client-managed embeddings (content changed + no embedder) via dropStaleVectorClientManaged', () => {
-    expect(dataPlane).toContain('const dropStaleVectorClientManaged = contentChanged && !embedder')
+describe('canonical v2 edits and vector freshness', () => {
+  it('uses one strict write parser and the same revision-aware update for all API/dashboard aliases', () => {
+    expect(routes).toContain("for (const prefix of ['', '/dashboard', '/admin'])")
+    expect(routes).toContain('updateKnowledge(req.params.id, req.body)')
+    expect(canonical).toContain('parseKnowledge(KnowledgeUpdate, raw)')
+    expect(canonical).toContain('parseKnowledge(KnowledgeWrite, raw)')
   })
-
-  it('forces embeddingStatus=pending on a client-managed content edit', () => {
-    expect(dataPlane).toContain("...(dropStaleVectorClientManaged ? { embeddingStatus: 'pending' as const } : {})")
+  it('rejects an old content-only edit before touching storage', () => {
+    expect(() => parseKnowledge(KnowledgeUpdate, { content: 'Old content-only edits cannot silently bypass the new write contract.' })).toThrow('Community memory contract v2')
   })
-
-  it('deletes the existing qdrantPointId from memory_vectors on a client-managed / pending edit', () => {
-    expect(dataPlane).toContain('(dropStaleVectorClientManaged || dropStaleVectorServerManagedFail) && existing.qdrantPointId')
-    expect(dataPlane).toContain(".delete('memory_vectors', { points: [existing.qdrantPointId] })")
+  it('rejects a shape-only new write before touching storage', () => {
+    expect(() => parseKnowledge(KnowledgeWrite, { content: 'An old shape payload cannot supply missing certainty or evidence.', project: 'alpha', metadata: { category: 'fix' } })).toThrow('Community memory contract v2')
   })
-
-  it('flags dropStaleVectorServerManagedFail when server-managed embed yields no vector or upsert throws', () => {
-    // set in the no-vector else-branch AND in the upsert catch.
-    expect(dataPlane).toContain('dropStaleVectorServerManagedFail = true')
+  it('increments the accepted revision and invalidates both derived projections on an update', () => {
+    expect(canonical).toContain('revision: { increment: 1 }')
+    expect(canonical).toContain("embeddingStatus: 'pending', graphStatus: 'pending'")
+    expect(canonical).toContain('revision: input.expectedRevision, deletedAt: null')
+    expect(canonical).toContain("throw new KnowledgeError('revision_conflict'")
   })
-
-  it('carries qdrantPointId in MEM_SELECT so the purge can find the point', () => {
-    expect(dataPlane).toMatch(/MEM_SELECT[\s\S]*qdrantPointId: true/)
+  it('serves semantic candidates only for the current searchable revision', () => {
+    expect(merge).toContain("row.embeddingStatus === 'embedded'")
+    expect(merge).toContain('hit.revision === row.revision')
+    expect(merge).toContain("row.revision === 1 && row.knowledge === null")
   })
-})
-
-describe('admin PATCH /dashboard/memories/:id — client-managed / pending edit drops the stale point', () => {
-  it('sets dropStalePoint when no embedder is buildable on a content change (client-managed embeddings)', () => {
-    expect(adminPlane).toContain('dropStalePoint = true // client-managed embeddings (no embedder) → stale')
-  })
-
-  it('sets dropStalePoint on a server-managed embed failure (no vector OR threw)', () => {
-    expect(adminPlane).toContain('if (!vector) dropStalePoint = true')
-    expect(adminPlane).toContain('dropStalePoint = true // embed threw → stale')
-  })
-
-  it('deletes the existing qdrantPointId on a pending edit (else-branch of the re-upsert)', () => {
-    expect(adminPlane).toContain('else if (dropStalePoint && existing.qdrantPointId)')
-    expect(adminPlane).toContain(".delete('memory_vectors', { points: [existing.qdrantPointId] })")
+  it('fences worker completion against a changed/deleted record after embedding', () => {
+    expect(worker).toContain("ownershipState: 'personal', deletedAt: null")
+    expect(worker).toContain('revision: rows.find(row => row.id === id)?.revision')
+    expect(worker).toContain("deletedAt: null, embeddingStatus: 'pending'")
   })
 })
 
-describe('admin POST /dashboard/memories/import — client-managed/embed-fail re-import drops the stale point', () => {
-  it('captures the prior qdrantPointId only when there is no fresh vector', () => {
-    expect(adminPlane).toContain('let stalePointId: string | null = null')
-    expect(adminPlane).toContain('if (!vector) {')
-    expect(adminPlane).toMatch(/findUnique\(\{\s*where: \{ id: rec\.id \},\s*select: \{ qdrantPointId: true \}/)
+describe('historical archive conversion is not an update bypass', () => {
+  it('requires an explicit versioned archive and ownership confirmation', () => {
+    expect(archive).toContain("schema:z.enum(['pm.memory-export/1','pm.memory-export/2'])")
+    expect(archive).toContain('ownerConfirmation:z.literal(true)')
   })
-
-  it('deletes the captured stale point in the no-vector branch of the import upsert', () => {
-    expect(adminPlane).toContain('else if (stalePointId)')
-    expect(adminPlane).toContain(".delete('memory_vectors', { points: [stalePointId] })")
+  it('rejects existing-ID overwrite and keeps both row history and accepted revision', () => {
+    expect(archive).toContain("'archive_revision_conflict'")
+    expect(archive).toContain('revision:record.revision??1')
+    expect(archive).toContain('record.revisionHistory??[]')
+    expect(archive).toContain('tx.memoryRevision.create')
   })
-})
-
-describe('admin POST /dashboard/memories/import — fresh-install restore remaps stale ids', () => {
-  it('resolves the target team instead of blindly trusting the exported team id', () => {
-    expect(adminPlane).toContain('resolveImportTeamId')
-    expect(adminPlane).toContain('teamExists')
-    expect(adminPlane).toContain('const targetTeam = await resolveImportTeamId')
+  it('does not infer ownership from exported project or foreign author identifiers', () => {
+    expect(archive).toContain('record.createdById===ctx.userId')
+    expect(archive).toContain('record.teamId===ctx.teamId')
+    expect(archive).toContain('tx.memoryImportQuarantine.create')
+    expect(archive).toContain('payload:json(record)')
+    expect(archive).toContain('metadata:record.metadata==null?Prisma.DbNull:json(record.metadata)')
   })
-
-  it('remaps stale exported createdById values before creating rows', () => {
-    expect(adminPlane).toContain('resolveImportCreatedById')
-    expect(adminPlane).toContain('const importCreatedById = await resolveImportCreatedById')
-    expect(adminPlane).toContain('createdById: importCreatedById')
-    expect(adminPlane).not.toContain('createdById: rec.createdById ?? id.userId')
-  })
-
-  it('returns bounded row-level import error details for the dashboard card', () => {
-    expect(adminPlane).toContain('MAX_IMPORT_ERROR_DETAILS')
-    expect(adminPlane).toContain('const ImportErrorDetail = z.object')
-    expect(adminPlane).toContain('details: z.array(ImportErrorDetail)')
-    expect(adminPlane).toContain('recordError(rowIndex, rec.id')
+  it('returns bounded row-level errors instead of exposing failed raw memory content', () => {
+    expect(archive).toContain('if(details.length<100)')
+    expect(archive).toContain("stage:'validation'")
+    expect(archive).toContain('no partial row was accepted')
   })
 })

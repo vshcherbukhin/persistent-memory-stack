@@ -128,6 +128,14 @@ export interface Memory {
   confidence?: number
   graphPrimary?: boolean
   graphPrimaryFactCount?: number
+  revision?: number
+  classification?: import('./knowledge').Classification | null
+  classificationStatus?: string
+  memoryType?: string
+  assertionStatus?: string
+  graphStatus?: string
+  searchable?: boolean
+  processing?: string
 }
 
 export interface MemoryGraphNode {
@@ -638,7 +646,7 @@ export interface OverviewSummary {
 export interface ModelDependencyHealth {
   capability: 'fact_extraction' | 'embeddings' | 'ollama_host'
   observerScope: string
-  state: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  state: 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | 'starting'
   provider: 'anthropic' | 'openai' | 'ollama' | 'voyage' | null
   model: string | null
   lastSuccessAt: string | null

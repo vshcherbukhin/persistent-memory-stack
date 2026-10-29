@@ -28,6 +28,9 @@ vi.mock('../src/services/model-dependency-health.ts', () => ({
   modelDependencyHealth: health,
 }))
 
+vi.mock('../src/services/ollama-readiness.ts', () => ({ ollamaReadiness: { inspect: vi.fn() } }))
+import { ollamaReadiness } from '../src/services/ollama-readiness.ts'
+
 import {
   listServices,
   serviceLogs,
@@ -121,74 +124,23 @@ describe('docker client — every failure maps to DockerUnavailableError', () =>
   })
 })
 
-describe('ollamaInfo — host probe, never throws', () => {
-  beforeEach(() => {
-    health.recordSuccess.mockReset()
-    health.recordFailure.mockReset()
-    health.recordSuccess.mockResolvedValue(undefined)
-    health.recordFailure.mockResolvedValue(undefined)
-  })
-
-  it('parses tags, confirms the configured model, and explicitly marks host logs unavailable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [{ name: 'qwen3-embedding:4b' }] }), { status: 200 })))
-
-    expect(await ollamaInfo({ model: 'qwen3-embedding:4b', provider: 'ollama' })).toMatchObject({
-      state: 'reachable',
-      health: 'healthy',
-      configuredModel: 'qwen3-embedding:4b',
-      configuredModelState: 'present',
-      logsAvailable: false,
-    })
-    expect(health.recordSuccess).toHaveBeenCalledWith(expect.objectContaining({
-      capability: 'ollama_host', observerScope: 'host', provider: 'ollama', model: 'qwen3-embedding:4b',
-    }))
-  })
-
-  it('is unhealthy when Ollama is reachable but the configured Ollama model is absent', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [{ name: 'nomic-embed-text:latest' }] }), { status: 200 })))
-
-    expect(await ollamaInfo({ model: 'qwen3-embedding:4b', provider: 'ollama' })).toMatchObject({
-      state: 'reachable', health: 'unhealthy', configuredModelState: 'missing', logsAvailable: false,
-    })
-    expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
-      capability: 'ollama_host', observerScope: 'host',
-      failure: { code: 'ollama_model_unavailable', state: 'unhealthy' },
-    }))
-  })
-  it('treats malformed tag payloads as an unavailable host probe, not a missing configured model', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{not-json', { status: 200 })))
-
-    expect(await ollamaInfo({ model: 'qwen3-embedding:4b', provider: 'ollama' })).toMatchObject({
-      state: 'unreachable', health: 'unhealthy', logsAvailable: false,
-    })
-    expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
-      capability: 'ollama_host', observerScope: 'host',
-      failure: { code: 'ollama_host_unavailable', state: 'unhealthy' },
-    }))
-  })
+describe('ollamaInfo � configured model readiness', () => {
   it.each([
-    ['an object without models', {}],
-    ['a non-array models field', { models: {} }],
-  ])('treats valid JSON with %s as an unavailable host probe', async (_label, payload) => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })))
-
+    ['starting', 'starting', 'starting', 'present'],
+    ['ready', 'reachable', 'healthy', 'present'],
+    ['model_missing', 'reachable', 'unhealthy', 'missing'],
+    ['unavailable', 'unreachable', 'unhealthy', undefined],
+    ['invalid_embedding', 'reachable', 'unhealthy', 'present'],
+  ] as const)('projects %s without mistaking reachability for readiness', async (state, expectedState, expectedHealth, modelState) => {
+    vi.mocked(ollamaReadiness.inspect).mockResolvedValue({ state, message: 'Safe readiness status', observedAt: new Date(), readyAt: state === 'ready' ? new Date() : null })
     expect(await ollamaInfo({ model: 'qwen3-embedding:4b', provider: 'ollama' })).toMatchObject({
-      state: 'unreachable', health: 'unhealthy', logsAvailable: false,
+      state: expectedState, health: expectedHealth, configuredModelState: modelState,
+      controllable: false, logsAvailable: false,
     })
-    expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
-      capability: 'ollama_host', observerScope: 'host',
-      failure: { code: 'ollama_host_unavailable', state: 'unhealthy' },
-    }))
-    expect(health.recordFailure).not.toHaveBeenCalledWith(expect.objectContaining({
-      failure: { code: 'ollama_model_unavailable', state: 'unhealthy' },
-    }))
+    expect(ollamaReadiness.inspect).toHaveBeenCalledWith({ model: 'qwen3-embedding:4b', dim: 2560 })
   })
-  it('unreachable when fetch rejects', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
-    expect(await ollamaInfo({ model: 'qwen3-embedding:4b', provider: 'ollama' })).toMatchObject({ state: 'unreachable', health: 'unhealthy', logsAvailable: false })
-    expect(health.recordFailure).toHaveBeenCalledWith(expect.objectContaining({
-      capability: 'ollama_host', observerScope: 'host',
-      failure: { code: 'ollama_host_unavailable', state: 'unhealthy' },
-    }))
+  it('retains the unconfigured host reachability probe', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ models: [] })))
+    expect(await ollamaInfo()).toMatchObject({ state: 'reachable', health: 'healthy', configuredModelState: 'not_configured' })
   })
 })

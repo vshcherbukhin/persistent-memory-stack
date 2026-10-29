@@ -16,6 +16,7 @@ import { z } from 'zod/v4'
 import { ownerPrisma } from '@pm/db'
 import { issueToken, revokeToken } from '../../auth/token-service.ts'
 import { NotFoundError, notFoundIfMissing } from './shared.ts'
+import { forbidden } from '../../authz/errors.ts'
 
 const IssuedOut = z.object({
   tokenId: z.string(),
@@ -31,6 +32,11 @@ const Body = z
   .strict()
 
 export async function dashboardTokenRoutes(app: FastifyInstance): Promise<void> {
+  // Owner token rotation/revocation remains available. Historical shared-user
+  // credentials cannot be issued, revoked or rotated through Community.
+  app.addHook('preHandler', async req => {
+    if ((req.params as { id?: string }).id !== req.identity!.userId) throw forbidden('sharing_retired', 'Only the validated personal owner credential can be managed here.')
+  })
   const z4 = app.withTypeProvider<ZodTypeProvider>()
 
   // Shared issue/rotate handler — both mint a fresh token and return it once.

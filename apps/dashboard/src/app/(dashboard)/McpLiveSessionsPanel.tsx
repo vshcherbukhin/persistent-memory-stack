@@ -17,7 +17,7 @@ import { listServicesAction, serviceLogsAction } from './services/actions'
 const LIST_POLL_MS = 5_000
 const OUTPUT_POLL_MS = 3_000
 const OUTPUT_TAIL_LINES = 400
-const MCP_LIVE_COLS = 'minmax(0, 1fr) 132px 104px 128px 32px'
+const MCP_LIVE_COLS = 'minmax(280px, 1fr) 132px 104px 128px 32px'
 
 type OpenSession = { id: string; name: string }
 
@@ -42,7 +42,8 @@ export function McpLiveSessionsPanel({
   const [endedName, setEndedName] = useState<string | null>(null)
   const [output, setOutput] = useState('')
   const [outputError, setOutputError] = useState<string | null>(null)
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  // Server and browser clocks/locales can differ; hydrate the same placeholders.
+  const [nowMs, setNowMs] = useState<number | null>(null)
   const listInFlight = useRef(false)
 
   const refreshList = useCallback(async () => {
@@ -66,6 +67,7 @@ export function McpLiveSessionsPanel({
   }, [refreshList])
 
   useEffect(() => {
+    setNowMs(Date.now())
     const id = window.setInterval(() => setNowMs(Date.now()), 1_000)
     return () => window.clearInterval(id)
   }, [])
@@ -121,7 +123,7 @@ export function McpLiveSessionsPanel({
           <span className="cell-mono service-image">{open.id}</span>
           {current ? (
             <span className="note">
-              Last seen {formatSeenAgo(current.lastSeenAt, nowMs)} · closes when idle in {formatMcpTerminateCountdown(current.terminatesAt, nowMs)}
+              Last seen {nowMs === null ? '—' : formatSeenAgo(current.lastSeenAt, nowMs)} · closes when idle in {nowMs === null ? '—' : formatMcpTerminateCountdown(current.terminatesAt, nowMs)}
             </span>
           ) : null}
         </div>
@@ -176,6 +178,7 @@ export function McpLiveSessionsPanel({
           <span>No active MCP streams. Sessions appear here while Claude or Codex is connected and leave when they disconnect.</span>
         </div>
       ) : (
+        <div className="mcp-live-table-scroll" role="region" aria-label="Live MCP sessions table" tabIndex={0}>
         <div className="gt mcp-live-table">
           <div className="gt-head" style={{ gridTemplateColumns: MCP_LIVE_COLS }}>
             <div>Client</div>
@@ -186,7 +189,7 @@ export function McpLiveSessionsPanel({
           </div>
           <div className="gt-scroll-body">
             {clients.map((client) => {
-              const closesAt = formatMcpTerminateTime(client.terminatesAt)
+              const closesAt = nowMs === null ? '' : formatMcpTerminateTime(client.terminatesAt)
               return (
                 <button
                   type="button"
@@ -206,9 +209,9 @@ export function McpLiveSessionsPanel({
                   <span className="cell-mono mcp-connection-cell">
                     {client.connectionType === 'stream' ? 'streamable-http' : 'legacy local stdio'}
                   </span>
-                  <span className="mcp-time-cell cell-mono">{formatSeenAgo(client.lastSeenAt, nowMs)}</span>
+                  <span className="mcp-time-cell cell-mono">{nowMs === null ? '—' : formatSeenAgo(client.lastSeenAt, nowMs)}</span>
                   <span className="mcp-time-cell">
-                    <span className="cell-mono">{formatMcpTerminateCountdown(client.terminatesAt, nowMs)}</span>
+                    <span className="cell-mono">{nowMs === null ? '—' : formatMcpTerminateCountdown(client.terminatesAt, nowMs)}</span>
                     {closesAt ? <span className="note">{closesAt}</span> : null}
                   </span>
                   <span className="mcp-live-chevron" aria-hidden="true"><Icon name="chevron_right" size={16} /></span>
@@ -216,6 +219,7 @@ export function McpLiveSessionsPanel({
               )
             })}
           </div>
+        </div>
         </div>
       )}
     </section>

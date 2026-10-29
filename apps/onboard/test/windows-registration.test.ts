@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { agentProfiles } from '../server/agent-profiles.ts'
 import { buildMcpEntry, planRegistration, registerClaudeWrite, registerCodexWrite } from '../server/register.ts'
 import { readPersistentMemoryTomlEntry } from '../server/mcp-toml.ts'
-import { defaultMemoryBlock, targetMemoryFiles, writeRuleTargets } from '../server/rule.ts'
+import { defaultMemoryBlock, mergeManagedRule, targetMemoryFiles, writeRuleTargets } from '../server/rule.ts'
 
 const apps = { claudeCli: true, claudeDesktop: true, codexCli: true, codexDesktop: true }
 const entry = buildMcpEntry({
@@ -133,7 +133,7 @@ describe('Windows agent profile registration', () => {
         const memory = readFileSync(target.memoryFile, 'utf8')
         expect(memory).toContain('Keep this unrelated guidance.')
         expect(memory).toContain('@rules/persistent-memory.md')
-        expect(readFileSync(target.ruleFile, 'utf8')).toBe('# Fixture memory rule\nRead context before work.\n')
+        expect(readFileSync(target.ruleFile, 'utf8')).toBe(mergeManagedRule('', '# Fixture memory rule\nRead context before work.\n'))
       }
       const paths = [claudeConfig, codexConfig, ...targets.flatMap(target => [target.memoryFile, target.ruleFile])]
       const snapshots = paths.map(path => readFileSync(path, 'utf8'))

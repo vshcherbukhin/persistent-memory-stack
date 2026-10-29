@@ -5,7 +5,22 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { atomicJson, imageLifecycle, smokeCommand } from './docker-image-lifecycle.mjs'
+import { atomicJson, atomicReplace, imageLifecycle, smokeCommand } from './docker-image-lifecycle.mjs'
+
+test('Windows atomic replacement tolerates transient locks and bounds persistent failures without a delete fallback', () => {
+  const locked = Object.assign(new Error('synthetic file lock'), { code: 'EPERM' })
+  const waits = []
+  let attempts = 0
+  atomicReplace('new-ledger.tmp', 'accepted-ledger.json', { platform: 'win32', rename: () => { if (++attempts < 3) throw locked }, wait: delay => waits.push(delay) })
+  assert.equal(attempts, 3)
+  assert.deepEqual(waits, [10, 20])
+  attempts = 0
+  assert.throws(() => atomicReplace('new-ledger.tmp', 'accepted-ledger.json', { platform: 'win32', rename: () => { attempts++; throw locked }, wait: () => {} }), error => error === locked)
+  assert.equal(attempts, 8)
+  attempts = 0
+  assert.throws(() => atomicReplace('new-ledger.tmp', 'accepted-ledger.json', { platform: 'linux', rename: () => { attempts++; throw locked }, wait: () => assert.fail('non-Windows permission errors must not retry') }), error => error === locked)
+  assert.equal(attempts, 1)
+})
 
 const OWNER = 'io.persistent-memory.install.owner'
 const ATTEMPT = 'io.persistent-memory.install.attempt'

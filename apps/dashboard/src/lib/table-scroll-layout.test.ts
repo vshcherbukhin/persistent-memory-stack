@@ -72,7 +72,7 @@ describe('table scroll layout contract', () => {
     expect(overview).toContain('badgeTone={mcpBadge.tone}')
     expect(overview).toContain('serviceBadge(overview.services)')
     expect(overview).toContain('workerBadge(overview.workers)')
-    expect(overview).toContain('`${overview.services.active} active, ${overview.services.stopped} stopped, ${overview.services.failed} failed`')
+    expect(overview).toContain("`${overview.services.active} active, ${overview.services.starting > 0 ? `${overview.services.starting} starting, ` : ''}${overview.services.stopped} stopped, ${overview.services.failed} failed`")
     expect(overview).toContain('`${overview.workers.enabled} active, ${workerStoppedCount} stopped, ${overview.workers.failed} failed`')
     expect(overview).toContain('tone="neutral"')
     expect(types).toContain('mcpSessions: {')
@@ -102,13 +102,12 @@ describe('table scroll layout contract', () => {
   ])('%s grid table puts rows in a dedicated scroll body', (_name, file) => {
     const page = src(file)
 
-    expect(page).toContain('className="gt table-scroll"')
+    expect(page).toContain(_name === 'memories' ? 'className="gt table-scroll memory-table"' : 'className="gt table-scroll"')
     expect(page).toContain('className="gt-head"')
     expect(page).toContain('className="gt-scroll-body"')
   })
 
   it.each([
-    ['users', '../app/(dashboard)/users/page.tsx'],
     ['tokens', '../app/(dashboard)/tokens/page.tsx'],
   ])('%s page uses the fixed-shell internal table scroll pattern', (_name, file) => {
     const page = src(file)
@@ -549,18 +548,6 @@ describe('table scroll layout contract', () => {
     expect(optionActive).not.toContain('var(--accent')
   })
 
-  it('keeps Teams mutations inside the reusable modal flow, not browser confirm prompts', () => {
-    const page = src('../app/(dashboard)/teams/page.tsx')
-    const client = src('../app/(dashboard)/teams/TeamsClient.tsx')
-
-    expect(page).toContain('<TeamsClient teams={teams} />')
-    expect(client).toContain("import { Modal } from '@/components/ui/Modal'")
-    expect(client).toContain('Rename team')
-    expect(client).toContain('Delete team')
-    expect(client).not.toContain('confirm(')
-    expect(client).not.toContain('confirm={`')
-  })
-
   it('uses the custom token expiry picker and shows token issue dates', () => {
     const modal = src('../components/TokenModal.tsx')
     const tokens = src('../app/(dashboard)/tokens/page.tsx')
@@ -571,14 +558,9 @@ describe('table scroll layout contract', () => {
     expect(tokens).toContain('issued')
   })
 
-  it('presents mounts as a reader-focused editor using the themed checkbox component', () => {
-    const grants = src('../components/GrantMatrix.tsx')
-
-    expect(grants).toContain("import { Checkbox } from '@/components/ui/Checkbox'")
-    expect(grants).toContain('Selected reader')
-    expect(grants).toContain('Mounted memory sources')
-    expect(grants).not.toContain('type="checkbox"')
-    expect(grants).not.toContain('owner ↓')
+  it('retires the mounts editor instead of exposing old grants', () => {
+    expect(src('../app/(dashboard)/grants/page.tsx')).toContain('notFound()')
+    expect(src('../components/Nav.tsx')).not.toContain("label: 'Mounts'")
   })
 
   it('shows client-managed embeddings as an informational pin, not an editable embedding form', () => {
@@ -707,7 +689,8 @@ describe('table scroll layout contract', () => {
     expect(memories).toContain("type MemoryView = 'list' | 'graph' | 'tools'")
     expect(memories).toContain("const activeView: MemoryView = requestedView === 'graph'")
     expect(memories).toContain('const fixedMemoryColumn = (width: number) => `minmax(${width}px, ${width}px)`')
-    expect(memories).toContain("const contentTrack = 'minmax(0, 1fr)'")
+    expect(memories).toContain('const MEMORY_CONTENT_MIN_WIDTH = 300')
+    expect(memories).toContain('const contentTrack = `minmax(${MEMORY_CONTENT_MIN_WIDTH}px, 1fr)`')
     expect(memories).toContain('fixedMemoryColumn(projectWidth)')
     expect(memories).toContain('fixedMemoryColumn(categoryWidth)')
     expect(memories).toContain('fixedMemoryColumn(authorWidth)')
@@ -737,6 +720,27 @@ describe('table scroll layout contract', () => {
     expect(tools).toContain('Error details')
     expect(css).toContain('.import-steps')
     expect(css).toContain('.import-error-list')
+  })
+
+  it('keeps mobile memory content readable with one horizontal surface for the header and vertical body', () => {
+    const memories = src('../app/(dashboard)/memories/MemoriesClient.tsx')
+    expect(memories).toContain('minWidth: MEMORY_CONTENT_MIN_WIDTH + projectWidth + categoryWidth + MEMORY_TIME_WIDTH * 2 + teamWidth + authorWidth + actionsWidth')
+    const surface = memories.indexOf('className="memory-table-surface" style={{ minWidth: tableColumns.minWidth }}')
+    const header = memories.indexOf('className="gt-head" style={{ gridTemplateColumns: tableColumns.template }}', surface)
+    const body = memories.indexOf('ref={scrollBodyRef} className="gt-scroll-body"', header)
+    expect(surface).toBeGreaterThan(-1)
+    expect(header).toBeGreaterThan(surface)
+    expect(body).toBeGreaterThan(header)
+    expect(memories).toContain('style={{ gridTemplateColumns: tableColumns.template }}')
+    expect(memories).toContain('const root = scrollBodyRef.current')
+    expect(memories).toContain("{ root, rootMargin: '240px' }")
+    expect(cssRule('.memories-page .gt.table-scroll.memory-table')).toMatch(/overflow-x:\s*auto/)
+    expect(cssRule('.memories-page .gt.table-scroll.memory-table')).toMatch(/overflow-y:\s*hidden/)
+    expect(cssRule('.memories-page .memory-table-surface')).toMatch(/min-height:\s*0/)
+    expect(cssRule('.memories-page .memory-table-surface')).toMatch(/flex-direction:\s*column/)
+    // Other screens retain the shared grid-table behavior.
+    expect(cssRule('.gt.table-scroll')).toMatch(/overflow:\s*hidden/)
+    expect(cssRule('.gt-scroll-body')).toMatch(/overflow-y:\s*auto/)
   })
 
   it('keeps graph focus, rail sizing, and inspector scrolling in the app-owned layout', () => {

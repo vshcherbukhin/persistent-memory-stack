@@ -32,7 +32,7 @@ const BEARER = /^Bearer\s+(.+)$/i
 // All writes hit the CONTROL table app_user → ownerPrisma (pm_app has no grant).
 
 /** argon2id params — read at call time so env overrides apply (match seed.ts). */
-function argonOptions(): argon2.Options {
+function argonOptions(): argon2.HashOptions {
   return {
     type: argon2.argon2id,
     memoryCost: config.ARGON2_MEMORY_KIB,
@@ -140,17 +140,7 @@ export async function verifyToken(
  * excluded. Control-table read → ownerPrisma (no RLS / tenant context needed).
  */
 export async function resolveMountedTeams(ownTeamId: string): Promise<string[]> {
-  const grants = await ownerPrisma.teamGrant.findMany({
-    where: { granteeTeamId: ownTeamId }, // grants where MY team is the grantee (mounts)
-    select: { grantorTeamId: true },
-  })
-  // Annotate the row shape explicitly — the Prisma 7 generated conditional types
-  // collapse a `findMany({ select })` element to `unknown` under an explicit
-  // return annotation; pinning it keeps `.map` typed.
-  const grantors = (grants as { grantorTeamId: string }[])
-    .map((g) => g.grantorTeamId)
-    .filter((t) => t !== ownTeamId)
-  return [...new Set(grantors)]
+  return [] // Historical grants are preserved but confer no Community access.
 }
 
 /**

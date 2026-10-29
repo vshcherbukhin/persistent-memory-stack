@@ -53,6 +53,7 @@ HANDOFF_DONE=0
 HANDOFF_ACTIVITY_SEQUENCE=0
 HANDOFF_FAILURE_DETAIL=""
 HANDOFF_PROBE_PID=""
+FALKOR_STORAGE_RECEIPT=""
 
 # shellcheck source=deploy/scripts/lib/env.sh
 . "$SCRIPT_DIR/lib/env.sh"
@@ -517,6 +518,10 @@ dashboard_handoff_fail_on_exit() {
     code=$?
     stop_progress_probe
     release_coordinator_reservation
+    if [ "$code" -ne 0 ] && [ -n "${FALKOR_STORAGE_RECEIPT:-}" ]; then
+        node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs" --env-file "$ENV_RUNTIME" --resume "$FALKOR_STORAGE_RECEIPT" \
+            || warn "Could not resume the original graph container. Preserve the recorded graph backup and review its storage receipt."
+    fi
     if [ "$code" -ne 0 ] && [ "${HANDOFF_DONE:-0}" != "1" ]; then
         error="${HANDOFF_FAILURE_DETAIL:-Update command failed with exit code $code during ${HANDOFF_PHASE:-update}.}"
         dashboard_handoff_write "failed" "Update failed during ${HANDOFF_PHASE:-update}. Review the error below, then use the terminal for full details." "$error" || true
@@ -812,13 +817,13 @@ const total = Number(input?.total);
 const state = typeof input?.state === "string" ? input.state.trim().slice(0, 80) : "running";
 if (!Number.isInteger(completed) || completed < 0 || !Number.isInteger(total) || total < 0 || completed > total) process.exit(1);
 const remaining = total - completed;
-const message = `Graph migration: ${completed} / ${total} complete — ${remaining} remaining (${state}).`;
+const message = `Graph preservation: ${completed} / ${total} inspected — ${remaining} remaining (${state}).`;
 process.stdout.write(JSON.stringify({ completed, total, remaining, checkedAt: new Date().toISOString(), message }));
 '
 }
 
 run_graph_v2_migration_with_probe() {
-    run_progress_probe "graph migration" "verifying" "87" "Rebuilding and validating project-scoped graph partitions." graph_v2_progress_probe
+    run_progress_probe "graph migration" "verifying" "87" "Checking preserved legacy graphs and classified projection state." graph_v2_progress_probe
     if "${COMPOSE[@]}" exec -T worker node dist/graph-v2-migration-cli.js --snapshot-id="$HANDOFF_RUN_ID"; then
         stop_progress_probe
         return 0
@@ -1116,6 +1121,13 @@ fi
 compose_build_with_handoff "application images" "55" "73" "${UPDATE_RECREATE_SERVICES[@]}" \
     && ok "Application images rebuilt; dashboard gateway skipped the main recreate." \
     || { fail "docker compose build ${UPDATE_RECREATE_SERVICES[*]} failed."; exit 1; }
+
+# Older FalkorDB images persisted outside the mounted /data directory. Never
+# recreate that container until its exact RDB/AOF state has a durable backup and
+# an empty, positively identified existing volume has received the safe copy.
+FALKOR_STORAGE_PREPARATION="$(node "$REPO_ROOT/scripts/prepare-falkordb-storage.mjs" --env-file "$ENV_RUNTIME" --prepare)" \
+    || { fail "Graph storage could not be prepared safely. The original container and backup were preserved; inspect the typed storage error."; exit 1; }
+FALKOR_STORAGE_RECEIPT="$(printf '%s\n' "$FALKOR_STORAGE_PREPARATION" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).receiptPath||""))')"
 dashboard_handoff_write "rebuilding-dashboard" "Starting rebuilt application containers." "" "75" \
     "deploy" "running" "application containers" "Starting rebuilt application containers."
 "${COMPOSE[@]}" up -d --no-build "${UPDATE_RECREATE_SERVICES[@]}" && ok "Application containers recreated." \
@@ -1158,11 +1170,11 @@ fi
 # starts. Run the compiled worker command only after Prisma/RLS are current and
 # before final runtime verification; the Postgres run record makes interruption
 # safe and blocks legacy cleanup until its validation succeeds.
-dashboard_handoff_write "verifying" "Rebuilding and validating project-scoped graph partitions." "" "87" \
-    "verify" "running" "graph migration" "Rebuilding and validating project-scoped graph partitions."
+dashboard_handoff_write "verifying" "Checking preserved legacy graphs and classified projection state." "" "87" \
+    "verify" "running" "graph migration" "Checking preserved legacy graphs and classified projection state."
 run_graph_v2_migration_with_probe \
-    && ok "Graph V2 migration completed or was already complete." \
-    || { fail "Graph V2 migration failed; legacy graph data was preserved for recovery."; exit 1; }
+    && ok "Legacy graphs preserved; no automatic inference or legacy group cleanup." \
+    || { fail "Graph preservation check failed; legacy graph data was retained for recovery."; exit 1; }
 
 # ── 7. Restart runtime services so they pick up the new images/schema ─────────
 RUNTIME_SERVICES=(api worker docker-control update-runner)

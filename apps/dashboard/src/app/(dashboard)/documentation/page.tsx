@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { DocumentationArticle } from '@/components/documentation/DocumentationArticle'
 import { VisualGuide } from '@/components/documentation/VisualGuide'
 import { Icon } from '@/components/ui/Icon'
-import { isLocalMode } from '@/lib/deploymentMode'
+import { normalizeMemorySurface } from '@/lib/api'
 import {
   dashboardDocumentationFor,
   dashboardDocumentationTopic,
@@ -16,8 +16,8 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 function documentationSpace(space: string | undefined): DashboardDocumentationSpace {
-  if (!isLocalMode) return 'shared-server'
-  return space === 'shared' ? 'local-shared-client' : 'local-personal'
+  normalizeMemorySurface(space)
+  return 'local-personal'
 }
 
 export default async function DocumentationPage({
@@ -40,7 +40,7 @@ export default async function DocumentationPage({
             Stack documentation
           </a>
           <span className="dashboard-docs-nav-group">
-            {selectedSpace === 'local-personal' ? 'Personal memories' : selectedSpace === 'local-shared-client' ? 'Shared memories' : 'Shared server'}
+            Personal memories
           </span>
           <nav>
             {topics.map((item) => (

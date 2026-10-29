@@ -550,7 +550,7 @@ export function MemoryGraphShell({ surface, focusMemoryId = null }: { surface: M
               <dl>
                 <div><dt>Project</dt><dd>{selected.project}</dd></div>
                 {selected.category ? <div><dt>Badge</dt><dd>{selected.category}</dd></div> : null}
-                <div><dt>Access</dt><dd>{selected.relation === 'own' ? 'Own memory space' : 'Mounted memory space'}</dd></div>
+                <div><dt>Access</dt><dd>{selected.relation === 'own' ? 'Personal memory space' : 'Unverified ownership'}</dd></div>
                 {selected.graphStatus ? <div><dt>Graph sync</dt><dd>{selected.graphStatus}</dd></div> : null}
                 <div><dt>Connections</dt><dd>{selectedEdges.length.toLocaleString()}</dd></div>
               </dl>

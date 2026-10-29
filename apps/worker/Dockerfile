@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # persistent-memory-worker — workspace-aware multi-stage TS/Node build (Phase 6).
 #
@@ -28,9 +28,9 @@
 # =============================================================================
 
 # ── Stage 1: workspace install (root lockfile) ───────────────────────────────
-FROM node:22-alpine AS deps
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/db/package.json ./packages/db/
 COPY layers/graph/package.json ./layers/graph/
@@ -41,23 +41,22 @@ COPY layers/core/schema/package.json ./layers/core/schema/
 COPY deploy/scripts/npm-ci-with-retry.sh /usr/local/bin/npm-ci-with-retry
 RUN chmod +x /usr/local/bin/npm-ci-with-retry
 RUN --mount=type=cache,target=/root/.npm npm-ci-with-retry
-# npm fully dedupes/hoists workspace deps into the ROOT node_modules, so a
-# workspace may end up with NO own node_modules dir. The build stage COPYs
-# apps/worker/ + layers/core/schema/ node_modules unconditionally — guarantee they exist (empty is
-# fine; deps resolve from the hoisted root node_modules COPY'd alongside).
-RUN mkdir -p apps/worker/node_modules layers/core/schema/node_modules
+# Workspace dependencies can be hoisted or version-nested. Guarantee staged COPY
+# paths exist even when a member currently has no own dependency directory.
+RUN mkdir -p packages/shared/node_modules apps/worker/node_modules layers/core/schema/node_modules
 
 # ── Stage 2: build @pm/shared (composite library) ────────────────────────────
-FROM node:22-alpine AS shared-build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS shared-build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 RUN rm -f packages/shared/tsconfig.tsbuildinfo
 RUN node /app/node_modules/typescript/bin/tsc -p packages/shared/tsconfig.json
 
 # ── Stage 3: build — generate the Prisma client, then compile @pm/db + worker ─
-FROM node:22-alpine AS build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 # npm version-nests bullmq/ioredis/zod/dotenv under apps/worker/, and the prisma CLI
@@ -93,10 +92,10 @@ COPY apps/worker/src ./apps/worker/src
 RUN node /app/node_modules/typescript/bin/tsc -b apps/worker/tsconfig.json
 
 # ── Stage 4: runtime — prod deps + the self-contained dist trees ──────────────
-FROM node:22-alpine AS runtime
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/db/package.json ./packages/db/
 COPY layers/graph/package.json ./layers/graph/
@@ -105,6 +104,7 @@ COPY layers/security-dlp/package.json ./layers/security-dlp/
 COPY apps/worker/package.json ./apps/worker/
 COPY layers/core/schema/package.json ./layers/core/schema/
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=deps /app/apps/worker/node_modules ./apps/worker/node_modules
 COPY --from=deps /app/layers/core/schema/node_modules ./layers/core/schema/node_modules
 RUN npm prune --omit=dev && npm cache clean --force

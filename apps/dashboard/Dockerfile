@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # -----------------------------------------------------------------------------
 # persistent-memory-dashboard — Next.js 15 standalone, multi-stage.
 #
@@ -19,17 +19,16 @@
 # -----------------------------------------------------------------------------
 
 # ── deps ──────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS deps
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
 WORKDIR /app/apps/dashboard
-COPY apps/dashboard/package.json apps/dashboard/package-lock.json* ./
+COPY apps/dashboard/package.json apps/dashboard/package-lock.json apps/dashboard/.npmrc ./
 RUN npm config set fetch-retries 5 >/dev/null \
  && npm config set fetch-retry-factor 2 >/dev/null \
  && npm config set fetch-retry-mintimeout 20000 >/dev/null \
  && npm config set fetch-retry-maxtimeout 120000 >/dev/null \
  && npm config set fetch-timeout 300000 >/dev/null \
  && for i in 1 2 3 4; do \
-      if npm ci; then exit 0; fi; \
-      status="$?"; \
+      if npm ci; then exit 0; else status="$?"; fi; \
       if [ "$i" = "4" ]; then echo "npm ci failed after 4 attempts." >&2; exit "$status"; fi; \
       delay=$((5 * i)); \
       echo "npm ci failed with exit ${status}; retrying in ${delay}s (${i}/4)..." >&2; \
@@ -38,7 +37,7 @@ RUN npm config set fetch-retries 5 >/dev/null \
     done
 
 # ── builder ───────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS builder
 WORKDIR /app
 COPY --from=deps /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
 COPY apps/dashboard ./apps/dashboard
@@ -57,7 +56,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # ── runner ──────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runner
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

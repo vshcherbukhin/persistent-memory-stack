@@ -98,7 +98,7 @@ export function dependencyHealthToServiceRows(
       id: '',
       state: health.embeddings.state,
       status: capabilityStatusDetail(health.embeddings),
-      health: health.embeddings.state === 'healthy' ? 'healthy' : health.embeddings.state === 'unknown' ? null : 'unhealthy',
+      health: health.embeddings.state === 'healthy' ? 'healthy' : health.embeddings.state === 'starting' ? 'starting' : health.embeddings.state === 'unknown' ? null : 'unhealthy',
       controllable: false,
       logsAvailable: false,
       configuredModel: settings.activeEmbedModel,

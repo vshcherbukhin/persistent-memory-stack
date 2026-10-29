@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const env = { ...process.env, PYTHONPATH: [join(root, '.local/mkdocs-python'), process.env.PYTHONPATH].filter(Boolean).join(delimiter) }
 const options = { cwd: root, env }
 if (process.argv[2] === 'install') {
-  const python = pythonInvocation(['-m', 'pip', 'install', '--disable-pip-version-check', '--target', '.local/mkdocs-python', '-r', 'documentation/requirements.txt'])
+  const python = pythonInvocation(['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '--target', '.local/mkdocs-python', '--require-hashes', '-r', 'documentation/requirements.lock'])
   await run(python.command, python.args, options)
   await runNpm(['ci', '--prefix', 'apps/documentation'], options)
 } else if (process.argv[2] === 'build') {

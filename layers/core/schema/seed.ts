@@ -46,7 +46,7 @@ const adapter = new PrismaPg({ connectionString })
 const prisma = new PrismaClient({ adapter })
 
 // ── Argon2id params (kept in lockstep with the API verifier in P3). ──────────
-const argonOptions: argon2.Options = {
+const argonOptions: argon2.HashOptions = {
   type: argon2.argon2id,
   memoryCost: Number(process.env.ARGON2_MEMORY_KIB ?? 19456),
   timeCost: Number(process.env.ARGON2_TIME_COST ?? 2),

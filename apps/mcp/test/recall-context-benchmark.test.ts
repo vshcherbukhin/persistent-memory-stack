@@ -25,7 +25,7 @@ function collectAllTools(api: unknown, runtime: Runtime): Map<string, Tool> {
   const tools = new Map<string, Tool>()
   const server = {
     registerTool(name: string, options: ToolOptions, handler: Tool['handler']) {
-      tools.set(name, { options, handler })
+      tools.set(name, { options, handler: async input => handler(z.object(options.inputSchema ?? {}).parse(input)) })
     },
   }
   registerAllTools(server as never, { api, runtime } as never)
@@ -64,6 +64,7 @@ function memoryRow(
     isOwnTeam: true,
     createdAt: '2026-08-05T10:00:00.000Z',
     recordUpdatedAt: '2026-08-05T10:00:00.000Z',
+    revision: 1, classification: null, classificationStatus: 'legacy_unclassified', embeddingStatus: 'embedded', graphStatus: 'ok',
     memoryTier: 'semantic',
     sourceProvenance: 'human_verified',
     confidence: 0.98,
@@ -84,6 +85,7 @@ function fact(
   invalidAt: string | null = null,
 ) {
   return {
+    episodes: [`episode-${uuid}`], sourceMemoryIds: ['M1'], assertionStatus: 'observation', verification: 'derived_source_reported' as const,
     uuid,
     name,
     fact: factText,
@@ -95,7 +97,7 @@ function fact(
     valid_at: validAt,
     invalid_at: invalidAt,
     project: demoProject,
-    surface: 'shared' as const,
+    surface: 'personal' as const,
     relation: 'own' as const,
   }
 }
@@ -392,7 +394,7 @@ describe('recall_context memory benchmark contract', () => {
             query: expect.stringContaining('Widget'),
             limit: 20,
             validOnly: false,
-            scope: 'own',
+            project: demoProject,
           })
           return { facts: graphFacts }
         }
@@ -401,7 +403,7 @@ describe('recall_context memory benchmark contract', () => {
       get: vi.fn(async (path: string, query?: Record<string, unknown>) => {
         if (path.startsWith('/graph/entity/')) {
           const name = decodeURIComponent(path.slice('/graph/entity/'.length))
-          expect(query).toMatchObject({ limit: 20, scope: 'own' })
+          expect(query).toMatchObject({ limit: 20, project: demoProject })
           return { name, facts: graphFactsForEntity(name) }
         }
         if (path === '/graph/timeline') {
@@ -409,7 +411,7 @@ describe('recall_context memory benchmark contract', () => {
             entityUuid: nodeId('Widget'),
             includeInvalid: true,
             limit: 20,
-            scope: 'own',
+            project: demoProject,
           })
           return { entityUuid: nodeId('Widget'), entries: widgetTimeline }
         }
@@ -417,7 +419,7 @@ describe('recall_context memory benchmark contract', () => {
           expect(query).toMatchObject({
             entityUuid: nodeId('Widget'),
             limit: 20,
-            scope: 'own',
+            project: demoProject,
           })
           return { contradictions }
         }
@@ -431,7 +433,6 @@ describe('recall_context memory benchmark contract', () => {
       query:
         'Provide a chronological narrative of the Widget product: who worked on it, which teams they belonged to, delays and resolutions, and participant name or role changes.',
       project: demoProject,
-      scope: 'own',
       entityNames: ['Widget', 'Alice', 'Bob', 'Charlie', 'Marketing', 'Sales', 'Supplier Z'],
       memoryLimit: 8,
       graphLimit: 20,
@@ -489,7 +490,7 @@ describe('recall_context memory benchmark contract', () => {
     const factRegistry = context.facts as Record<string, (typeof graphFacts)[number]>
     const graph = context.graph as { factRefs: string[] }
     expect(graph.factRefs).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11'])
-    expect(Object.values(factRegistry).every((edge) => edge.project === demoProject && edge.surface === 'shared')).toBe(true)
+    expect(Object.values(factRegistry).every((edge) => edge.project === demoProject && edge.surface === 'personal')).toBe(true)
     expect(Object.values(factRegistry).some((edge) => edge.source_name === 'Widgeon' || edge.target_name === 'Widgeon')).toBe(false)
 
     const entities = context.entities as Array<{ name: string; factRefs: string[] }>
@@ -580,7 +581,6 @@ describe('recall_context memory benchmark contract', () => {
     const result = await tools.get('recall_context')!.handler({
       query: 'Is the Widgeon product part of the Widget project?',
       project: demoProject,
-      scope: 'own',
       memoryLimit: 5,
       graphLimit: 10,
       entityLimit: 10,

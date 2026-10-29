@@ -33,6 +33,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import { deriveIdentity } from './token-service.ts'
 import { tenantStore } from '@pm/db'
+import { ownerPrisma } from '@pm/db'
 import { unauthorized } from '../authz/errors.ts'
 import { localIdentity } from './local-mode.ts'
 
@@ -65,6 +66,13 @@ export async function authenticate(
       'invalid_token',
     )
   }
+  // Keep token verification on authenticated installations. An old shared token
+  // is not a personal-owner credential, even when it has an admin role or grant.
+  const owner = await ownerPrisma.localIdentity.findUnique({ where: { id: 'singleton' }, select: { userId: true, teamId: true } })
+  if (!owner || owner.userId !== identity.userId || owner.teamId !== identity.teamId) {
+    throw unauthorized('This credential does not identify the validated local personal owner.', 'personal_owner_required')
+  }
+  identity.mountedTeamIds = []
   req.identity = identity
   // NOTE: enterWith() must NOT be called here. This is an async hook that has
   // already awaited deriveIdentity() above; calling enterWith() in a continuation

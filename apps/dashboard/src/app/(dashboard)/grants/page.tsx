@@ -1,14 +1,8 @@
-import { requireControlPlane } from '@/lib/session'
-import { api } from '@/lib/api'
-import { GrantMatrix } from '@/components/GrantMatrix'
+import { notFound } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
-export default async function GrantsPage() {
-  await requireControlPlane()
-  const { teams, grants } = await api.getGrants()
-
-  return (
-    <GrantMatrix teams={teams} grants={grants} />
-  )
+/** Community has no active sharing/connector operations. */
+export default function RetiredSharingPage() {
+  notFound()
 }

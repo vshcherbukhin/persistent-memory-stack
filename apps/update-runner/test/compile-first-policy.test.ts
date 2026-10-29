@@ -5,7 +5,7 @@ const source = (path: string) => readFile(new URL(path, import.meta.url), 'utf8'
 
 describe('compile-first runtime policy', () => {
   it('runs every first-party Node service from emitted JavaScript', async () => {
-    const [compose, rootPackage, gatewayDockerfile, dockerControlDockerfile, updateRunnerDockerfile, gatewayPackage, dockerControlPackage, updateRunnerPackage, dashboardPackage, onboardPackage, onboardLauncher, serverModeLaunchers] = await Promise.all([
+    const [compose, rootPackage, gatewayDockerfile, dockerControlDockerfile, updateRunnerDockerfile, gatewayPackage, dockerControlPackage, updateRunnerPackage, dashboardPackage, onboardPackage, onboardLauncher, hostLauncher, serverModeLaunchers] = await Promise.all([
       source('../../../deploy/compose/docker-compose.yml'),
       source('../../../package.json'),
       source('../../dashboard-gateway/Dockerfile'),
@@ -17,6 +17,7 @@ describe('compile-first runtime policy', () => {
       source('../../dashboard/package.json'),
       source('../../onboard/package.json'),
       source('../../../deploy/scripts/onboard.sh'),
+      source('../../../scripts/host-lifecycle.mjs'),
       Promise.all([
         source('../../../deploy/scripts/install-server-client-managed.sh'),
         source('../../../deploy/scripts/install-server-server-managed.sh'),
@@ -40,7 +41,10 @@ describe('compile-first runtime policy', () => {
       expect(pkg).not.toContain('node --experimental-strip-types')
     }
     expect(dashboardPackage).toContain('"build": "tsc --noEmit && next build"')
-    expect(onboardLauncher).toContain('node "$ONBOARD_DIR/dist/apps/onboard/server/index.js"')
+    expect(onboardLauncher).toContain('exec node scripts/host-lifecycle.mjs install "$@"')
+    expect(hostLauncher).toContain("runNpm(['ci', '--no-audit', '--no-fund']")
+    expect(hostLauncher).toContain("runNpm(['run', 'build']")
+    expect(hostLauncher).toContain("spawn(process.execPath, [join(appDir, 'dist/apps/onboard/server/index.js')]")
     expect(rootPackage).toContain('"build:server-mode-install": "tsc -p tsconfig.server-mode-install.json"')
     expect(rootPackage).toContain('"typecheck:server-mode-install": "tsc --noEmit -p tsconfig.server-mode-install.json"')
     for (const launcher of serverModeLaunchers) {
