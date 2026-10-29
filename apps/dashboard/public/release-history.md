@@ -2,6 +2,45 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 2.0.1 - 2026-10-29
+
+[GitHub release v2.0.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.1)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| api / worker / shared | 2.0.1 | Use a maintained S3 client adapter for local evidence storage without vulnerable parser dependencies. |
+| dashboard / docs | 2.0.1 | Release metadata, patched diagram renderer and current security/validation documentation. |
+| onboarding / database / schema / mcp / graph | 2.0.0 | Existing Community knowledge contracts and installation flow retained. |
+| security-dlp / update-runner / update-coordinator | 1.0.1 | Existing scanner and updater contracts retained. |
+
+- Add GitHub-hosted validation for pull requests and development/release pushes:
+  clean locked installations, tests, type checks, production builds, documentation
+  and release/upgrade contracts. Also check the supported Node 22 host/storage path.
+- Audit all four npm lockfiles, including development and documentation packages.
+  Any reported finding, including low severity, or an unavailable/incomplete audit
+  fails validation. The corrected dependency trees report zero known npm findings.
+- Replace the obsolete storage-client parser dependencies behind the existing
+  local S3 interface. Preserve the MinIO server, endpoint, credentials, buckets,
+  object keys, streaming uploads/downloads, metadata and signed download links.
+  No AWS account, data migration or external storage connection is introduced.
+- Patch the math renderer used by the documentation CLI and record the actual
+  renderer version in regenerated diagram assets. Document the security checks
+  and release verification procedure.
+
+Existing Community 2.0 memory contracts, ownership, privacy gates and embedding
+configuration remain unchanged. Public 1.0.0–1.3.1 installations still stop at
+1.3.2 before this major line. Preserve the supported updater snapshot/recovery path.
+
+To update, run from the repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 2.0.1
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 2.0.1`.
+For a new installation, follow the
+[v2.0.1 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.1/README.md).
+
 ## 2.0.0 - 2026-10-29
 
 [GitHub release v2.0.0](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.0)

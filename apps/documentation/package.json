@@ -1,6 +1,6 @@
 {
   "name": "persistent-memory-documentation",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "description": "Versioned MkDocs build assets and dependency-free Node runtime for Persistent Memory documentation.",
@@ -14,6 +14,11 @@
   "devDependencies": {
     "@mermaid-js/mermaid-cli": "12.0.0",
     "mermaid": "12.2.0"
+  },
+  "overrides": {
+    "@mermaid-js/mermaid-cli": {
+      "katex": "0.18.10"
+    }
   },
   "engines": {
     "node": "^22.13.0 || ^24.0.0"

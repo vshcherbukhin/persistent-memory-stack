@@ -51,6 +51,19 @@ expired provider credential, or interrupted download succeed. The wizard blocks
 known environment failures and reports installation failures without claiming
 success.
 
+From Community 2.0.1, `npm run audit:dependencies` also checks all four npm trees,
+including documentation and other development dependencies. Every reported
+severity and incomplete/unavailable audit fails validation. The GitHub
+[release validation workflow](release-validation.md) runs these checks together
+with tests, builds and release contracts.
+
+The local S3 adapter uses the exact locked AWS SDK packages instead of the older
+MinIO JavaScript dependency tree. It still connects only to the configured MinIO
+endpoint with the existing explicit credentials; no AWS account is needed.
+Mermaid CLI's KaTeX dependency is explicitly pinned to patched 0.18.10, matching
+the renderer used by Mermaid itself. Renderer changes require diagram checks
+and a real rendering smoke test, not only a clean audit result.
+
 Community guidance does not require company notification or external-page update
 workflows. Personal document requirements need no external account or page ID.
 Historical source metadata remains readable.

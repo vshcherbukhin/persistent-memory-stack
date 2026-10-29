@@ -47,7 +47,7 @@ extra_css:
   - stylesheets/material-icons-outlined.css
   - stylesheets/pm-management.css
 extra:
-  docs_version: 2.0.0
+  docs_version: 2.0.1
 nav:
   - "Home": index.md
   - "Installation":
@@ -55,6 +55,7 @@ nav:
       - "Installation steps": installation/installation-steps.md
       - "Machine requirements and models": installation/machine-requirements.md
       - "Dependency reproducibility": installation/dependency-reproducibility.md
+      - "Release validation": installation/release-validation.md
       - "Uninstall memory stack": installation/uninstall-memory-stack.md
   - "Spaces":
       - "Personal Space Documentation":

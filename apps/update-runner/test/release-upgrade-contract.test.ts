@@ -21,7 +21,7 @@ describe('release upgrade contract', () => {
       minimumSupportedSource: '1.0.0',
       compatibleMajorLine: 2,
       directFrom: `>=1.3.2 <${rootPackage.version}`,
-      bridges: [{ from: '>=1.3.2 <2.0.0', to: '2.0.0', requires: '>=1.3.2' }],
+      bridges: [{ from: `>=1.3.2 <${rootPackage.version}`, to: rootPackage.version, requires: '>=1.3.2' }],
       requiredStops: [{ when: '>=1.0.0 <1.3.2', release: '1.3.2' }],
       coordinator: { minimumVersion: 1, bootstrap: true },
     })
