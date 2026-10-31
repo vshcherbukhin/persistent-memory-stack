@@ -12,7 +12,8 @@
 | mcp / mcp-runtime | 2.0.1 | Describe bounded model warm-up accurately instead of implying the whole service is launching. |
 | dashboard / docs | 2.0.2 | Release metadata and embedding-readiness guidance. |
 | worker / shared | 2.0.1 | Existing embedding, storage and projection behavior retained. |
-| onboarding / database / schema / graph | 2.0.0 | Existing Community knowledge contracts and installation flow retained. |
+| onboarding | 2.0.1 | Pin patched filesystem-matching dependencies used by the installer static-file server. |
+| database / schema / graph | 2.0.0 | Existing Community knowledge contracts retained. |
 | security-dlp / update-runner / update-coordinator | 1.0.1 | Existing scanner and updater contracts retained. |
 
 - Renew the selected server-managed Ollama model's existing five-minute lease
@@ -27,6 +28,9 @@
 - Keep service/dashboard health inspection prompt. Missing models, invalid vectors
   and provider failures still fail safely. A warm-up that does not finish within
   the bounded wait remains retryable and reports model warming accurately.
+
+- Patch the onboarding static-file server's filesystem matcher dependencies to
+  address the newly reported glob and minimatch denial-of-service advisories.
 
 Preserves the configured provider, model, dimension, credentials, ownership,
 existing memories and Docker volumes. Uses the existing supported snapshot and
