@@ -76,8 +76,18 @@ export const memoryActivity = createMemoryActivity()
 export async function assertMemoryEmbeddingsReady(): Promise<void> {
   // Remote providers and client bridges retain their existing behavior.
   if (embeddingMode !== 'server' || embedder?.provider !== 'ollama') return
-  const readiness = await ollamaReadiness.inspect({ model: activePin.modelId, dim: activePin.dim })
+  const target = { model: activePin.modelId, dim: activePin.dim }
+  const readiness = await ollamaReadiness.waitUntilReady(target)
+  // A live model switch must not admit work on the old probe's result.
+  if (target.model !== activePin.modelId || target.dim !== activePin.dim) {
+    throw new EmbeddingsNotReadyError({ state: 'starting', message: 'The embedding model changed while warming up. Retry shortly.', observedAt: new Date(), readyAt: null })
+  }
   if (readiness.state !== 'ready') throw new EmbeddingsNotReadyError(readiness)
+}
+
+export function maintainMemoryEmbeddings(): () => void {
+  return ollamaReadiness.maintain(() => embeddingMode === 'server' && embedder?.provider === 'ollama'
+    ? { model: activePin.modelId, dim: activePin.dim } : null)
 }
 
 /** After authentication; fail before parsing/uploads, validation, provider calls or writes. */
@@ -93,7 +103,11 @@ export function registerMemoryRuntime(app: FastifyInstance, ensureReady = assert
     // Fastify onResponse. Finish is idempotent across all lifecycle events.
     reply.raw.once('close', () => { if (!reply.raw.writableFinished) request.finish('error') })
     reply.raw.once('error', () => request.finish('error'))
-    try { if (needsEmbeddingReadiness(req.method, req.routeOptions.url ?? '')) await ensureReady() } catch (error) {
+    try {
+      if (needsEmbeddingReadiness(req.method, req.routeOptions.url ?? '')) await ensureReady()
+      // Do not start a write after a caller gave up during the readiness wait.
+      if (req.raw.aborted || reply.raw.destroyed) return reply.hijack()
+    } catch (error) {
       request.starting = error instanceof EmbeddingsNotReadyError && error.readiness.state === 'starting'
       throw error
     }

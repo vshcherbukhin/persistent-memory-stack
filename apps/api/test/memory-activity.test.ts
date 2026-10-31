@@ -2,10 +2,59 @@ import Fastify from 'fastify'
 import { request as httpRequest } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import { createMemoryActivity, memoryOperation, registerMemoryRuntime } from '../src/services/memory-activity.ts'
-import { EmbeddingsNotReadyError } from '../src/services/ollama-readiness.ts'
+import { createOllamaReadiness, EmbeddingsNotReadyError } from '../src/services/ollama-readiness.ts'
 
 const owner = { teamId: 'team-a', userId: 'owner-a' }
 describe('private memory activity and startup gate', () => {
+  it('completes the original read and write once after a shared cold warm-up, without a caller retry', async () => {
+    const app = Fastify()
+    let finish!: (value: Response) => void
+    const target = { model: 'qwen3-embedding:4b', dim: 2 }
+    const readiness = createOllamaReadiness({ baseUrl: 'http://ollama', fetch: vi.fn(async url => String(url).endsWith('/api/embed')
+      ? new Promise<Response>(resolve => { finish = resolve })
+      : new Response(JSON.stringify({ models: [{ name: target.model }] }))) })
+    const read = vi.fn(async () => ({ found: true })), write = vi.fn(async () => ({ saved: true }))
+    app.addHook('onRequest', (req, _reply, done) => { req.identity = owner as typeof req.identity; done() })
+    registerMemoryRuntime(app, async () => {
+      const state = await readiness.waitUntilReady(target)
+      if (state.state !== 'ready') throw new EmbeddingsNotReadyError(state)
+    })
+    app.post('/memories/search', read); app.post('/memories', write)
+    try {
+      const reads = app.inject({ method: 'POST', url: '/memories/search', payload: {} }).then(value => value)
+      const writes = app.inject({ method: 'POST', url: '/memories', payload: {} }).then(value => value)
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+      expect(read).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+      finish(new Response(JSON.stringify({ embeddings: [[1, 2]] })))
+      expect((await reads).statusCode).toBe(200); expect((await writes).statusCode).toBe(200)
+      expect(read).toHaveBeenCalledTimes(1); expect(write).toHaveBeenCalledTimes(1)
+    } finally { await app.close() }
+  })
+
+  it('never starts a write when the client disconnects during readiness waiting', async () => {
+    const app = Fastify(), activity = createMemoryActivity()
+    let started!: () => void, complete!: () => void
+    const waiting = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<void>(resolve => { complete = resolve })
+    const handler = vi.fn(async () => ({ saved: true }))
+    app.addHook('onRequest', (req, _reply, done) => { req.identity = owner as typeof req.identity; done() })
+    registerMemoryRuntime(app, async () => { started(); await gate }, activity)
+    app.post('/memories', handler)
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = app.server.address() as { port: number }
+    const client = httpRequest({ hostname: '127.0.0.1', port: address.port, path: '/memories', method: 'POST', headers: { 'content-type': 'application/json' } })
+    client.on('error', () => {})
+    try {
+      client.end('{"synthetic":true}')
+      await waiting
+      client.destroy()
+      await vi.waitFor(() => expect(activity.snapshot(owner).write.active).toBe(0))
+      complete()
+      await new Promise(resolve => setTimeout(resolve, 25))
+      expect(handler).not.toHaveBeenCalled()
+    } finally { complete(); client.destroy(); await app.close() }
+  })
+
   it('classifies route templates without storing queries and excludes its own polling', () => {
     expect(memoryOperation('POST', '/memories/search')).toBe('read')
     expect(memoryOperation('POST', '/memories/search-by-entities')).toBe('read')

@@ -39,7 +39,7 @@ const API_URL = 'http://host.docker.internal:8090'
 it('returns actionable launch guidance without treating startup as a sixty-second transport timeout', () => {
   const error = ApiError.fromResponse(503, { error: 'embeddings_starting', retryable: true }, API_URL)
   expect(error.code).toBe('embeddings_starting')
-  expect(error.toAgentText()).toContain('still launching')
+  expect(error.toAgentText()).toContain('still warming up')
   expect(error.toAgentText()).toContain('no memory was saved or updated')
 })
 

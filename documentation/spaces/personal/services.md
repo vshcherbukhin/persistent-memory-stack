@@ -42,17 +42,22 @@ For server-managed Ollama embeddings, **Embeddings** and **ollama (host)** show
 installed model do not establish readiness: a small synthetic embedding must
 return a valid vector for the current pin. Concurrent requests share that probe.
 Residency is checked again after readiness, so an unloaded model returns to
-Starting. While the dashboard or memory clients use the stack, a small empty-input
-request refreshes the loaded model's five-minute lease shortly before it expires.
+Starting. While the API is running, a background check every 30 seconds refreshes the
+selected model's five-minute lease shortly before it expires, even with the
+dashboard closed and no agent requests. A small empty-input request renews it.
 It performs no text embedding and does not turn a healthy model back to Starting.
-After activity ends, the normal idle expiry still applies. This changes no pin,
+The loop follows the live model pin and stops when the API closes; normal idle
+expiry then releases the model. This changes no pin,
 provider or global host setting. An initially unreachable host has a two-minute startup
 grace before showing unavailable; a previously ready host that disappears is
 unavailable immediately after the next residency check.
 
-Memory operations during startup return a retryable `embeddings_starting`
-response before validation or storage begins. Retry shortly; the operation is
-not queued or replayed. SQL-only Overview statistics remain readable during
+Memory operations can wait up to 35 seconds for a shared model warm-up before
+validation or storage begins. The original request proceeds once the configured
+model returns a valid vector. A caller that disconnects during this wait cannot
+start a write afterward. If warm-up still has not succeeded, the API returns a
+retryable `embeddings_starting` response; no operation is queued or replayed.
+SQL-only Overview statistics remain readable during
 startup; a warming embedding runner does not make saved records disappear or
 prove the graph service is down. The normal MCP request timeout remains 60 seconds.
 

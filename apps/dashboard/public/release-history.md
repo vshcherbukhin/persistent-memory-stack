@@ -2,6 +2,47 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 2.0.2 - 2026-10-31
+
+[GitHub release v2.0.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.2)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| api | 2.0.2 | Keep the selected local embedding model warm without dashboard activity; let the original memory request await shared model warm-up before any work begins. |
+| mcp / mcp-runtime | 2.0.1 | Describe bounded model warm-up accurately instead of implying the whole service is launching. |
+| dashboard / docs | 2.0.2 | Release metadata and embedding-readiness guidance. |
+| worker / shared | 2.0.1 | Existing embedding, storage and projection behavior retained. |
+| onboarding / database / schema / graph | 2.0.0 | Existing Community knowledge contracts and installation flow retained. |
+| security-dlp / update-runner / update-coordinator | 1.0.1 | Existing scanner and updater contracts retained. |
+
+- Renew the selected server-managed Ollama model's existing five-minute lease
+  from an API-owned background check every 30 seconds. Dashboard tabs and agent
+  requests no longer need to arrive just before expiry to prevent idle unloads.
+  The loop follows the current model pin and stops when the API closes. It does
+  not change global Ollama settings, pull models, or pin them permanently.
+- When a cold or evicted model needs loading, memory requests can wait up to
+  35 seconds on the shared readiness probe before validation, parsing or storage.
+  The original request proceeds once readiness succeeds; writes are never replayed.
+  A disconnected caller cannot start a write after its readiness wait finishes.
+- Keep service/dashboard health inspection prompt. Missing models, invalid vectors
+  and provider failures still fail safely. A warm-up that does not finish within
+  the bounded wait remains retryable and reports model warming accurately.
+
+Preserves the configured provider, model, dimension, credentials, ownership,
+existing memories and Docker volumes. Uses the existing supported snapshot and
+upgrade path. The Stream MCP service is updated automatically; reconnect an agent
+if it retains a closed transport after the update.
+
+To update, run from the repository directory:
+
+```sh
+npm run update-persistent-memory -- --release 2.0.2
+```
+
+Windows PowerShell: `npm.cmd run update-persistent-memory -- --release 2.0.2`.
+For a new installation, follow the
+[v2.0.2 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.2/README.md).
+
 ## 2.0.1 - 2026-10-29
 
 [GitHub release v2.0.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.1)

@@ -9,11 +9,11 @@ export type OllamaReadiness = {
   readyAt: Date | null
 }
 
-const STARTING = 'Embeddings service is still launching. Please try again shortly.'
+const STARTING = 'The embedding model is warming up. Please try again shortly.'
 const sameModel = (left: string, right: string) => left.replace(/:latest$/, '') === right.replace(/:latest$/, '')
 
 /** Residency is cheap to check; a real, synthetic embedding establishes readiness.
- * Callers never wait for model loading, and concurrent callers share one warm-up.
+ * Dashboard inspection stays prompt; memory callers can await the shared warm-up.
  * No user text, configuration changes, model pulls or permanent keep-alive.
  */
 export function createOllamaReadiness(options: {
@@ -101,7 +101,7 @@ export function createOllamaReadiness(options: {
     })()
   }
 
-  return {
+  const readiness = {
     async inspect(target: OllamaTarget): Promise<OllamaReadiness> {
       const key = `${target.model}|${target.dim}`
       if (active?.key !== key) active = { key, entry: { value: { state: 'starting', message: STARTING, observedAt: new Date(now()), readyAt: null }, checkedAt: -Infinity, createdAt: now(), hasReady: false, lastLeaseAttempt: -Infinity } }
@@ -134,7 +134,35 @@ export function createOllamaReadiness(options: {
       })()
       return entry.check
     },
+    async waitUntilReady(target: OllamaTarget, timeoutMs = 35_000): Promise<OllamaReadiness> {
+      const value = await readiness.inspect(target)
+      if (value.state !== 'starting' || active?.key !== `${target.model}|${target.dim}` || !active.entry.warming || timeoutMs <= 0) return value
+      const entry = active.entry
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          entry.warming,
+          new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs) }),
+        ])
+        return entry.value
+      } finally { clearTimeout(timer) }
+    },
+    /** One API-owned lease loop, independent of browser activity. Resolve the
+     * live pin each tick so a model switch never keeps the old pin warm.
+     * Closing the API stops renewal; normal Ollama expiry then releases memory.
+     */
+    maintain(getTarget: () => OllamaTarget | null): () => void {
+      const tick = () => {
+        const target = getTarget()
+        if (target) void readiness.inspect(target).catch(() => {})
+      }
+      tick()
+      const timer = setInterval(tick, 30_000)
+      timer.unref()
+      return () => clearInterval(timer)
+    },
   }
+  return readiness
 }
 
 export const ollamaReadiness = createOllamaReadiness({ baseUrl: config.OLLAMA_URL })
