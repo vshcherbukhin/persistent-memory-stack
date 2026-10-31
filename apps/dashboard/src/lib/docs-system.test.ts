@@ -429,7 +429,7 @@ describe('dashboard documentation integration', () => {
     expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('retired in Community')
     expect(dashboardDocumentationFor('local-shared-client')[0].markdown).toContain('do not activate')
     expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('retired in Community')
-    expect(dashboardDocumentationFor('shared-server')[0].markdown).toContain('outside\nactive personal recall')
+    expect(dashboardDocumentationFor('shared-server')[0].markdown.replace(/\r\n/g, '\n')).toContain('outside\nactive personal recall')
     expect(guide).toContain('dashboardGuideSources')
     expect(guide).toContain('dashboard_space')
     expect(guide).not.toContain('FALLBACK_TOPICS')

@@ -3,6 +3,18 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 2.0.2 - 2026-10-31
+
+[GitHub release v2.0.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.2)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| documentation | 2.0.2 | Explain API-owned embedding lease renewal, bounded memory readiness waits, and safe caller-disconnect behavior. |
+
+Update the Services guide to distinguish model warm-up from whole-stack startup.
+Document that the API renews the current local model lease without dashboard or
+agent activity, and stops renewal on shutdown without changing global Ollama settings.
+
 ## 2.0.1 - 2026-10-29
 
 [GitHub release v2.0.1](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.1)

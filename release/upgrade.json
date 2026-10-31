@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "release": "2.0.1",
+  "release": "2.0.2",
   "minimumSupportedSource": "1.0.0",
   "compatibleMajorLine": 2,
-  "directFrom": ">=1.3.2 <2.0.1",
+  "directFrom": ">=1.3.2 <2.0.2",
   "bridges": [
     {
-      "from": ">=1.3.2 <2.0.1",
-      "to": "2.0.1",
+      "from": ">=1.3.2 <2.0.2",
+      "to": "2.0.2",
       "requires": ">=1.3.2",
       "reason": "Owner-preserving personal knowledge migration and explicit memory-tool contract v2."
     }

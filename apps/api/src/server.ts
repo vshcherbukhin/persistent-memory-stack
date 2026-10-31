@@ -10,7 +10,7 @@ import { buildApp } from './app.ts'
 import { config } from './config.ts'
 import { qdrant, activePin } from './services/embedding.ts'
 import { ensureLocalIdentity } from './auth/local-mode.ts'
-import { assertMemoryEmbeddingsReady } from './services/memory-activity.ts'
+import { maintainMemoryEmbeddings } from './services/memory-activity.ts'
 
 // Initialize @pm/db BEFORE anything touches the clients (runInTenant reads
 // `prisma` at call time, so this must run before the first request). Synchronous,
@@ -62,10 +62,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    await app.listen({ host: '0.0.0.0', port: config.API_PORT })
     // Begin warming without delaying API/dashboard liveness or accepting memory
     // operations before the first successful embedding readiness probe.
-    void assertMemoryEmbeddingsReady().catch(() => {})
+    const stopMaintaining = maintainMemoryEmbeddings()
+    app.addHook('onClose', async () => { stopMaintaining() })
+    await app.listen({ host: '0.0.0.0', port: config.API_PORT })
   } catch (err) {
     app.log.error(err)
     process.exit(1)

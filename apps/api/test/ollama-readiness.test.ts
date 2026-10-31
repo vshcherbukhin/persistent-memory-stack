@@ -7,6 +7,64 @@ const models = { models: [{ name: target.model }] }
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
 
 describe('Ollama readiness', () => {
+  it('keeps the live pin resident through idle periods without dashboard or memory requests, and releases renewal on close', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    let expiresAt = 0
+    const bodies: Array<{ model: string; input: string[] }> = []
+    let targetNow = target
+    const readiness = createOllamaReadiness({ baseUrl: 'http://ollama', fetch: vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/embed')) {
+        const body = JSON.parse(String(init?.body)); bodies.push(body)
+        expiresAt = Date.now() + 300_000
+        return response({ embeddings: body.input.length ? [[1, 2]] : [] })
+      }
+      return response({ models: [{ name: targetNow.model, expires_at: new Date(expiresAt).toISOString() }] })
+    }) })
+    const stop = readiness.maintain(() => targetNow)
+    try {
+      await vi.advanceTimersByTimeAsync(720_000)
+      expect(bodies.filter(body => body.input.length > 0)).toHaveLength(1)
+      expect(bodies.filter(body => body.input.length === 0).length).toBeGreaterThanOrEqual(2)
+      expect(expiresAt).toBeGreaterThan(Date.now())
+      targetNow = { ...target, model: 'nomic-embed-text' }
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(bodies.at(-1)?.model).toBe('nomic-embed-text')
+      stop()
+      const count = bodies.length
+      await vi.advanceTimersByTimeAsync(360_000)
+      expect(bodies).toHaveLength(count)
+      expect(expiresAt).toBeLessThan(Date.now())
+    } finally { stop(); vi.useRealTimers() }
+  })
+
+  it('lets concurrent first memory requests await one warm-up while dashboard inspection stays prompt', async () => {
+    let finish!: (value: Response) => void
+    const request = vi.fn(async (url: string | URL | Request) => String(url).endsWith('/api/embed')
+      ? new Promise<Response>(resolve => { finish = resolve }) : response(models))
+    const readiness = createOllamaReadiness({ baseUrl: 'http://ollama', fetch: request })
+    expect((await readiness.inspect(target)).state).toBe('starting')
+    const waiting = Array.from({ length: 5 }, () => readiness.waitUntilReady(target))
+    expect((await readiness.inspect(target)).state).toBe('starting')
+    finish(response({ embeddings: [[1, 2]] }))
+    expect((await Promise.all(waiting)).every(value => value.state === 'ready')).toBe(true)
+    expect(request.mock.calls.filter(([url]) => String(url).endsWith('/api/embed'))).toHaveLength(1)
+  })
+
+  it('bounds memory waiting without claiming readiness or cancelling another caller shared warm-up', async () => {
+    vi.useFakeTimers()
+    let finish!: (value: Response) => void
+    const readiness = createOllamaReadiness({ baseUrl: 'http://ollama', fetch: vi.fn(async url => String(url).endsWith('/api/embed')
+      ? new Promise<Response>(resolve => { finish = resolve }) : response(models)) })
+    try {
+      const waiting = readiness.waitUntilReady(target, 200)
+      await vi.advanceTimersByTimeAsync(200)
+      expect((await waiting).state).toBe('starting')
+      finish(response({ embeddings: [[1, 2]] }))
+      expect((await readiness.waitUntilReady(target)).state).toBe('ready')
+    } finally { vi.useRealTimers() }
+  })
+
   it('refreshes a near-expiry resident lease without inference, waiting, or another Starting transition', async () => {
     let time = 0, expiresAt = 300_000
     let finishLease!: (response: Response) => void
