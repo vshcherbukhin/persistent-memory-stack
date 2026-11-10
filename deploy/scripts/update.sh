@@ -1112,7 +1112,7 @@ if compose_build_with_handoff "dashboard gateway" "46" "52" dashboard-gateway; t
     ok "Dashboard gateway image rebuilt."
     dashboard_handoff_write "rebuilding-dashboard" "Starting the refreshed dashboard gateway." "" "53" \
         "deploy" "running" "dashboard gateway" "Starting the refreshed dashboard gateway."
-    "${COMPOSE[@]}" up -d --no-deps dashboard-gateway >/dev/null \
+    "${COMPOSE[@]}" up -d --no-deps dashboard-gateway \
         && wait_for_gateway_ready \
         || { fail "Could not refresh dashboard-gateway."; exit 1; }
 else
