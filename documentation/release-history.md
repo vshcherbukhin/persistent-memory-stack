@@ -3,6 +3,18 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 2.0.3 - 2026-11-10
+
+[GitHub release v2.0.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.3)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| documentation | 2.0.3 | Explain shared runtime-file resolution across release hops and recovery of an already-failed pinned update. |
+
+Document how to refresh an older updater checkout, finish an existing 2.0.2 plan
+without deleting recovery state, and then update to 2.0.3. Missing configuration
+must be restored from the existing installation rather than regenerated.
+
 ## 2.0.2 - 2026-10-31
 
 [GitHub release v2.0.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.2)

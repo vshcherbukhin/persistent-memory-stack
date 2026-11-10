@@ -2,6 +2,47 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 2.0.3 - 2026-11-10
+
+[GitHub release v2.0.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.3)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| update-coordinator | 1.0.2 | Pass the installed runtime configuration to every intermediate and final release hop; reject missing configuration before snapshot or deployment. |
+| dashboard / docs | 2.0.3 | Release metadata and safe recovery guidance for failed multi-hop updates. |
+| api | 2.0.2 | Existing embedding-readiness behavior retained. |
+| worker / shared / onboarding / mcp / mcp-runtime | 2.0.1 | Existing storage, installer and memory-tool behavior retained. |
+| database / schema / graph | 2.0.0 | Existing Community knowledge contracts retained. |
+| security-dlp / update-runner | 1.0.1 | Existing scanner and release-discovery contracts retained. |
+
+- Fix updates from older Community installations that must stop at 1.3.2 before
+  upgrading to the current release. Compose now receives the same validated
+  absolute runtime-file path for interpolation and service environment loading.
+  Pristine or reused intermediate worktrees no longer require copied credentials.
+- Use the source installation's snapshot-backed configuration and fail clearly if the
+  installed configuration is missing or unreadable. No replacement is generated.
+- Keep dashboard gateway startup output visible so Compose failures can be diagnosed.
+
+Existing memories, credentials, ownership, Docker volumes and published-release
+commit checks are preserved. The upgrade path still requires the 1.3.2 baseline.
+
+Update the updater checkout before running an update from older source code:
+
+```sh
+git fetch origin tag v2.0.3
+git merge --ff-only v2.0.3
+npm run update-persistent-memory -- --release 2.0.3
+```
+
+If a previous 2.0.2 update failed at 1.3.2, after refreshing the checkout first
+rerun `npm run update-persistent-memory -- --release 2.0.2` to finish its
+saved plan, then run the 2.0.3 command. Keep `.env.persistent-memory`, recovery
+state and backups intact. If Git cannot fast-forward, preserve local changes
+and resolve the checkout before retrying. On Windows PowerShell use `npm.cmd`.
+
+For a new installation, follow the
+[v2.0.3 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.3/README.md).
+
 ## 2.0.2 - 2026-10-31
 
 [GitHub release v2.0.2](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.2)
