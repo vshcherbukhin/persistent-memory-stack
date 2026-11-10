@@ -2,6 +2,53 @@
 
 <!-- persistent-memory-release-line: public-v1 -->
 
+## 2.0.4 - 2026-11-10
+
+[GitHub release v2.0.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.4)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| installer / updater verification | 2.0.4 | Compare platform image manifests correctly and stop updates on required failures. |
+| dashboard / docs | 2.0.4 | Release metadata and trustworthy verification/recovery guidance. |
+| api | 2.0.2 | Existing embedding-readiness behavior retained. |
+| update-coordinator | 1.0.2 | Existing runtime-file and immutable-hop contracts retained. |
+| worker / shared / onboarding / mcp / mcp-runtime | 2.0.1 | Existing storage, installer and memory-tool behavior retained. |
+| database / schema / graph | 2.0.0 | Existing Community knowledge contracts retained. |
+| security-dlp / update-runner | 1.0.1 | Existing scanner and release-discovery contracts retained. |
+
+- Fix false image mismatches on Docker's containerd image store. Resolve the
+  selected platform of an OCI image index and compare its immutable manifest
+  with the running container's manifest. Retain classic image-ID compatibility.
+  Matching labels or an index alone cannot bypass a genuine image mismatch.
+- Preserve checks for unhealthy services, restarts, missing images, unsupported
+  image metadata and bounded initial health waits. Verification remains read-only.
+- Stop the updater if required runtime restart, installation verification or
+  graph preservation fails, or the verification script is unavailable. Preserve
+  the actual exit status in failure handlers and publish a failed dashboard state.
+- Replace the successful-update record atomically, preserving the previous
+  record even if a temporary write fails. Print
+  `Update complete` only after verification, registration, dashboard readiness
+  and successful completion-state writing. Remove the generic startup/retry tip.
+
+Memories, credentials, snapshots and Docker volumes are preserved. No image
+rebuild or container restart is needed merely to resolve the false mismatch.
+
+Refresh the calling updater checkout so it uses the corrected completion logic:
+
+```sh
+git fetch origin tag v2.0.4
+git merge --ff-only v2.0.4
+npm run update-persistent-memory -- --release 2.0.4
+```
+
+If Git cannot fast-forward, preserve local changes and resolve the checkout
+before continuing. An unfinished update remains pinned to its original target;
+review and finish that plan before selecting a new one. Never delete recovery
+state to bypass a failed check. On Windows PowerShell use `npm.cmd`.
+
+For a new installation, follow the
+[v2.0.4 installation instructions](https://github.com/vshcherbukhin/persistent-memory-stack/blob/v2.0.4/README.md).
+
 ## 2.0.3 - 2026-11-10
 
 [GitHub release v2.0.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.3)

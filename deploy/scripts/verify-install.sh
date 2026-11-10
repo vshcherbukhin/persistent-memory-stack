@@ -375,7 +375,6 @@ if [ "$FAIL" -eq 0 ]; then
     exit 0
 else
     echo -e "  ${RED}$FAIL check(s) failed. Review above for details.${NC}"
-    echo -e "  ${CYAN}Tip: a fresh 'starting' health state often clears on a re-run.${NC}"
     echo ""
     exit 1
 fi

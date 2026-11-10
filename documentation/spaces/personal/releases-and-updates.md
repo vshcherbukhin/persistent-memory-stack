@@ -76,6 +76,38 @@ Compose interpolation and service environment loading. It does not copy secrets
 into intermediate worktrees. Both paths use the source installation's
 `.env.persistent-memory`, matching the protected pre-update snapshot.
 
+### Verification and completion
+
+The image verifier checks the running platform-specific image manifest when
+Docker exposes an OCI image index. It also supports classic image IDs. A raw
+index ID, config ID and platform manifest ID can differ for the same valid image;
+matching Compose labels alone never establish image identity. If platform
+inspection is unavailable or metadata cannot prove identity, verification fails
+with the affected service and a diagnostic. OCI index inspection requires Docker
+CLI/Engine support for `image inspect --platform` (Engine API 1.49 or later).
+
+Required runtime restart, graph preservation and installation verification must
+all succeed. A missing verifier also blocks completion. On failure the updater
+exits unsuccessfully, publishes the failed dashboard handoff and retains the
+previous successful-update record, backups and recovery state. It prints
+`Update complete` only after the remaining registration/readiness checks and
+completion-state write succeed. The verifier waits for initial service health
+within its existing bound; genuine unhealthy or restarting services still fail.
+The successful-update record is replaced atomically, so a failed or partial
+temporary write leaves the previous accepted record intact.
+
+To load the corrected updater from an older calling checkout, run from the
+original installation directory:
+
+```sh
+git fetch origin tag v2.0.4
+git merge --ff-only v2.0.4
+npm run update-persistent-memory -- --release 2.0.4
+```
+
+Preserve local changes if Git cannot fast-forward. Keep any unfinished plan
+pinned to its original target and finish that plan before requesting a new one.
+
 ### Recovering an older multi-hop updater
 
 Version 2.0.3 repairs a failure where an update from 1.2.0 stopped at 1.3.2 with
