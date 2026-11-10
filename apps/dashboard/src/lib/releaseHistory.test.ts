@@ -14,10 +14,10 @@ describe('release history UI parsing', () => {
     expect(rootPackage.persistentMemoryReleaseLine).toBe('public-v1')
     expect(rootHistory).toContain('<!-- persistent-memory-release-line: public-v1 -->')
     const cards = parseReleaseHistoryForUi(dashboardHistory)
-    expect(cards).toHaveLength(14)
+    expect(cards).toHaveLength(15)
     expect(cards[0]).toMatchObject({ version: APP_VERSION, latest: true })
     expect(cards.slice(1).map(card => ({version: card.version, latest: card.latest}))).toEqual(
-      ['2.0.2', '2.0.1', '2.0.0', '1.3.2', '1.3.1', '1.3.0', '1.2.0', '1.1.4', '1.1.3', '1.1.2', '1.1.1', '1.1.0', '1.0.0'].map(version => ({version, latest: false})),
+      ['2.0.3', '2.0.2', '2.0.1', '2.0.0', '1.3.2', '1.3.1', '1.3.0', '1.2.0', '1.1.4', '1.1.3', '1.1.2', '1.1.1', '1.1.0', '1.0.0'].map(version => ({version, latest: false})),
     )
     expect(cards[0]!.services.length).toBeGreaterThan(0)
     expect(cards[0]!.services).toEqual(expect.arrayContaining([

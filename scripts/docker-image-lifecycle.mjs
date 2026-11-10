@@ -9,6 +9,8 @@ const OWNER = 'io.persistent-memory.install.owner'
 const ATTEMPT = 'io.persistent-memory.install.attempt'
 const KIND = 'io.persistent-memory.install.kind'
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/
+const MANIFEST_TYPES = new Set(['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'])
+const INDEX_TYPES = new Set(['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'])
 const CONTAINER_ID = /^[a-f0-9]{64}$/
 const STORAGE_FAILURE = /no space left|ENOSPC|input\/output error|I\/O error|bbolt|read-only file system|disk quota/i
 const CORRUPT_BUILD = /unexpected EOF|checksum|corrupt|missing blob|failed to (?:extract|register layer)|invalid tar|content digest.*not found/i
@@ -137,8 +139,8 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
   const ledger = existsSync(ledgerPath) ? readJson(ledgerPath) : empty
   if (ledger.version !== 1 || ledger.owner !== owner || ledger.project !== config.name || !['images', 'containers', 'volumes', 'attempts'].every(key => Array.isArray(ledger[key]))) throw new Error('Installer resource ledger is invalid or belongs to another checkout; resources preserved.')
   const save = () => atomicJson(ledgerPath, ledger)
-  const inspectImage = async reference => {
-    const result = await execute(['image', 'inspect', reference])
+  const inspectImage = async (reference, platform) => {
+    const result = await execute(['image', 'inspect', ...(platform ? ['--platform', platform] : []), reference])
     if (result.code !== 0) {
       if (/no such image|not found/i.test(result.stderr)) return null
       const error = failure('image metadata', result)
@@ -303,9 +305,39 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
     for (const [name, service] of services) {
       const image = await inspectImage(service.image)
       if (!image) throw new Error(`Required image is missing for ${name}; rerun installation image preparation.`)
-      const running = containers.find(container => container.Image === image.Id && container.State?.Running && container.Config?.Labels?.['com.docker.compose.project'] === config.name && container.Config?.Labels?.['com.docker.compose.service'] === name)
+      // Container.Image may be a legacy config digest while image inspect Id
+      // identifies an OCI index. Compare the selected platform's immutable
+      // manifest when Docker supplies descriptors; never trust Compose labels
+      // or a shared index alone as proof that the platform image matches.
+      const isIndex = INDEX_TYPES.has(image.Descriptor?.mediaType)
+      let selected = image
+      if (isIndex) {
+        const platform = service.platform ?? [image.Os, image.Architecture, image.Variant].filter(Boolean).join('/')
+        if (!/^linux\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)?$/.test(platform)) throw new Error(`Cannot determine the required image platform for ${name}. Inspect Docker image metadata before retrying.`)
+        try { selected = await inspectImage(service.image, platform) } catch {
+          throw new Error(`Cannot inspect the required platform image for ${name} (${platform}). Check Docker CLI/Engine platform inspection support before retrying.`)
+        }
+        const [os, arch, variant] = platform.split('/')
+        const architecture = value => ({ x86_64: 'amd64', aarch64: 'arm64' })[value] ?? value
+        const variantFor = (arch, value) => value || (architecture(arch) === 'arm64' ? 'v8' : '')
+        const matchesPlatform = value => value?.os === os && architecture(value.architecture) === architecture(arch)
+          && (!variant || variantFor(value.architecture, value.variant) === variantFor(arch, variant))
+        if (!matchesPlatform({ os: selected?.Os, architecture: selected?.Architecture, variant: selected?.Variant ?? selected?.Descriptor?.platform?.variant })
+            || (selected?.Descriptor?.platform && !matchesPlatform(selected.Descriptor.platform))) {
+          throw new Error(`Cannot prove the required image platform for ${name} (${platform}). Inspect Docker image metadata before retrying.`)
+        }
+      }
+      const descriptor = selected?.Descriptor
+      const manifest = MANIFEST_TYPES.has(descriptor?.mediaType) && IMAGE_ID.test(descriptor?.digest ?? '') ? descriptor.digest : undefined
+      if ((isIndex || image.Descriptor != null) && !manifest) throw new Error(`Cannot prove the required platform image identity for ${name}. Inspect Docker image metadata before retrying.`)
+      const matches = container => {
+        const actual = container.ImageManifestDescriptor
+        if (manifest && actual != null) return MANIFEST_TYPES.has(actual.mediaType) && IMAGE_ID.test(actual.digest ?? '') && actual.digest === manifest
+        return !isIndex && container.Image === image.Id
+      }
+      const running = containers.find(container => matches(container) && container.State?.Running && container.Config?.Labels?.['com.docker.compose.project'] === config.name && container.Config?.Labels?.['com.docker.compose.service'] === name)
       if (!running || running.State?.Restarting || (running.State?.Health && !['healthy', 'starting'].includes(running.State.Health.Status))) throw new Error(`Service ${name} is not running the validated current image or is unhealthy/restarting. Inspect its logs before retrying; do not delete data volumes.`)
-      observed.push({ name, id: running.Id, image: image.Id, restarts: Number(running.RestartCount ?? 0) })
+      observed.push({ name, id: running.Id, image: running.Image, manifest: running.ImageManifestDescriptor?.digest, restarts: Number(running.RestartCount ?? 0) })
     }
     // Compose startup and the MCP health gate do not wait for independent
     // services (for example the dashboard or worker) to finish their first
@@ -317,7 +349,7 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
       const starting = []
       for (const item of observed) {
         const current = sample.find(container => container.Id === item.id)
-        if (!current || current.Image !== item.image || !current.State?.Running || current.State?.Restarting || Number(current.RestartCount ?? 0) > item.restarts) throw new Error(`Service ${item.name} restarted or became unavailable during image verification. Inspect its logs and Docker storage; user data volumes were preserved.`)
+        if (!current || current.Image !== item.image || current.ImageManifestDescriptor?.digest !== item.manifest || !current.State?.Running || current.State?.Restarting || Number(current.RestartCount ?? 0) > item.restarts) throw new Error(`Service ${item.name} restarted or became unavailable during image verification. Inspect its logs and Docker storage; user data volumes were preserved.`)
         const health = current.State?.Health?.Status
         if (health === 'starting') starting.push(item.name)
         else if (health && health !== 'healthy') throw new Error(`Service ${item.name} is unhealthy during image verification. Inspect its logs before retrying; user data volumes were preserved.`)
@@ -334,7 +366,7 @@ async function runImageLifecycle({ root, mode, env = process.env, run = dockerCo
     const second = await allContainers()
     for (const item of observed) {
       const current = second.find(container => container.Id === item.id)
-      if (!current || current.Image !== item.image || !current.State?.Running || current.State?.Restarting || (current.State?.Health && current.State.Health.Status !== 'healthy') || Number(current.RestartCount ?? 0) > item.restarts) throw new Error(`Service ${item.name} restarted or became unavailable during image verification. Inspect its logs and Docker storage; user data volumes were preserved.`)
+      if (!current || current.Image !== item.image || current.ImageManifestDescriptor?.digest !== item.manifest || !current.State?.Running || current.State?.Restarting || (current.State?.Health && current.State.Health.Status !== 'healthy') || Number(current.RestartCount ?? 0) > item.restarts) throw new Error(`Service ${item.name} restarted or became unavailable during image verification. Inspect its logs and Docker storage; user data volumes were preserved.`)
     }
     emit(`Validated metadata, running image identity and restart stability for ${services.length} required services.`)
     return { ok: true }

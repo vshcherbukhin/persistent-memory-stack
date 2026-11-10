@@ -3,6 +3,18 @@ nav_hidden: true
 ---
 # Documentation Release History
 
+## 2.0.4 - 2026-11-10
+
+[GitHub release v2.0.4](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.4)
+
+| Service | Version | Change |
+| --- | --- | --- |
+| documentation | 2.0.4 | Explain platform-aware image verification, required completion gates and preserved failure/recovery state. |
+
+Document that required failures stop the update and prevent a new success marker
+or completion banner. Explain the one-time updater checkout refresh and retain
+the existing pinned-target recovery procedure.
+
 ## 2.0.3 - 2026-11-10
 
 [GitHub release v2.0.3](https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/v2.0.3)

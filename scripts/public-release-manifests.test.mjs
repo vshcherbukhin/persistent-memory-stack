@@ -59,7 +59,7 @@ test('terminal state writers mark new handoff and successful update artifacts', 
       assert.match(body, /PM_PUBLIC_SOURCE_FILE="\$(?:SCRIPT_REPO_ROOT|REPO_ROOT)\/layers\/update-ops\/update-flow\/public-source\.json"/)
       const script = /node -e '([\s\S]*?)\n'/u.exec(body)?.[1]
       assert.ok(script)
-      const result = spawnSync(process.execPath, ['-e', script], { env: { ...process.env, ...env, PM_PUBLIC_SOURCE_FILE: join(root, 'layers/update-ops/update-flow/public-source.json') }, encoding: 'utf8', windowsHide: true })
+      const result = spawnSync(process.execPath, ['-e', script], { env: { ...process.env, ...env, PM_PUBLIC_SOURCE_FILE: join(root, 'layers/update-ops/update-flow/public-source.json'), MARKER_WRITER_FILE: join(root, 'scripts/docker-image-lifecycle.mjs') }, encoding: 'utf8', windowsHide: true })
       assert.equal(result.status, 0, result.stderr)
       assert.equal(JSON.parse(readFileSync(join(directory, output), 'utf8')).releaseLine, source.releaseLine)
     }
