@@ -363,6 +363,85 @@ test('verify is read-only and catches restart loops and wrong image identities',
   await assert.rejects(f.invoke('verify'), /validated current image/)
 })
 
+function manifestFixture(t, { index = true, platform = 'linux/amd64', inspectFailure } = {}) {
+  const digest = id(800)
+  const descriptor = { digest, mediaType: 'application/vnd.oci.image.manifest.v1+json', platform: { os: 'linux', architecture: 'amd64' } }
+  const selected = { Id: digest, Os: 'linux', Architecture: 'amd64', Descriptor: descriptor }
+  const f = fixture(t, { onlyApp: true, intercept: args => args[0] === 'image' && args.includes('--platform') ? inspectFailure ?? success([selected]) : null })
+  f.old.Architecture = 'amd64'
+  f.old.Descriptor = index ? { digest: f.old.Id, mediaType: 'application/vnd.oci.image.index.v1+json' } : descriptor
+  f.config.services['update-runner'].platform = platform
+  const runtime = { Id: cid(950), Image: id(700), ImageManifestDescriptor: structuredClone(descriptor), RestartCount: 0,
+    Config: { Labels: { 'com.docker.compose.project': f.config.name, 'com.docker.compose.service': 'update-runner', 'com.docker.compose.image': digest } },
+    State: { Running: true, Restarting: false, Health: { Status: 'healthy' } }, Mounts: [] }
+  f.containers.set(runtime.Id, runtime)
+  return { ...f, runtime, selected }
+}
+
+for (const index of [true, false]) {
+  test(`verification accepts matching platform manifests with different config/tag IDs (index=${index})`, async t => {
+    const f = manifestFixture(t, { index })
+    const before = readFileSync(join(f.root, '.env.persistent-memory'))
+    await f.invoke('verify')
+    const inspect = f.calls.find(call => call.args.includes('--platform'))
+    if (index) assert.deepEqual(inspect.args, ['image', 'inspect', '--platform', 'linux/amd64', 'fixture-updater:latest'])
+    else assert.equal(inspect, undefined)
+    assert.ok(f.calls.every(call => call.args[0] === 'ps' || call.args.includes('inspect') || call.args.includes('config')))
+    assert.equal(existsSync(join(f.root, '.local')), false, 'verification must not create a ledger or modify the installation')
+    assert.deepEqual(readFileSync(join(f.root, '.env.persistent-memory')), before)
+  })
+}
+
+test('verification resolves the image native platform when Compose does not specify one', async t => {
+  const f = manifestFixture(t)
+  delete f.config.services['update-runner'].platform
+  f.old.Architecture = 'arm64'; f.old.Variant = 'v8'
+  f.selected.Architecture = 'arm64'; f.selected.Descriptor.platform.architecture = 'arm64'; f.selected.Descriptor.platform.variant = 'v8'
+  await f.invoke('verify')
+  assert.ok(f.calls.some(call => call.args.includes('linux/arm64/v8')))
+})
+
+test('verification rejects a matching digest reported for the wrong platform', async t => {
+  const f = manifestFixture(t)
+  f.selected.Descriptor.platform.architecture = 'arm64'
+  await assert.rejects(f.invoke('verify'), /Cannot prove the required image platform/)
+})
+
+for (const defect of ['wrong-manifest', 'missing-manifest', 'malformed-manifest', 'wrong-media-type']) {
+  test(`verification rejects ${defect} even with matching index IDs and Compose image labels`, async t => {
+    const f = manifestFixture(t)
+    f.runtime.Image = f.old.Id
+    if (defect === 'wrong-manifest') f.runtime.ImageManifestDescriptor.digest = id(999)
+    if (defect === 'missing-manifest') delete f.runtime.ImageManifestDescriptor
+    if (defect === 'malformed-manifest') f.runtime.ImageManifestDescriptor.digest = 'not-an-immutable-digest'
+    if (defect === 'wrong-media-type') f.runtime.ImageManifestDescriptor.mediaType = 'application/vnd.oci.image.index.v1+json'
+    await assert.rejects(f.invoke('verify'), /validated current image/)
+  })
+}
+
+test('verification fails clearly when platform inspection is unavailable instead of accepting index labels', async t => {
+  const f = manifestFixture(t, { inspectFailure: failed('unknown flag: --platform') })
+  await assert.rejects(f.invoke('verify'), /Cannot inspect the required platform image.*Docker CLI\/Engine/)
+})
+
+test('verification rejects unresolved or invalid platform image descriptors', async t => {
+  const f = manifestFixture(t)
+  f.selected.Descriptor.digest = 'invalid'
+  await assert.rejects(f.invoke('verify'), /Cannot prove the required platform image identity/)
+})
+
+for (const defect of ['unhealthy', 'restarting', 'restart-increase', 'manifest-changed']) {
+  test(`matching platform identity does not hide ${defect}`, async t => {
+    const f = manifestFixture(t)
+    if (defect === 'unhealthy') f.runtime.State.Health.Status = 'unhealthy'
+    if (defect === 'restarting') f.runtime.State.Restarting = true
+    await assert.rejects(f.invoke('verify', { pause: async () => {
+      if (defect === 'restart-increase') f.runtime.RestartCount++
+      if (defect === 'manifest-changed') f.runtime.ImageManifestDescriptor.digest = id(999)
+    } }), /unhealthy\/restarting|restarted or became unavailable/)
+  })
+}
+
 test('another active image operation is rejected before any Docker commands', async t => {
   const f = fixture(t)
   mkdirSync(join(f.root, '.local/install-artifacts'), { recursive: true })

@@ -506,16 +506,14 @@ release_coordinator_reservation() {
 }
 
 dashboard_handoff_record_error() {
-    local code
-    code=$?
+    local code=$?
     if [ "$code" -ne 0 ] && [ -z "$HANDOFF_FAILURE_DETAIL" ]; then
         HANDOFF_FAILURE_DETAIL="Update command failed with exit code $code during ${HANDOFF_PHASE:-update}."
     fi
 }
 
 dashboard_handoff_fail_on_exit() {
-    local code error
-    code=$?
+    local code=$? error
     stop_progress_probe
     release_coordinator_reservation
     if [ "$code" -ne 0 ] && [ -n "${FALKOR_STORAGE_RECEIPT:-}" ]; then
@@ -827,17 +825,19 @@ run_graph_v2_migration_with_probe() {
     if "${COMPOSE[@]}" exec -T worker node dist/graph-v2-migration-cli.js --snapshot-id="$HANDOFF_RUN_ID"; then
         stop_progress_probe
         return 0
+    else
+        local code=$?
+        stop_progress_probe
+        return "$code"
     fi
-    local code=$?
-    stop_progress_probe
-    return "$code"
 }
 
 mark_update_complete() {
     local state_dir marker version finished_at marker_id branch commit
     state_dir="$DEPLOYED_STATE_DIR"
     marker="$state_dir/last-successful-update.json"
-    version="$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version" 2>/dev/null || echo "0.0.0")"
+    version="$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version" 2>/dev/null)" \
+        || { fail "Could not read the verified release version. The update was not marked complete."; return 1; }
     finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     marker_id="${finished_at}-${version}"
     if [ "$VERSIONED_WORKTREE" = "1" ]; then
@@ -854,8 +854,11 @@ mark_update_complete() {
     MARKER_FINISHED_AT="$finished_at" \
     MARKER_BRANCH="$branch" \
     MARKER_COMMIT="$commit" \
+    MARKER_WRITER_FILE="$SCRIPT_REPO_ROOT/scripts/docker-image-lifecycle.mjs" \
     node -e '
 const fs = require("fs");
+const { pathToFileURL } = require("url");
+import(pathToFileURL(process.env.MARKER_WRITER_FILE).href).then(({ atomicJson }) => {
 const marker = {
   id: process.env.MARKER_ID,
   source: "update-script",
@@ -863,9 +866,11 @@ const marker = {
   version: process.env.MARKER_VERSION,
   finishedAt: process.env.MARKER_FINISHED_AT,
 };
+if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(marker.version)) throw new Error("Verified release version is invalid.");
 if (process.env.MARKER_BRANCH && process.env.MARKER_BRANCH !== "HEAD") marker.branch = process.env.MARKER_BRANCH;
 if (process.env.MARKER_COMMIT) marker.commit = process.env.MARKER_COMMIT;
-fs.writeFileSync(process.env.MARKER_FILE, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
+atomicJson(process.env.MARKER_FILE, marker);
+}).catch(error => { console.error("Could not record the verified update:", error.message); process.exitCode = 1; });
 '
     if [ "${PM_COORDINATOR_FINAL_HOP:-1}" = "0" ]; then
         dashboard_handoff_write "updating" "Bridge release ${version} is verified. Continuing to the next required release." "" "96"
@@ -1183,22 +1188,25 @@ if [ "$MCP_RUNTIME" = "stream" ]; then
 fi
 dashboard_handoff_write "verifying" "Restarting runtime services." "" "90" \
     "deploy" "running" "runtime services" "Restarting runtime services."
-"${COMPOSE[@]}" up -d --no-deps "${RUNTIME_SERVICES[@]}" >/dev/null 2>&1 \
+"${COMPOSE[@]}" up -d --no-deps "${RUNTIME_SERVICES[@]}" \
     && ok "${RUNTIME_SERVICES[*]} restarted." \
-    || warn "Could not restart ${RUNTIME_SERVICES[*]} — run 'docker compose -f deploy/compose/docker-compose.yml --env-file .env.persistent-memory up -d'."
+    || { fail "Required runtime services could not be restarted. The update was not marked complete; inspect the Compose error above before retrying."; exit 1; }
 
 # ── 8. Verify ─────────────────────────────────────────────────────────────────
 dashboard_handoff_write "verifying" "Running installation verification." "" "94" \
     "verify" "running" "installation" "Running installation verification."
-if [ -x "$REPO_ROOT/deploy/scripts/verify-install.sh" ]; then
-    bash "$REPO_ROOT/deploy/scripts/verify-install.sh" || warn "verify-install.sh reported issues — review above."
+if [ ! -f "$REPO_ROOT/deploy/scripts/verify-install.sh" ] || [ ! -r "$REPO_ROOT/deploy/scripts/verify-install.sh" ]; then
+    fail "Required installation verification script is missing or unreadable. The update was not marked complete."
+    exit 1
 fi
+bash "$REPO_ROOT/deploy/scripts/verify-install.sh" \
+    || { fail "Required installation verification failed. The update was not marked complete; fix the reported failure before retrying."; exit 1; }
 
 dashboard_handoff_write "verifying" "Refreshing Claude and Codex memory registrations." "" "96" \
     "verify" "running" "AI assistant registrations" "Refreshing Claude and Codex memory registrations."
 refresh_agent_artifacts
 wait_for_dashboard_ready
 
+mark_update_complete
 section "Update complete"
 echo "  Dashboard: http://localhost:3200"
-mark_update_complete
