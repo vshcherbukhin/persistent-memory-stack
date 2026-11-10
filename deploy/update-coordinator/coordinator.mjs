@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { access, chmod, copyFile, link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -49,6 +49,20 @@ async function copyPrivateIfMissing(source, destination) {
 }
 async function requireReadable(path) {
     await access(path, constants.R_OK);
+}
+export async function coordinatorRuntimeEnvFor(sourceRoot) {
+    // Match the protected snapshot's installation configuration; an inherited
+    // hop override must not select different stores from the ones backed up.
+    const runtimeEnvFile = resolve(sourceRoot, '.env.persistent-memory');
+    try {
+        await requireReadable(runtimeEnvFile);
+        if (!(await stat(runtimeEnvFile)).isFile())
+            throw new Error('Not a regular file');
+    }
+    catch {
+        throw new Error(`Cannot update without a readable runtime environment file: ${runtimeEnvFile}. Restore the existing installation configuration before retrying.`);
+    }
+    return runtimeEnvFile;
 }
 async function artifactIdFor(paths) {
     const hash = createHash('sha256');
@@ -750,6 +764,7 @@ async function main() {
     const lock = await acquireCoordinatorLock(coordinatorHome, { adoptExisting: process.env.PM_COORDINATOR_LOCK_HELD === '1' });
     try {
         const sourceRoot = resolve(process.env.PM_COORDINATOR_SOURCE_ROOT ?? cli.repoRoot);
+        const runtimeEnvFile = await coordinatorRuntimeEnvFor(sourceRoot);
         const releaseLine = await coordinatorReleaseLineFor(sourceRoot);
         const publishedMode = process.env.PM_COORDINATOR_SOURCE_MODE !== 'branch';
         const branch = publishedMode ? '' : process.env.PM_COORDINATOR_BRANCH ?? await gitOutput(sourceRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -849,7 +864,10 @@ async function main() {
                     PM_HANDOFF_PROTOCOL_VERSION: legacyBridge ? '' : '1',
                     PM_COORDINATOR_RESOLVED_ROOT: hopRoot,
                     PM_COORDINATOR_SOURCE_ROOT: sourceRoot,
-                    PM_COORDINATOR_ENV_RUNTIME: join(sourceRoot, '.env.persistent-memory'),
+                    // Compose --env-file controls interpolation; service env_file needs
+                    // its own absolute path when the hop uses a pristine release worktree.
+                    PM_COORDINATOR_ENV_RUNTIME: runtimeEnvFile,
+                    PM_RUNTIME_ENV_FILE: runtimeEnvFile,
                     PM_COORDINATOR_VERSIONED_WORKTREE: finalHop ? process.env.PM_COORDINATOR_VERSIONED_WORKTREE ?? '0' : '1',
                     PM_COORDINATOR_FINAL_HOP: finalHop ? '1' : '0',
                     PM_COORDINATOR_SOURCE_MODE: publishedMode ? 'published' : 'branch',

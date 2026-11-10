@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -9,6 +9,7 @@ import {
   acquireCoordinatorLock,
   clearHandoffForNoopRun,
   coordinatorReleaseLineFor,
+  coordinatorRuntimeEnvFor,
   coordinatorReleaseWorktree,
   coordinatorPublishedReleaseWorktree,
   fetchPublishedReleaseCommit,
@@ -78,19 +79,23 @@ async function installFixture(): Promise<{ root: string; installation: Coordinat
   return { root, installation }
 }
 
-async function publishedFixture() {
+async function publishedFixture(versions: [string, string, string] = ['1.0.0', '1.1.0', '1.2.0']) {
   const root = await tempRoot()
   const git = (...args: string[]) => execFileSync('git', ['-c', `safe.directory=${root.replace(/\\/gu, '/')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
   git('init', '--quiet')
   git('remote', 'add', 'origin', root)
   await mkdir(join(root, 'release'))
   const pins = new Map<string, { version: string; tag: string; commit: string }>()
-  for (const version of ['1.0.0', '1.1.0', '1.2.0']) {
+  for (const [index, version] of versions.entries()) {
     await writeFile(join(root, 'package.json'), JSON.stringify({ version, persistentMemoryReleaseLine: releaseLine }))
     await writeFile(join(root, 'release', 'upgrade.json'), JSON.stringify({
       ...initialPublicContract, release: version,
-      directFrom: version === '1.2.0' ? '=1.1.0' : '=1.0.0',
-      requiredStops: version === '1.2.0' ? [{ when: '=1.0.0', release: '1.1.0', reason: 'Fixture intermediate migration' }] : [],
+      compatibleMajorLine: Number(version.split('.')[0]),
+      minimumSupportedSource: versions[0],
+      directFrom: `=${index === 2 ? versions[1] : versions[0]}`,
+      bridges: index === 2 && versions[1].split('.')[0] !== version.split('.')[0]
+        ? [{ from: `=${versions[1]}`, to: version, requires: `>=${versions[1]}`, reason: 'Fixture major migration' }] : [],
+      requiredStops: index === 2 ? [{ when: `=${versions[0]}`, release: versions[1], reason: 'Fixture intermediate migration' }] : [],
     }))
     git('add', '.')
     git('commit', '--quiet', '-m', `Published fixture ${version}`)
@@ -100,7 +105,7 @@ async function publishedFixture() {
   }
   // A later untagged commit reuses both a published version and invalid metadata.
   // Developer history lookup can see it; published resolution must not use it.
-  await writeFile(join(root, 'package.json'), JSON.stringify({ version: '1.1.0', persistentMemoryReleaseLine: releaseLine }))
+  await writeFile(join(root, 'package.json'), JSON.stringify({ version: versions[1], persistentMemoryReleaseLine: releaseLine }))
   await writeFile(join(root, 'release', 'upgrade.json'), '{"unpublished":true}')
   git('add', '.')
   git('commit', '--quiet', '-m', 'Unpublished branch work with reused version')
@@ -109,6 +114,16 @@ async function publishedFixture() {
 }
 
 describe('update coordinator bootstrap', () => {
+  it('requires a readable regular runtime file from the source installation', async () => {
+    const root = await tempRoot()
+    const defaultFile = join(root, '.env.persistent-memory')
+    await expect(coordinatorRuntimeEnvFor(root)).rejects.toThrow('Cannot update without a readable runtime environment file')
+    await writeFile(defaultFile, 'FIXTURE_ONLY=value\n')
+    await expect(coordinatorRuntimeEnvFor(root)).resolves.toBe(defaultFile)
+    await rm(defaultFile)
+    await mkdir(defaultFile)
+    await expect(coordinatorRuntimeEnvFor(root)).rejects.toThrow('readable runtime environment file')
+  })
   it('snapshots once, resumes at the first unfinished hop, and persists each verified hop', async () => {
     const { installation } = await installFixture()
     const calls: string[] = []
@@ -742,6 +757,7 @@ describe('update coordinator bootstrap', () => {
     if (kind !== 'unpublished') git('checkout', '--quiet', '--detach', pin.commit)
     const local = join(root, '.local')
     await mkdir(local, { recursive: true })
+    await writeFile(join(root, '.env.persistent-memory'), 'FIXTURE_ONLY=value\n')
     await mkdir(join(root, 'layers/update-ops/update-flow'), { recursive: true })
     await writeFile(join(root, 'layers/update-ops/update-flow/public-source.json'), JSON.stringify({ releaseLine }))
     await mkdir(join(root, 'scripts'), { recursive: true })
@@ -792,6 +808,97 @@ describe('update coordinator bootstrap', () => {
         PM_COORDINATOR_HOP_COMMIT: pin.commit,
       })
       expect(JSON.parse(await readFile(join(installation.installationHome, 'state/hop-progress.json'), 'utf8'))).toMatchObject({ status: 'complete', releaseCommits: { [pin.version]: pin.commit } })
+    }
+  }, 30_000)
+
+  it.each([
+    { mode: 'published', missing: false, targetVersion: '2.0.3', resume: false },
+    { mode: 'branch', missing: false, targetVersion: '2.0.3', resume: false },
+    { mode: 'published', missing: true, targetVersion: '2.0.3', resume: false },
+    { mode: 'published', missing: false, targetVersion: '2.0.2', resume: true },
+  ])('passes one installed runtime file through actual multi-hop execution: $mode, missing=$missing, resume=$resume', async ({ mode, missing, targetVersion, resume }) => {
+    const { root, git, pins } = await publishedFixture(['1.2.0', '1.3.2', targetVersion])
+    const target = pins.get(targetVersion)!
+    git('checkout', '--quiet', '--detach', target.commit)
+    git('update-ref', 'refs/remotes/origin/master', target.commit)
+    const local = join(root, '.local')
+    await mkdir(local, { recursive: true })
+    const runtimeEnvFile = join(root, '.env.persistent-memory')
+    if (!missing) await writeFile(runtimeEnvFile, 'FIXTURE_ONLY=preserved\n')
+    await mkdir(join(root, 'layers/update-ops/update-flow'), { recursive: true })
+    await writeFile(join(root, 'layers/update-ops/update-flow/public-source.json'), JSON.stringify({ releaseLine }))
+    await mkdir(join(root, 'scripts'), { recursive: true })
+    const snapshot = join(local, 'snapshot-ran')
+    await writeFile(join(root, 'scripts/pre-update-snapshot.mjs'), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(snapshot)}, 'yes')`)
+    const capture = join(local, 'hops.jsonl')
+    await writeFile(join(local, 'capture-hop.mjs'), `
+      import { appendFileSync, readFileSync } from 'node:fs';
+      const env = process.env;
+      if (env.PM_COORDINATOR_ENV_RUNTIME !== ${JSON.stringify(runtimeEnvFile)} || env.PM_RUNTIME_ENV_FILE !== ${JSON.stringify(runtimeEnvFile)}) throw new Error('Runtime file path differs');
+      if (readFileSync(env.PM_RUNTIME_ENV_FILE, 'utf8') !== 'FIXTURE_ONLY=preserved\\n') throw new Error('Runtime file changed');
+      appendFileSync(${JSON.stringify(capture)}, JSON.stringify({ root: env.PM_COORDINATOR_RESOLVED_ROOT, runtime: env.PM_RUNTIME_ENV_FILE }) + '\\n');
+    `)
+    const legacyScript = join(local, 'legacy-update.sh')
+    await writeFile(legacyScript, '#!/bin/sh\nnode "$PM_COORDINATOR_SOURCE_ROOT/.local/capture-hop.mjs"\n')
+    const stateDir = join(local, 'update-state')
+    await mkdir(stateDir)
+    await writeFile(join(stateDir, 'last-successful-update.json'), JSON.stringify({ version: '1.2.0', releaseLine }))
+    const installation = await installCoordinator({
+      repoRoot: root,
+      artifactDir: fileURLToPath(new URL('../../../deploy/update-coordinator', import.meta.url)),
+      coordinatorBaseDir: join(local, 'coordinator'),
+    })
+    // Reuse a pristine hop created by an earlier failed attempt, with no secret copy.
+    const hopRoot = await coordinatorPublishedReleaseWorktree(root, installation.installationHome, pins.get('1.3.2')!)
+    expect(existsSync(join(hopRoot, '.env.persistent-memory'))).toBe(false)
+    if (resume) {
+      await expect(executeCoordinatorPlan({
+        coordinatorHome: installation.installationHome,
+        plan: { protocolVersion: 1, releaseLine, sourceVersion: '1.2.0', targetVersion, path: ['1.3.2', targetVersion], targetRevision: target.commit,
+          releaseCommits: { '1.3.2': pins.get('1.3.2')!.commit, [targetVersion]: target.commit }, plannedAt: '2026-11-10T00:00:00Z' },
+        snapshot: async () => { await writeFile(snapshot, 'original snapshot') },
+        runHop: async () => { throw new Error('Original missing worktree env failure') },
+      })).rejects.toThrow('Original missing worktree env failure')
+    }
+    const responses: Record<string, unknown> = {}
+    const apiBase = '/repos/vshcherbukhin/persistent-memory-stack/'
+    for (const pin of [target, pins.get('1.3.2')!]) {
+      responses[`${apiBase}releases/tags/${pin.tag}`] = { tag_name: pin.tag, draft: false, prerelease: false, published_at: '2026-11-10T00:00:00Z', html_url: `https://github.com/vshcherbukhin/persistent-memory-stack/releases/tag/${pin.tag}` }
+      responses[`${apiBase}git/ref/tags/${pin.tag}`] = { ref: `refs/tags/${pin.tag}`, object: { type: 'commit', sha: pin.commit } }
+      responses[`${apiBase}contents/package.json?ref=${pin.commit}`] = JSON.stringify({ version: pin.version, persistentMemoryReleaseLine: releaseLine })
+      responses[`${apiBase}contents/release-history.md?ref=${pin.commit}`] = `<!-- persistent-memory-release-line: ${releaseLine} -->\n## ${pin.version} - 2026-11-10\n`
+    }
+    const preload = join(local, 'published-api-fixture.mjs')
+    await writeFile(preload, `const fixtures = ${JSON.stringify(responses)}; globalThis.fetch = async url => { const parsed = new URL(url); const value = fixtures[parsed.pathname + parsed.search]; if (value === undefined) throw new Error('Unexpected fixture request'); return new Response(typeof value === 'string' ? value : JSON.stringify(value)); };`)
+    const { hostCommand } = await import('../../onboard/server/host.ts')
+    const env = { ...process.env }
+    for (const key of Object.keys(env)) if (key.startsWith('PM_COORDINATOR_') || key.startsWith('PM_HANDOFF_')) delete env[key]
+    Object.assign(env, {
+      PM_COORDINATOR_TARGET_RESOLVED: '1', PM_COORDINATOR_SOURCE_ROOT: root,
+      PM_COORDINATOR_SOURCE_MODE: mode, PM_COORDINATOR_BRANCH: 'master',
+      PM_COORDINATOR_RELEASE_TAG: target.tag, PM_COORDINATOR_RELEASE_VERSION: target.version,
+      PM_COORDINATOR_RELEASE_COMMIT: target.commit,
+      PM_COORDINATOR_ENV_RUNTIME: join(local, 'stale-coordinator.env'),
+      PM_RUNTIME_ENV_FILE: join(local, 'stale-worktree.env'),
+      PM_GIT_BASH: hostCommand('bash', []).command,
+    })
+    const run = () => execFileSync(process.execPath, ['--import', pathToFileURL(preload).href,
+      join(installation.home, 'coordinator.mjs'), '--repo-root', root, '--legacy-script', legacyScript, '--'],
+    { cwd: root, env, encoding: 'utf8', windowsHide: true, timeout: 20_000, stdio: 'pipe' })
+    if (missing) {
+      expect(run).toThrow('Cannot update without a readable runtime environment file')
+      expect(existsSync(snapshot)).toBe(false)
+      expect(existsSync(capture)).toBe(false)
+      expect(existsSync(join(installation.installationHome, 'update.lock'))).toBe(false)
+    } else {
+      expect(run).not.toThrow()
+      expect((await readFile(capture, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([
+        { root: hopRoot, runtime: runtimeEnvFile }, { root, runtime: runtimeEnvFile },
+      ])
+      expect(await readFile(runtimeEnvFile, 'utf8')).toBe('FIXTURE_ONLY=preserved\n')
+      expect(existsSync(join(hopRoot, '.env.persistent-memory'))).toBe(false)
+      expect(await readFile(snapshot, 'utf8')).toBe(resume ? 'original snapshot' : 'yes')
+      expect(JSON.parse(await readFile(join(installation.installationHome, 'state/hop-progress.json'), 'utf8'))).toMatchObject({ status: 'complete', completedHops: ['1.3.2', targetVersion] })
     }
   }, 30_000)
 
