@@ -79,7 +79,7 @@ async function installFixture(): Promise<{ root: string; installation: Coordinat
   return { root, installation }
 }
 
-async function publishedFixture(versions = ['1.0.0', '1.1.0', '1.2.0']) {
+async function publishedFixture(versions: [string, string, string] = ['1.0.0', '1.1.0', '1.2.0']) {
   const root = await tempRoot()
   const git = (...args: string[]) => execFileSync('git', ['-c', `safe.directory=${root.replace(/\\/gu, '/')}`, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
   git('init', '--quiet')
